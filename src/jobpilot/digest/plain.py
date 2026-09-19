@@ -32,11 +32,11 @@ def render_plain_digest(
     unhealthy = [h for h in health if h["status"] != "healthy" or h["stale"]]
     jobs = store.notifiable_postings(seeker_id, min_score, limit)
 
-    lines = [f"JobPilot update for {seeker.name}"]
+    lines = [f"CareerDesk update for {seeker.name}"]
     if not health:
         lines.append("Source health: no source run recorded; an empty list is not trustworthy.")
     elif unhealthy:
-        lines.append("Source health: incomplete — some sources are unavailable or stale.")
+        lines.append("Source health: incomplete: some sources are unavailable or stale.")
         for item in unhealthy:
             lines.append(f"- {item['source']}: {item['status']}")
     else:
@@ -49,7 +49,7 @@ def render_plain_digest(
     lines.append(f"\n{len(jobs)} role(s) worth reviewing:")
     for index, job in enumerate(jobs, start=1):
         lines.extend([
-            f"\n{index}. {job.title} — {job.company_name} ({job.fit_score:.0f}/100)",
+            f"\n{index}. {job.title}, {job.company_name} ({job.fit_score:.0f}/100)",
             job.reasoning or "No reasoning recorded.",
         ])
         url = safe_url(job.url)

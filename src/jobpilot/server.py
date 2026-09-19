@@ -55,6 +55,13 @@ def build_tools(
         return [n for n, sc in load_config().sites.items()
                 if sc.enabled and n not in PROHIBITED_SOURCES]
 
+    def _clean(items, limit, width):
+        return [str(i).strip()[:width] for i in (items or []) if str(i).strip()][:limit]
+
+    def _search_location(raw: str) -> str:
+        """Job boards need one searchable place: keep text before any slash."""
+        return str(raw).split("/")[0].strip()[:120]
+
     def register_me(
         name: str, headline: str, location: str, search_terms: list[str],
         sources: list[str], exclude_keywords: list[str] | None = None,
@@ -63,7 +70,8 @@ def build_tools(
         """Create the profile for the Telegram user this session serves.
 
         Call once, after the user has told you their target role, location and
-        preferences. Identity comes from the session, never from an argument.
+        preferences. location must be one city (for example "Gurgaon" or
+        "Austin, TX"). Identity comes from the session, never from an argument.
         """
         import yaml
         if onboard_telegram_id is None:
@@ -71,13 +79,11 @@ def build_tools(
         if store.seeker_by_telegram_id(onboard_telegram_id) is not None:
             return {"ok": False, "error": "already registered"}
 
-        def _clean(items, limit, width):
-            return [str(i).strip()[:width] for i in (items or []) if str(i).strip()][:limit]
-
         terms = _clean(search_terms, 10, 60)
         allowed = set(available_sources())
         chosen = [x for x in _clean(sources, 10, 40) if x in allowed]
-        name, headline, location = (str(v).strip()[:120] for v in (name, headline, location))
+        name, headline = (str(v).strip()[:120] for v in (name, headline))
+        location = _search_location(location)
         if not (name and headline and location and terms and chosen):
             return {"ok": False, "error":
                     "name, headline, location, search_terms and at least one valid "
@@ -606,7 +612,47 @@ def build_tools(
         store.record_event("manual_search", "", seeker_id=sid)
         return discover([sid])
 
+    def update_my_profile(
+        seeker_id: int, headline: str | None = None, location: str | None = None,
+        search_terms: list[str] | None = None, sources: list[str] | None = None,
+        exclude_keywords: list[str] | None = None,
+        target_companies: list[str] | None = None,
+    ) -> dict:
+        """Change this seeker's own search profile; only the fields given change.
+
+        location must be one city (for example "Gurgaon" or "Austin, TX").
+        """
+        import yaml
+        try:
+            sid = _check(seeker_id)
+            _, path, _ = _profile_for(sid)
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        allowed = set(available_sources())
+        if headline is not None and str(headline).strip():
+            data["headline"] = str(headline).strip()[:120]
+        if location is not None and _search_location(location):
+            data["location"] = _search_location(location)
+        if search_terms is not None and _clean(search_terms, 10, 60):
+            data["search_terms"] = _clean(search_terms, 10, 60)
+        if sources is not None:
+            chosen = [x for x in _clean(sources, 10, 40) if x in allowed]
+            if not chosen:
+                return {"ok": False, "error": f"no valid source; choose from {sorted(allowed)}"}
+            data["sources"] = chosen
+        if exclude_keywords is not None:
+            data["exclude_keywords"] = _clean(exclude_keywords, 20, 60)
+        if target_companies is not None:
+            data["target_companies"] = _clean(target_companies, 20, 80)
+        path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                        encoding="utf-8")
+        return {"ok": True, "profile": {k: data.get(k) for k in (
+            "headline", "location", "search_terms", "sources",
+            "exclude_keywords", "target_companies")}}
+
     tools["available_sources"] = available_sources
+    tools["update_my_profile"] = update_my_profile
     tools["run_my_search"] = run_my_search
     if not operator_mode:
         return tools
