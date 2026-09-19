@@ -564,3 +564,44 @@ class Store:
             d["stale"] = bool(since is not None and d["run_at"] < since)
             out.append(d)
         return out
+
+    # --- companies -----------------------------------------------------
+    def sync_companies(self, rows: list) -> int:
+        with self._lock, self.conn:
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO companies (name, tier, ats_vendor, careers_url, region) "
+                    "VALUES (?,?,?,?,?) "
+                    "ON CONFLICT(name) DO UPDATE SET "
+                    "  tier = excluded.tier, ats_vendor = excluded.ats_vendor, "
+                    "  careers_url = excluded.careers_url, region = excluded.region",
+                    (r.name, r.tier, r.ats_vendor, r.careers_url, r.region),
+                )
+        return len(rows)
+
+    def match_company(self, company_name: str) -> int | None:
+        """Match a board's company string to a target employer.
+
+        Boards list 'Marks & Spencer Reliance India Pvt Ltd'; the target list
+        says 'Marks & Spencer'. Whole-word substring matching on a normalised form is
+        crude but right for a curated list of fewer than a hundred names.
+        """
+        needle = re.sub(r"[^a-z0-9]+", " ", (company_name or "").lower()).strip()
+        if not needle:
+            return None
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, name FROM companies WHERE enabled = 1"
+            ).fetchall()
+        for row in rows:
+            target = re.sub(r"[^a-z0-9]+", " ", row["name"].lower()).strip()
+            if target and f" {target} " in f" {needle} ":
+                return int(row["id"])
+        return None
+
+    def attach_company(self, posting_id: int, company_id: int) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE job_postings SET company_id = ? WHERE id = ?",
+                (company_id, posting_id),
+            )
