@@ -395,3 +395,125 @@ class Store:
             )
             for r in rows
         ]
+
+    # --- scores --------------------------------------------------------
+    def record_score(
+        self, seeker_id: int, posting_id: int, fit_score: float,
+        reasoning: str, model: str | None = None,
+    ) -> None:
+        if not 0 <= float(fit_score) <= 100:
+            raise ValueError(f"fit_score must be between 0 and 100, got {fit_score}")
+        clean = re.sub(r"https?://\S+", "[link removed]", reasoning or "")
+        clean = " ".join(clean.split())[:MAX_REASONING_CHARS]
+
+        with self._lock, self.conn:
+            if not self.is_linked(seeker_id, posting_id):
+                raise ValueError(
+                    f"posting {posting_id} is not linked to seeker {seeker_id}; "
+                    "refusing to write a score that no query would ever see"
+                )
+            self.conn.execute(
+                """
+                INSERT INTO scores (seeker_id, posting_id, fit_score, reasoning, model, scored_at)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(seeker_id, posting_id) DO UPDATE SET
+                    fit_score = excluded.fit_score,
+                    reasoning = excluded.reasoning,
+                    model     = excluded.model,
+                    scored_at = excluded.scored_at
+                """,
+                (seeker_id, posting_id, float(fit_score), clean, model, _now()),
+            )
+            self.conn.execute(
+                "UPDATE seeker_jobs SET status = 'scored' "
+                "WHERE seeker_id = ? AND posting_id = ? AND status = 'discovered'",
+                (seeker_id, posting_id),
+            )
+
+    def unscored_jobs(self, seeker_id: int, limit: int) -> list[SeekerJob]:
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT sj.seeker_id, sj.posting_id, sj.status, jp.title,
+                       jp.company_name, jp.canonical_url AS url
+                FROM seeker_jobs sj
+                JOIN job_postings jp ON jp.id = sj.posting_id
+                LEFT JOIN scores s
+                       ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id
+                WHERE sj.seeker_id = ? AND s.posting_id IS NULL
+                ORDER BY sj.posting_id
+                LIMIT ?
+                """,
+                (seeker_id, limit),
+            ).fetchall()
+        return [
+            SeekerJob(
+                seeker_id=r["seeker_id"], posting_id=r["posting_id"],
+                status=r["status"], title=r["title"],
+                company_name=r["company_name"], url=r["url"],
+            )
+            for r in rows
+        ]
+
+    def posting_description(self, posting_id: int) -> str | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT description FROM job_postings WHERE id = ?", (posting_id,)
+            ).fetchone()
+        return row["description"] if row else None
+
+    # --- notifications -------------------------------------------------
+    def record_notification(
+        self, seeker_id: int, posting_id: int, channel: str, kind: str,
+        message_ref: str | None = None,
+    ) -> None:
+        if kind not in ("first", "nudge", "expiry"):
+            raise ValueError(f"unknown notification kind: {kind}")
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO notifications "
+                "(seeker_id, posting_id, channel, kind, delivered_at, message_ref) "
+                "VALUES (?,?,?,?,?,?)",
+                (seeker_id, posting_id, channel, kind, _now(), message_ref),
+            )
+            self.conn.execute(
+                "UPDATE seeker_jobs SET status = 'presented' "
+                "WHERE seeker_id = ? AND posting_id = ? AND status = 'scored'",
+                (seeker_id, posting_id),
+            )
+
+    def notifiable_postings(
+        self, seeker_id: int, min_score: float, limit: int
+    ) -> list[SeekerJob]:
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT sj.seeker_id, sj.posting_id, sj.status, jp.title,
+                       jp.company_name, jp.canonical_url AS url,
+                       s.fit_score, s.reasoning
+                FROM seeker_jobs sj
+                JOIN job_postings jp ON jp.id = sj.posting_id
+                JOIN scores s
+                  ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id
+                WHERE sj.seeker_id = ?
+                  AND s.fit_score >= ?
+                  AND NOT EXISTS (
+                        SELECT 1 FROM notifications n
+                        WHERE n.seeker_id = sj.seeker_id
+                          AND n.posting_id = sj.posting_id
+                          AND n.kind = 'first'
+                  )
+                ORDER BY s.fit_score DESC, sj.posting_id
+                LIMIT ?
+                """,
+                (seeker_id, min_score, limit),
+            ).fetchall()
+        return [
+            SeekerJob(
+                seeker_id=r["seeker_id"], posting_id=r["posting_id"],
+                status=r["status"], title=r["title"],
+                company_name=r["company_name"], url=r["url"],
+                fit_score=r["fit_score"], reasoning=r["reasoning"],
+            )
+            for r in rows
+        ]

@@ -169,6 +169,7 @@ def test_notification_suppression_survives_a_title_edit(store):
         "  AND n.posting_id = sj.posting_id AND n.kind = 'first')", (sid,)
     ).fetchall()
     assert unnotified == []
+    assert store.notifiable_postings(sid, 50.0, 10) == []
 
 
 def _two_known_roles(store):
