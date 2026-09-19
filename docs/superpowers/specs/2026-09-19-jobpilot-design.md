@@ -613,6 +613,44 @@ interface and never vendors, imports or bundles its code.** Same treatment as
 **Cost:** none. It runs locally and is already provisioned. It also removes any
 remaining argument for Apify (§17.3).
 
+### 17.6 Seekers are not all in apparel (decided 2026-09-19)
+
+The other seekers work in **different fields entirely**. Everything domain-specific
+therefore becomes per-seeker data, not one shared file. Decided before R2 was
+built, so this is a design change rather than a retrofit.
+
+**What moves per seeker:**
+
+| Was | Becomes |
+|---|---|
+| `data/scoring_rubric.md` (apparel brand-side, shared) | `data/seekers/<name>/rubric.md` per seeker |
+| `data/companies.csv` (20 apparel employers, shared) | `data/seekers/<name>/companies.csv`, falling back to a shared `data/companies-<domain>.csv` |
+| `min_score`, exclusions in one profile | unchanged - already per seeker |
+
+**What stays shared, because it is domain-neutral:** everything in `sources/`,
+`store/`, `health.py`, the digest, the notification ledger, the canary rules,
+and the tenancy enforcement. The machinery does not care what industry a job is
+in; only the rubric and the target list do.
+
+**Onboarding a seeker in a new field** is therefore: a profile YAML, a rubric
+markdown file, a company CSV, and a row in `seekers`. No code change. That is
+the test of whether this split is correct - if adding a seeker in a new field
+requires touching Python, the boundary is in the wrong place.
+
+**Rubric contract.** Every rubric, whatever the field, must contain: score
+bands, an explicit list of what to score 0-39 regardless of title match, what
+to weight heavily for that person, the reasoning format, and the untrusted-text
+warning. The apparel rubric written for Alex is the worked example.
+
+### 17.7 Digest review gate (decided 2026-09-19)
+
+For the first two to three weeks after Telegram goes live, digests queue for the
+operator's approval before reaching the seeker, while the rubric is still being
+tuned. After that they go direct. Implemented as a per-seeker `review_required`
+flag on `seekers`, defaulting to 1 and cleared per seeker when the operator is
+satisfied - not a global mode, because seekers will be onboarded at different
+times and a later seeker still needs the early-weeks gate.
+
 ### 17.4 Google Sheets as the seeker-facing view (M3)
 
 Each seeker gets a Google Sheet showing every job found, its score, its status
