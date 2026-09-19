@@ -261,3 +261,34 @@ def test_oracle_hcm_builds_keyword_query_and_links():
     # the seeker opted into this one employer, and location fit is the
     # scoring rubric's job, not a blunt substring match on office names.
     assert len(src.search("merchandiser", "Mumbai")[0]) == 1
+
+
+def test_bamboohr_builds_careers_url_and_joins_location():
+    from jobpilot.config import ATSConfig
+    from jobpilot.sources.ats_json import ATSJsonSource
+    src = ATSJsonSource(ATSConfig(
+        name="proscia", vendor="bamboohr", company_name="Proscia", enabled=True,
+        endpoint="https://proscia.bamboohr.com/careers/list"),
+        fetcher=lambda u, t: {"meta": {"totalCount": 1}, "result": [
+            {"id": "259", "jobOpeningName": "Implementation Engineer, EU",
+             "atsLocation": {"country": "Ireland", "state": None, "city": "Dublin"}}]})
+    jobs, raw = src.search("engineer", None)
+    assert raw == 1 and len(jobs) == 1
+    job = jobs[0]
+    assert job.url == "https://proscia.bamboohr.com/careers/259"
+    assert job.location == "Dublin, Ireland" and job.company_name == "Proscia"
+
+
+def test_breezy_maps_list_fields_and_keeps_own_url():
+    from jobpilot.config import ATSConfig
+    from jobpilot.sources.ats_json import ATSJsonSource
+    src = ATSJsonSource(ATSConfig(
+        name="embraer", vendor="breezy", company_name="Embraer", enabled=True,
+        endpoint="https://embraer.breezy.hr/json"),
+        fetcher=lambda u, t: [{"id": "4658211f5c93", "name": "A&P Technician",
+                               "location": {"name": "Macon, GA"},
+                               "url": "https://embraer.breezy.hr/p/4658211f5c93-a-p-technician",
+                               "published_date": "2026-08-01T00:00:00Z"}])
+    jobs, raw = src.search("technician", None)
+    assert raw == 1 and jobs[0].location == "Macon, GA"
+    assert jobs[0].url == "https://embraer.breezy.hr/p/4658211f5c93-a-p-technician"

@@ -63,6 +63,10 @@ def _nested(item: dict, *keys: str) -> Any:
 def _items(payload: object, vendor: str) -> list[dict]:
     if vendor == "greenhouse":
         value = payload.get("jobs", []) if isinstance(payload, dict) else []
+    elif vendor == "bamboohr":
+        value = payload.get("result", []) if isinstance(payload, dict) else []
+    elif vendor == "breezy":
+        value = payload if isinstance(payload, list) else []
     elif vendor == "remoteok":
         value = payload if isinstance(payload, list) else []
     elif vendor == "remotive":
@@ -111,6 +115,26 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
         url = f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{external_id}"
         description = _nested(item, "ShortDescriptionStr")
         posted_at = _nested(item, "PostedDate")
+    elif vendor == "bamboohr":
+        # BambooHR's list endpoint carries no job URL; the public page is a
+        # fixed <tenant>/careers/<id> path (verified against a live tenant).
+        origin = "{0.scheme}://{0.netloc}".format(urlparse(cfg.endpoint))
+        external_id = _nested(item, "id")
+        title = _nested(item, "jobOpeningName")
+        ats_loc = item.get("atsLocation") if isinstance(item.get("atsLocation"), dict) else {}
+        location = ", ".join(v for v in (ats_loc.get("city"), ats_loc.get("state") or ats_loc.get("province"),
+                                          ats_loc.get("country")) if v)
+        url = f"{origin}/careers/{external_id}" if external_id else ""
+        description = ""
+        posted_at = ""
+    elif vendor == "breezy":
+        external_id = _nested(item, "id")
+        title = _nested(item, "name")
+        loc = item.get("location") if isinstance(item.get("location"), dict) else {}
+        location = _nested(loc, "name")
+        url = _nested(item, "url")
+        description = _nested(item, "description")
+        posted_at = _nested(item, "published_date")
     elif vendor == "remoteok":
         external_id = _nested(item, "id", "slug")
         title = _nested(item, "position")

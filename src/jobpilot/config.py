@@ -121,7 +121,8 @@ def load_config(path: Path | None = None) -> Config:
     ats_sources: dict[str, ATSConfig] = {}
     for name, block in raw.get("ats_sources", {}).items():
         vendor = str(block.get("vendor", "")).strip().lower()
-        if vendor not in {"greenhouse", "lever", "workday", "successfactors", "remoteok", "remotive", "workday_cxs", "oracle_hcm"}:
+        if vendor not in {"greenhouse", "lever", "workday", "successfactors", "remoteok",
+                          "remotive", "workday_cxs", "oracle_hcm", "bamboohr", "breezy"}:
             raise ValueError(
                 f"ATS source '{name}' has unsupported vendor {vendor!r}"
             )

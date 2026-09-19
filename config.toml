@@ -272,3 +272,19 @@ command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
 canary_term = "manager"
 enabled = true
 fetch_timeout_seconds = 180.0
+
+# --- Two more ATS connectors ported from career-ops (MIT-licensed reference,
+# https://github.com/career-ops-hq/career-ops), each live-tested against a
+# real tenant before being enabled 2026-09-20. Not yet subscribed by any
+# seeker; enable per-employer once a target company on one of these is named.
+[ats_sources.example_bamboohr]
+vendor = "bamboohr"
+company_name = "Proscia"
+endpoint = "https://proscia.bamboohr.com/careers/list"
+enabled = false
+
+[ats_sources.example_breezy]
+vendor = "breezy"
+company_name = "Embraer"
+endpoint = "https://embraer.breezy.hr/json"
+enabled = false
