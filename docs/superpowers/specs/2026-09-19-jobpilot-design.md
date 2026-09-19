@@ -52,47 +52,76 @@ scoring weights account adjacency heavily.
 
 ## 4. Architecture
 
-Local-first Python on macOS, SQLite store, single config file. Designed to lift
-to a Linux VPS later without a rewrite: no Mac-specific paths outside the
-launcher, no absolute paths in code, all secrets and tuning in `config.toml`.
+**Revised 2026-09-19 after investigation.** The system is not a standalone
+platform. Claude is the orchestrator; open-source MCP servers are the hands.
+This removes most of the bespoke code from the original design.
 
-```
-jobpilot/
-  config.toml           targets, search terms, thresholds, schedule
-  profile/
-    alex.yaml        structured profile, derived from resume
-    base_resume.yaml    canonical resume content as data
-  sources/
-    ats_api.py          Workday / SuccessFactors / Greenhouse / Lever JSON
-    structured.py       JSON-LD JobPosting, sitemaps, RSS
-    jobspy_adapter.py   Naukri, Indeed IN, Glassdoor, Google Jobs, LinkedIn
-    browser.py          Playwright fallback
-    health.py           canaries, per-source health, block detection
-  store/
-    schema.sql
-    db.py
-  brain/
-    base.py             AI adapter interface
-    claude_code.py      subscription-backed implementation (default)
-    api.py              API-key implementation (post-cloud-move)
-  resume/
-    tailor.py           per-job reframing
-    render.py           ATS-safe PDF generation
-  digest/
-    html.py             local HTML digest (milestone 1 output)
-  bot/                  Telegram (deferred to final milestone)
-  run.py                orchestrator
-```
+### Deployment target
+
+Everything runs on **DESKTOP-G47CCOU** ("abhimanyu-desktop"), Windows 10 Pro,
+reachable from the Mac as `ssh pc` over Tailscale. Verified 2026-09-19 to have
+claude.exe 2.1.277, bun, node v24.11.1, git 2.53, and Python 3.12 under
+`%LOCALAPPDATA%\Programs\Python\Python312\`. No new software needed.
+
+Machine constraints carried over from `Machines/windows-desktop.md`:
+
+- `where python` resolves to `C:\Python314` first. **Pin the 3.12 path
+  explicitly**; never rely on PATH.
+- PowerShell 5.1 reads UTF-8 `.ps1` as ANSI. **Generated scripts must be
+  ASCII-only.**
+- Git operations set `GCM_INTERACTIVE=Never` to avoid the invisible-prompt hang.
+- **C: is BitLocker-encrypted with a pre-boot password and no TPM.** Any reboot
+  halts the machine until the password is typed physically. This is the primary
+  availability risk, mitigated but not solved by the watchdog below.
+
+### Two entry points, both Claude
+
+1. **Scheduled routine** - wakes on a cron, runs discovery, scores, tailors,
+   writes the digest, exits. Needs no persistent session.
+2. **Live Telegram channel** - `claude --channels plugin:telegram@claude-plugins-official`
+   held open on the desktop. Alex DMs the bot; Claude answers in chat.
+
+### Hands (MCP servers)
+
+- **JobSpy MCP** - aggregator search across Naukri, Indeed IN, Glassdoor,
+  Google, LinkedIn. Evaluate `borgius/jobspy-mcp-server` (MIT) first; it is a
+  Node wrapper shelling out to the Python library, so if integration is fiddly,
+  fall back to a thin FastMCP wrapper over `python-jobspy` directly.
+- **JobPilot MCP** - built here. ATS JSON fetchers (Workday, SuccessFactors,
+  Greenhouse, Lever), the SQLite store, canaries and source health, resume
+  rendering with the extraction gate, application tracking.
+- **Validation gate** - the seven blocking checks from `leelakrishna288/ai-career-agent`
+  (Apache-2.0) ported into JobPilot MCP with attribution, rather than a
+  dependency on an unproven repo.
+
+### Telegram
+
+The official Anthropic plugin (`telegram@claude-plugins-official`, free, open
+source) rather than a custom bot. Access policy set to `allowlist` with
+Alex's numeric Telegram ID only. Claude gets `reply` (with file attachments
+up to 50MB, which is how tailored resumes reach her), `react`, `edit_message`.
+Known limitation: the bot has no message history or search, so all durable
+state must live in the JobPilot store, never in the chat.
+
+### Watchdog
+
+The Mac runs an independent lightweight check. If the desktop has not completed
+a run within its expected window, the Mac alerts Abhimanyu. This exists because
+the desktop's failure mode is silent: a BitLocker prompt after a reboot looks
+exactly like a quiet job market.
 
 ### Data flow
 
 ```
-sources -> normalize -> dedupe -> store(status=discovered)
-       -> brain.score()  -> store(fit_score, reasoning)
-       -> top N by score -> brain.tailor() -> resume/render -> PDF on disk
-       -> digest         -> operator reviews -> (later) Telegram push
-       -> her action     -> store(status=applied|skipped|deferred)
-       -> stale items    -> escalating nudges
+scheduled routine (desktop)
+  -> JobSpy MCP + JobPilot MCP ATS fetchers
+  -> normalize, dedupe, store(status=discovered)
+  -> canary check per source -> source_runs
+  -> Claude scores        -> store(fit_score, reasoning)
+  -> Claude tailors top N -> validation gate -> render -> extraction gate -> file
+  -> digest
+  -> Telegram push (M3) -> her action -> store
+  -> stale items -> escalating nudges
 ```
 
 ## 5. Discovery: reliability is the primary requirement
@@ -212,7 +241,13 @@ resume is a firing offence in the industry and a non-negotiable constraint in
 this system. Every generated resume is diffed against the base, and any new
 factual claim is flagged for human review before the file is written.
 
-**Rendering (ATS-safe).** Her current PDF exhibits character-detachment under
+**Rendering: DOCX primary, PDF on demand.** Workday and Taleo parse .docx more
+reliably than PDF, because the text is already text with no glyph-positioning
+layer to misread. Her current PDF's character detachment is exactly that class
+of failure. DOCX is the default deliverable; PDF is generated only when a portal
+requires it, and faces the same extraction gate.
+
+**Rendering rules (ATS-safe).** Her current PDF exhibits character-detachment under
 text extraction ("S ENIOR MERCHANDISER", "C osting"). Workday and Taleo will
 parse it the same way, and Taleo uses literal exact matching, so this plausibly
 suppresses keyword matches today. Requirements for the renderer:
@@ -232,31 +267,26 @@ gate, not a warning.
 Free manual spot-check: https://ats-screener.vercel.app (browser-only, files
 are parsed client-side).
 
-## 8. AI adapter
+## 8. AI layer
 
-`brain/base.py` defines exactly four operations:
+There is no AI adapter abstraction in the revised design, because there is no
+separate application calling a model. **Claude is the orchestrator**, reached
+either by the scheduled routine or by the live Telegram channel, and calls MCP
+tools directly.
 
-```python
-score(job, profile) -> (float, str)      # fit 0-100, plain-language reasoning
-tailor(base_resume, job) -> ResumeDraft
-cover_letter(job, profile) -> str
-interview_prep(job, profile) -> str      # later milestone
-```
-
-Nothing outside `brain/` knows how these are served.
-
-**`claude_code.py` (default).** Work is batched and handed to a scheduled
-Claude Code session that reads the store, performs the batch, and writes back.
 Consequences the operator has accepted:
 
-- Draws on the same subscription quota as his other projects; scheduled
-  off-peak, batch size capped in config.
-- Does not survive the move to a VPS. The adapter boundary exists so that
-  migration is a config change.
-- Cannot be handed to Alex to run herself.
+- All of Alex's usage draws on Abhimanyu's Claude subscription quota, shared
+  with Layaa, eduflow and cockroach work. Batch sizes capped in config; the
+  routine runs off-peak.
+- She is using his account. Anthropic ships multi-user allowlisting in the
+  official plugin, so this is a contemplated setup, but the account and the
+  budget remain his responsibility.
+- She cannot run this herself without her own account.
 
-**`api.py` (later).** Same interface over a paid API, with a hard monthly spend
-cap in config. Estimated $3-8/month at realistic volume.
+If the system later moves to a Linux VPS, the scheduled routine becomes either
+Claude Code authenticated on that box, or API calls with a hard spend cap. The
+MCP servers are unaffected either way, which is what keeps the migration cheap.
 
 ## 9. Anti-procrastination design
 
@@ -341,17 +371,19 @@ Investigated 2026-09-19:
 
 ## 15. Milestones
 
-**M1 (today):** JobSpy discovery + ATS JSON for tier 1-2 + store + canary health
-+ scoring + resume tailoring + ATS-safe render with extraction gate + local HTML
-digest.
+Shipped incrementally; each milestone is usable on its own.
 
-**M2:** Career-page watcher for tiers 3-4, structured-data parsing, scheduled
-daily runs via launchd.
+**M1 (now):** JobPilot MCP skeleton + store + JobSpy MCP wired up + canary
+health + target company list + scoring + local digest. Usable as soon as JobSpy
+returns real listings.
 
-**M3:** Telegram bot — digest push, inline actions, status write-back, nudge
-escalation.
+**M2:** ATS JSON fetchers for tiers 1-2, structured-data parsing, resume
+tailoring with the validation gate, DOCX renderer + extraction gate.
 
-**M4:** Separate specs — LinkedIn post generation; interview prep.
+**M3:** Telegram channel on the desktop allowlisted to Alex, scheduled
+routine, Mac watchdog.
+
+**M4:** Separate specs - LinkedIn post generation; interview prep.
 
 ## 16. Open questions
 
