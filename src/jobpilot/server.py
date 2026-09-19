@@ -6,6 +6,7 @@ requests discovery data, scores it, and asks the server to persist the result.
 from __future__ import annotations
 
 import os
+import ntpath
 from pathlib import Path
 from typing import Callable
 
@@ -161,7 +162,14 @@ def build_tools(
     ) -> dict:
         """Onboard a seeker using a profile path relative to the project home."""
         path = Path(profile_path)
-        if path.is_absolute() or ".." in path.parts:
+        windows_path = ntpath.normpath(str(profile_path))
+        if (
+            path.is_absolute()
+            or ntpath.isabs(str(profile_path))
+            or str(profile_path).startswith(("/", "\\"))
+            or ".." in path.parts
+            or ".." in windows_path.replace("\\", "/").split("/")
+        ):
             return {"ok": False,
                     "error": "profile_path must be relative to JOBPILOT_HOME"}
         sid = store.add_seeker(name, telegram_user_id, profile_path, daily_cap)
