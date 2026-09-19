@@ -1,4 +1,4 @@
-"""JobPilot R1 demo: see the built pieces work.
+"""JobPilot demo: see the discovery and notification ledger work.
 
 Run from the project folder:
 
@@ -200,7 +200,7 @@ def show_jobs(store: Store, seekers: list[tuple[str, int]], results) -> None:
 
 def never_told_twice(store: Store, seekers: list[tuple[str, int]]) -> None:
     head("Never told twice")
-    print("PLACEHOLDER scores: real scoring arrives in release R2")
+    print("PLACEHOLDER scores: this demo does not invoke an LLM; R2 scoring is exposed via build_scoring_batch")
     print(f"(scores of 90, 80 and 60 handed out in turn; {DEMO_MIN_SCORE:.0f} or more "
           "counts as worth telling the seeker about)")
     for label, sid in seekers:
@@ -425,7 +425,7 @@ def live(n_terms: int, keep: bool, input_fn, sleep, scraper, seekers_dir) -> int
 
 def main(argv=None, *, input_fn=None, sleep=time.sleep, scraper=None,
          seekers_dir=None) -> int:
-    ap = argparse.ArgumentParser(description="JobPilot R1 demo (offline by default).")
+    ap = argparse.ArgumentParser(description="JobPilot demo (offline by default).")
     ap.add_argument("--live", action="store_true", help="small careful live Indeed check")
     ap.add_argument("--keep", action="store_true", help="keep the throwaway database folder")
     ap.add_argument("--terms", type=int, default=1, metavar="N",

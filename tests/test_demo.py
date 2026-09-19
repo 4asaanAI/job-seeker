@@ -51,7 +51,7 @@ def test_offline_demo_end_to_end(capsys, tmp_root):
     assert "no company name" in out                          # why the reject
     assert "Demo Seeker A (synthetic)" in out and "Demo Seeker B (synthetic)" in out
     assert "Hitachi Energy" in out and "Austin, TX, US" in out and "2026-09-17" in out
-    assert "PLACEHOLDER scores: real scoring arrives in release R2" in out
+    assert "PLACEHOLDER scores: this demo does not invoke an LLM" in out
 
     before = re.findall(r"(Demo Seeker [AB]) \(synthetic\): (\d+) notifiable before notifying", out)
     after = re.findall(r"(Demo Seeker [AB]) \(synthetic\): (\d+) notifiable after notifying", out)
@@ -329,7 +329,7 @@ def test_live_prints_all_sections_and_never_runs_discovery_twice(rig, capsys, tm
     assert "indeed_us: HEALTHY" in out
     assert "Sample rows" in out and "became job postings" in out
     assert "Hitachi Energy" in out
-    assert "PLACEHOLDER scores: real scoring arrives in release R2" in out
+    assert "PLACEHOLDER scores: this demo does not invoke an LLM" in out
     assert re.search(r"a: [1-9]\d* notifiable before notifying", out)
     assert re.search(r"a: 0 notifiable after notifying", out)
     assert "Second run" not in out
