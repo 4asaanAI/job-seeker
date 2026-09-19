@@ -67,6 +67,17 @@ def test_notes_and_also_search_round_trip(tmp_path):
     assert prof.also_search == ["United States"]
 
 
+def test_rubric_defaults_to_none(tmp_path):
+    prof = load_profile(_write(tmp_path, PROFILE))
+    assert prof.rubric is None
+
+
+def test_rubric_round_trips(tmp_path):
+    text = PROFILE + "rubric: apparel-brand-side\n"
+    prof = load_profile(_write(tmp_path, text))
+    assert prof.rubric == "apparel-brand-side"
+
+
 def test_load_companies_skips_disabled(tmp_path):
     rows = load_companies(_write(tmp_path, COMPANIES, "companies.csv"))
     assert [r.name for r in rows] == ["Marks & Spencer", "Ralph Lauren"]

@@ -25,6 +25,9 @@ class Profile:
     min_score: float = 70.0
     notes: list[str] = field(default_factory=list)
     also_search: list[str] = field(default_factory=list)
+    # Names a shared rubric under data/rubrics/<rubric>.md, used only when this
+    # seeker has no data/seekers/<name>/rubric.md of their own (see scoring.py).
+    rubric: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ def load_profile(path: Path) -> Profile:
         min_score=float(raw.get("min_score", 70)),
         notes=list(raw.get("notes") or []),
         also_search=list(raw.get("also_search") or []),
+        rubric=raw.get("rubric") or None,
     )
 
 
