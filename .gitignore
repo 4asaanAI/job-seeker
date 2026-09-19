@@ -1,8 +1,20 @@
+# Personal data - real people's resumes, phone numbers, employers
+data/seekers/
 profile/
-*.db
+
+# Database: every seeker's telegram id, scores, full job-search history.
+# WAL and SHM are separate files; *.db alone misses them.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Generated digests name the seeker
 out/
-__pycache__/
+
 .venv/
 venv/
+__pycache__/
+*.pyc
 *.pdf
-fixtures/live/
+.env
+tests/fixtures/live/
