@@ -65,6 +65,11 @@ class Store:
     functions on an anyio worker thread. One RLock guards every read and
     write, so a reader never sees another thread's uncommitted rows. Writes
     run in `with self.conn:`, which commits on success and rolls back on error.
+
+    `with self.conn:` is not reentrant: a helper called from inside one
+    write's block (`_file_sighting`, `_file_key`, `_merge_postings`,
+    `_add_missing_columns`, ...) must never open its own -- it always relies
+    on its caller already holding one.
     """
 
     def __init__(self, db_path: Path):
@@ -646,6 +651,11 @@ class Store:
         return [int(r["results_count"]) for r in rows]
 
     def source_health_summary(self, since: str | None = None) -> list[dict]:
+        """since must be the exact isoformat _now() produces (with the
+        `+00:00` offset) -- it is compared as a plain string against
+        `run_at`, so any other format silently never marks a row stale.
+        The digest builds it as (now - a staleness window).isoformat().
+        """
         with self._lock:
             rows = self.conn.execute(
                 "SELECT source, run_at, canary_ok, canary_count, raw_count, "

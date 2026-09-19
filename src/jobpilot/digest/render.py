@@ -35,7 +35,10 @@ TEMPLATE = """<!doctype html>
   Results below are incomplete - this is not a quiet market.
   <ul>{% for h in unhealthy %}
     <li>{{ h.source }}: {{ h.status }}{% if h.stale %} (stale -- last reported
-      {{ h.run_at }}){% endif %} - {{ h.notes }}</li>
+      {{ h.run_at }}){% endif %} - {{ h.notes }}
+      {%- if h.status == "degraded" %} (below its usual results; the source
+      itself is still reachable and can recover on a later run without any
+      action){% endif -%}</li>
   {% endfor %}</ul>
 </div>
 {% else %}
@@ -52,7 +55,7 @@ TEMPLATE = """<!doctype html>
     <div class="score">{{ '%.0f'|format(j.fit_score) }}/100</div>
     <h3>{% if j.url %}<a href="{{ j.url }}">{{ j.title }}</a>{% else %}{{ j.title }}{% endif %}</h3>
     <p>{{ j.company_name }}</p>
-    <p>{{ j.reasoning }}</p>
+    <p>{{ j.reasoning or "No reasoning was recorded for this score." }}</p>
   </div>
   {% endfor %}
 {% elif health and not unhealthy %}

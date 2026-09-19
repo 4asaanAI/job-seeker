@@ -178,3 +178,33 @@ def test_digest_reports_found_versus_cleared(store, tmp_path):
     html = render_digest(store, sid, 70.0, 5, tmp_path).read_text(encoding="utf-8")
     assert "40" in html  # found
     assert "none cleared" in html.lower() or "0 cleared" in html.lower()
+
+
+def test_empty_reasoning_gets_a_floor_not_a_blank_paragraph(store, tmp_path):
+    """Deferred final-review finding: Store.record_score's cleaning can
+    empty the reasoning entirely; the digest renderer must decide that
+    case rather than emit an unexplained blank job entry."""
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    pid = store.upsert_posting(
+        Posting(company_name="M&S", source="naukri", external_id="n1",
+                title="Senior Merchandiser", location="Gurgaon", description="d",
+                url="https://x.test/1", posted_at="2026-09-18"))
+    store.link_posting(sid, pid)
+    store.record_score(sid, pid, 90.0, "", "claude")  # cleans to "" (Task 3 minor b)
+    store.record_source_run("naukri", True, 20, 5, 5, "healthy", "")
+
+    html = render_digest(store, sid, 70.0, 5, tmp_path).read_text(encoding="utf-8")
+    assert "<p></p>" not in html
+    assert "no reasoning" in html.lower()
+
+
+def test_degraded_source_explains_it_can_still_recover(store, tmp_path):
+    """Deferred final-review finding: a DEGRADED source that never rebounds
+    is loud, not silent, but the digest should say what DEGRADED means so
+    it doesn't read as permanently broken."""
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    store.record_source_run("naukri", True, 20, 5, 3, "degraded", "sharp drop vs history")
+
+    html = render_digest(store, sid, 70.0, 5, tmp_path).read_text(encoding="utf-8")
+    assert "degraded" in html.lower()
+    assert "below its usual" in html.lower() or "recover" in html.lower()
