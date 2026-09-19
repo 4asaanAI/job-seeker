@@ -72,7 +72,15 @@ Machine constraints carried over from `Machines/windows-desktop.md`:
 - Git operations set `GCM_INTERACTIVE=Never` to avoid the invisible-prompt hang.
 - **C: is BitLocker-encrypted with a pre-boot password and no TPM.** Any reboot
   halts the machine until the password is typed physically. This is the primary
-  availability risk, mitigated but not solved by the watchdog below.
+  availability risk, mitigated but not solved by the fallback below.
+- **Nothing is installed on C:.** Drive survey 2026-09-19: C: 100.2 GB free,
+  D: 183.2 GB, E: 377.7 GB. The project, its virtualenv, the store and all
+  generated documents live at `E:\Github\Aasaan AI\jobpilot\`, alongside the
+  existing repos. **Caveat:** Claude Code's own state (`~/.claude/`, the plugin
+  config and the Telegram access list) necessarily stays under
+  `C:\Users\Desktop\.claude\`. It is a few KB and cannot be relocated.
+  Moving the project off C: solves the space problem; it does not affect the
+  pre-boot password problem, which is a property of the OS volume.
 
 ### Two entry points, both Claude
 
@@ -103,12 +111,45 @@ up to 50MB, which is how tailored resumes reach her), `react`, `edit_message`.
 Known limitation: the bot has no message history or search, so all durable
 state must live in the JobPilot store, never in the chat.
 
-### Watchdog
+### How the system remembers
 
-The Mac runs an independent lightweight check. If the desktop has not completed
-a run within its expected window, the Mac alerts Abhimanyu. This exists because
-the desktop's failure mode is silent: a BitLocker prompt after a reboot looks
-exactly like a quiet job market.
+The Telegram plugin has no message history and no search, and Claude itself
+starts every scheduled run cold. **Neither is the memory layer, and neither
+needs to be.** All continuity lives in the JobPilot SQLite store, which is
+strictly better than chat history for this purpose: it is queryable, it
+survives restarts and machine moves, and it can be audited when something looks
+wrong.
+
+The specific worry this addresses - re-notifying her about the same job every
+day - is handled by a first-class `notifications` table. A job is eligible for
+notification only if no delivered row exists for it, or if a deliberate
+re-surfacing rule fires (the 3-day nudge in section 9). "We already told her
+about this on this date" is stored as a fact, not inferred from a transcript.
+
+MemPalace is already installed on the desktop and remains the place for
+conversational and cross-session context. Job state does not go there; it goes
+in the store, because job state needs exact queries, not semantic recall.
+
+### Availability: desktop primary, Mac fallback
+
+The desktop is primary. **The Mac is the fallback, not merely a watchdog.** If
+the desktop has not completed a run inside its expected window - most likely
+because a reboot left it at the BitLocker prompt - the Mac's scheduled run
+executes the pipeline itself and alerts Abhimanyu that it did so. Alex's
+digests keep arriving through an outage rather than stopping silently.
+
+This requires shared state across two machines. The store is therefore
+canonical on the desktop at `E:\Github\Aasaan AI\jobpilot\`, and
+synchronised through a **private git repo holding a SQL dump** - the same
+pattern already proven by the memory vault. Each run pulls before starting and
+pushes after finishing. The data is append-mostly and every row is keyed by
+`(source, external_id)`, so conflicts are rare and resolvable by timestamp.
+
+**Open decision for the operator:** whether her resume and profile go in that
+private repo alongside the job state. Keeping them there makes the Mac fallback
+self-sufficient. Keeping them out means the fallback can discover and score but
+not tailor. Section 13's rule stands either way: this never goes near the
+ClaudeMemory vault, which syncs to a shared remote.
 
 ### Data flow
 
@@ -216,6 +257,8 @@ padding the list with poor matches to look productive.
 - `applications` — job_id, status, resume_version_id, applied_at, response_at, notes
 - `resume_versions` — id, job_id, path, generated_at, ats_notes
 - `source_runs` — source, run_at, canary_ok, results_count, status, notes
+- `notifications` — job_id, channel, delivered_at, kind (first|nudge|expiry),
+  message_ref. Prevents duplicate notification; makes nudge scheduling explicit
 - `events` — append-only log of every state change, for auditability and nudges
 
 Status vocabulary for `jobs`: `discovered -> scored -> shortlisted ->
