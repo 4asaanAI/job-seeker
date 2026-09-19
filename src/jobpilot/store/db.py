@@ -212,9 +212,20 @@ class Store:
             if known is not None:
                 # Rule A: this posting is this key's, whatever else exists.
                 posting_id = int(known["posting_id"])
-                stored_city = normalize_location(self.conn.execute(
-                    "SELECT location FROM job_postings WHERE id = ?", (posting_id,)
-                ).fetchone()["location"])
+                stored = self.conn.execute(
+                    "SELECT company_name, normalized_title, location, content_hash "
+                    "FROM job_postings WHERE id = ?", (posting_id,)
+                ).fetchone()
+                stored_city = normalize_location(stored["location"])
+                # The location column can disagree with the row's own identity:
+                # Rule D's city-less fallback writes a city into `location` that
+                # the row's hash never saw. Trust the column only when it
+                # reproduces that hash; otherwise the row has no city of its own
+                # and must not borrow a stranger's.
+                if _hash(normalize_company(stored["company_name"]),
+                         stored["normalized_title"],
+                         stored_city) != stored["content_hash"]:
+                    stored_city = ""
                 # Rule B: a sighting with no city token adds no location
                 # information, so the stored city and its rendering both stay;
                 # a sighting that has one wins.
