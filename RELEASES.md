@@ -79,7 +79,25 @@ None from an earlier release (this is the first).
 
 ## v0.2.0 - R2 Judgement and digest
 
-_Not yet released._
+Released locally on 2026-09-19 as annotated tag `v0.2.0` at commit `80df9d9`.
+
+### What shipped
+- Per-seeker scoring rubrics with safe, path-keyed rubric caching and profile notes.
+- An HTML digest renderer sourced from the scored notification ledger, including source-health and stale-source warnings.
+- Per-seeker `review_required` migration support for the upcoming operator approval gate.
+- A city/region/country location model for cross-board identity, with explicit protection against shared-row rewrites and wrong merges.
+- Self-repairing database migration: interrupted location backfills are retried, hashes are recomputed, and parser-induced collisions preserve source keys and seeker history through the normal merge path.
+- Region ambiguity is conservative: a state-only sighting adopts only when exactly one city is known in that region; two known cities remain separate.
+
+### Gate evidence
+- Full suite: `python -m pytest -q -p no:cacheprovider` -> **269 passed**.
+- The high-risk location/identity redesign was independently reviewed; all findings carried into R2 were either fixed with regression tests or explicitly documented as accepted scope trade-offs.
+- `main` is fast-forwarded to the tagged R2 commit. No `origin` remote is configured in this checkout, so nothing has been pushed.
+
+### Current operator interface
+- Offline safety demo: `python scripts/demo.py`.
+- Guarded live smoke test: `python scripts/demo.py --live` (Indeed only; requires a real terminal and typed confirmation).
+- R2 scoring and digest are Python library interfaces. There is not yet a UI, Telegram bot, or MCP server; those are R3 work.
 
 ## v0.3.0 - R3 Claude-driven on the desktop
 
