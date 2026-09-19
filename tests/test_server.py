@@ -157,3 +157,72 @@ def test_unknown_seeker_gives_a_clear_error_not_stopiteration(operator):
     out = tools["build_digest"](9999)
     assert out["ok"] is False
     assert "no seeker" in out["error"]
+
+
+def test_m2_status_and_history_are_per_seeker(operator):
+    tools, store = operator
+    sid, pid = _seed(store)
+    assert tools["record_score"](sid, pid, 91.0, "good fit")["ok"]
+    assert tools["record_notification"](sid, pid, "test", "first")["ok"]
+
+    status = tools["my_status"](sid)
+    assert status["ok"] is True
+    assert status["found"] == 1
+    assert status["scored"] == 1
+    assert status["shown"] == 1
+    assert status["applied"] == 0
+
+    history = tools["my_history"](sid, "Senior")
+    assert history["ok"] is True
+    assert history["items"][0]["posting_id"] == pid
+    assert history["items"][0]["title"] == "Senior Merchandiser"
+
+
+def test_m2_investigation_handoff_never_exposes_an_unlinked_posting(operator):
+    tools, store = operator
+    sid, pid = _seed(store)
+    handoff = tools["investigate_posting"](sid, pid)
+    assert handoff["ok"] is True
+    assert handoff["browser_required"] is True
+    assert handoff["posting"]["id"] == pid
+    assert tools["verify_still_open"](sid, pid)["status"] == "browser_check_required"
+
+    other = store.upsert_posting(
+        Posting(company_name="Other", source="indeed", external_id="other",
+                title="Other Role", location="Austin", description="d",
+                url="https://x.test/other", posted_at="2026-09-18"))
+    refused = tools["investigate_posting"](sid, other)
+    assert refused["ok"] is False
+    assert "linked" in refused["error"]
+
+
+def test_watchlist_and_company_career_handoff_are_scoped(operator):
+    tools, store = operator
+    sid, _ = _seed(store)
+    added = tools["add_target_company"](sid, "  Target Sourcing  ")
+    assert added["ok"] is True
+    assert store.target_company_names(sid) == ["Target Sourcing"]
+    career = tools["check_company_careers"](sid, added["company_id"])
+    assert career["ok"] is True
+    assert career["browser_required"] is True
+
+    other = store.add_seeker("Other", 2, "other.yaml", 20)
+    refused = tools["check_company_careers"](other, added["company_id"])
+    assert refused["ok"] is False
+    assert "watchlist" in refused["error"]
+
+
+def test_pinned_process_scopes_new_m2_tools(tmp_path):
+    _, store = _tools(tmp_path)
+    a, pid = _seed(store, "A", 1, "a1")
+    b = store.add_seeker("B", 2, "b.yaml", 20)
+    store.close()
+    pinned, store2 = _tools(tmp_path, pinned_seeker_id=a, operator_mode=False)
+    assert pinned["my_status"](a)["ok"] is True
+    refused = pinned["my_status"](b)
+    assert refused["ok"] is False
+    assert "pinned" in refused["error"]
+    refused_history = pinned["my_history"](b)
+    assert refused_history["ok"] is False
+    assert "pinned" in refused_history["error"]
+    store2.close()

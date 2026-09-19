@@ -12,6 +12,8 @@ enabled. Naukri India is kept in the configuration but disabled after its live
 canary returned HTTP 406 (recaptcha required); re-enable it only after a
 deliberate cooldown retry. LinkedIn is intentionally not contacted.
 Telegram delivery and ATS-specific employer-board adapters are later work.
+The current MCP surface also includes per-seeker status/history views,
+watchlists, and explicit one-page browser-investigation handoffs.
 
 ## macOS development
 

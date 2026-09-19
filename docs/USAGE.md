@@ -73,6 +73,12 @@ The operator surface provides `list_seekers`, `add_seeker`, `discover`, and
 The server resolves relative profile paths from `JOBPILOT_HOME`, not from the
 client's current directory.
 
+The seeker surface also provides `my_status`, `my_sources`, `my_history`, and
+`add_target_company`. `investigate_posting`, `verify_still_open`, and
+`check_company_careers` return a single public URL and an explicit browser
+handoff; they do not bulk-crawl pages or claim that a listing is open without
+Claude's targeted browser check.
+
 For a seeker-facing process, set `JOBPILOT_SEEKER_ID` to one database seeker
 ID. That process exposes no roster or discovery tools and refuses requests for
 other seeker IDs. `resolve_telegram_sender` is the only supported mapping from

@@ -6,7 +6,7 @@ import re
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .location import parse_location
@@ -780,3 +780,132 @@ class Store:
                 "UPDATE job_postings SET company_id = ? WHERE id = ?",
                 (company_id, posting_id),
             )
+
+    # --- M2 seeker views and watchlist --------------------------------
+    def add_target_company(self, seeker_id: int, name: str,
+                           weight: float = 1.0) -> int:
+        """Add a named employer to one seeker's watchlist and return its id."""
+        clean = " ".join((name or "").split())
+        if not clean:
+            raise ValueError("target company name must not be empty")
+        if not 0 < float(weight) <= 10:
+            raise ValueError("target company weight must be between 0 and 10")
+        with self._lock, self.conn:
+            self.get_seeker(seeker_id)
+            row = self.conn.execute(
+                "SELECT id FROM companies WHERE lower(name) = lower(?)",
+                (clean,),
+            ).fetchone()
+            if row is None:
+                cur = self.conn.execute(
+                    "INSERT INTO companies (name, tier, ats_vendor, careers_url, region) "
+                    "VALUES (?, NULL, '', '', '')",
+                    (clean,),
+                )
+                company_id = int(cur.lastrowid)
+            else:
+                company_id = int(row["id"])
+            exists = self.conn.execute(
+                "SELECT 1 FROM seeker_targets WHERE seeker_id = ? AND company_id = ?",
+                (seeker_id, company_id),
+            ).fetchone()
+            if exists is None:
+                self.conn.execute(
+                    "INSERT INTO seeker_targets "
+                    "(seeker_id, company_id, weight, added_at) VALUES (?,?,?,?)",
+                    (seeker_id, company_id, float(weight), _now()),
+                )
+            return company_id
+
+    def target_company_names(self, seeker_id: int) -> list[str]:
+        """Return one seeker's watched company names in insertion order."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT c.name FROM seeker_targets st "
+                "JOIN companies c ON c.id = st.company_id "
+                "WHERE st.seeker_id = ? ORDER BY st.added_at, c.name",
+                (seeker_id,),
+            ).fetchall()
+        return [str(r["name"]) for r in rows]
+
+    def target_company(self, seeker_id: int, company_id: int) -> dict | None:
+        """Return a company only when it belongs to this seeker's watchlist."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT c.id, c.name, c.ats_vendor, c.careers_url, c.region, "
+                "       st.weight, st.added_at "
+                "FROM seeker_targets st JOIN companies c ON c.id = st.company_id "
+                "WHERE st.seeker_id = ? AND c.id = ?",
+                (seeker_id, company_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def seeker_status(self, seeker_id: int) -> dict:
+        """Return this seeker's weekly discovery, scoring and delivery counts."""
+        since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        with self._lock:
+            self.get_seeker(seeker_id)
+            found = self.conn.execute(
+                "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ? "
+                "AND first_seen_at >= ?", (seeker_id, since)
+            ).fetchone()[0]
+            scored = self.conn.execute(
+                "SELECT COUNT(*) FROM scores WHERE seeker_id = ? "
+                "AND scored_at >= ?", (seeker_id, since)
+            ).fetchone()[0]
+            shown = self.conn.execute(
+                "SELECT COUNT(*) FROM notifications WHERE seeker_id = ? "
+                "AND delivered_at >= ?", (seeker_id, since)
+            ).fetchone()[0]
+            applied = self.conn.execute(
+                "SELECT COUNT(*) FROM applications WHERE seeker_id = ? "
+                "AND applied_at >= ?", (seeker_id, since)
+            ).fetchone()[0]
+            total_jobs = self.conn.execute(
+                "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?",
+                (seeker_id,),
+            ).fetchone()[0]
+        return {
+            "seeker_id": seeker_id,
+            "window": "last_7_days",
+            "found": int(found),
+            "scored": int(scored),
+            "shown": int(shown),
+            "applied": int(applied),
+            "total_jobs": int(total_jobs),
+        }
+
+    def seeker_history(self, seeker_id: int, query: str = "",
+                       limit: int = 20) -> list[dict]:
+        """Return notification history for one seeker, newest first."""
+        limit = max(0, min(int(limit), 100))
+        needle = f"%{query.strip()}%"
+        with self._lock:
+            self.get_seeker(seeker_id)
+            rows = self.conn.execute(
+                "SELECT n.posting_id, n.kind, n.channel, n.delivered_at, "
+                "       jp.title, jp.company_name, jp.canonical_url AS url, "
+                "       GROUP_CONCAT(DISTINCT ps.source) AS sources "
+                "FROM notifications n JOIN job_postings jp ON jp.id = n.posting_id "
+                "LEFT JOIN posting_sources ps ON ps.posting_id = jp.id "
+                "WHERE n.seeker_id = ? AND (? = '' OR jp.title LIKE ? "
+                "   OR jp.company_name LIKE ? OR ps.source LIKE ?) "
+                "GROUP BY n.id ORDER BY n.delivered_at DESC, n.id DESC LIMIT ?",
+                (seeker_id, query.strip(), needle, needle, needle, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def posting_view(self, seeker_id: int, posting_id: int) -> dict | None:
+        """Return a posting only if it is linked to this seeker."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT jp.id, jp.title, jp.company_name, jp.location, "
+                "       jp.description, jp.canonical_url AS url, jp.posted_at, "
+                "       jp.first_seen_at, jp.last_seen_at, "
+                "       GROUP_CONCAT(DISTINCT ps.source) AS sources "
+                "FROM seeker_jobs sj JOIN job_postings jp ON jp.id = sj.posting_id "
+                "LEFT JOIN posting_sources ps ON ps.posting_id = jp.id "
+                "WHERE sj.seeker_id = ? AND jp.id = ? GROUP BY jp.id",
+                (seeker_id, posting_id),
+            ).fetchone()
+        return dict(row) if row else None

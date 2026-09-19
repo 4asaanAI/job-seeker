@@ -134,3 +134,15 @@ and MCP registration gate.
   and then `source_health` through the connected `jobpilot` MCP server.
 - Run `discover` only when you want a fresh live search; the operator surface
   is intentionally separate from a pinned seeker-facing process.
+
+## Main after v0.3.0 - M2 interface groundwork
+
+The post-R3 main line adds the seeker-scoped introspection and watchlist tools:
+`my_status`, `my_sources`, `my_history`, `add_target_company`,
+`investigate_posting`, `verify_still_open`, and `check_company_careers`.
+The browser tools are honest handoffs to Claude's one-page browser; they do not
+pretend that the MCP server itself performed a live verification.
+
+Gate evidence: **287 offline tests passed**. ATS JSON fetchers, Wigolo, the
+resume engine, Telegram transport, and Google Sheets remain subsequent
+milestones.
