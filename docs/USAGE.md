@@ -162,6 +162,12 @@ Limits: 30 messages per user per hour, 3 manual searches per day, and
 `JOBPILOT_MAX_SEEKERS` (default 100) total users. Private chats only; groups are
 ignored. All sessions run on the Windows user's Claude login.
 
+The Windows task `JobPilotDaily` runs `run.ps1 -Task scheduled` at 08:00. It
+discovers and scores for every seeker, then sends each Telegram user a plain-text
+digest of new matches. A notification is recorded only after Telegram accepted
+the message, so a failed delivery is retried the next day. Users who send
+`/profile` can change their own profile in chat.
+
 ## 8. Scheduled routine and Sheets view
 
 Copy `.mcp.scheduled.json.example` to `.mcp.scheduled.json` on the desktop,
