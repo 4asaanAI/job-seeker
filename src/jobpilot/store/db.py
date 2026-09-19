@@ -9,6 +9,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .location import parse_location
 from .models import Posting, Seeker, SeekerJob
 
 SCHEMA = Path(__file__).parent / "schema.sql"
@@ -16,20 +17,16 @@ MAX_REASONING_CHARS = 300
 # Unknown (later-milestone) statuses rank above these, as more advanced.
 _STATUS_RANK = {"discovered": 0, "scored": 1, "presented": 2}
 
+# Columns added after the original schema; migrate() adds and backfills any
+# that are missing from a database created before they existed.
+_LOCATION_COLUMNS = ("location_city", "location_region", "location_country")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 _COMPANY_SUFFIXES = {"pvt", "ltd", "limited", "private", "inc", "plc", "llp", "india"}
-_COUNTRY_ONLY = {"india"}
-_CITY_ALIASES = {
-    "gurugram": "gurgaon",
-    "bengaluru": "bangalore",
-    "delhi ncr": "delhi",
-    "ncr": "delhi",
-    "bombay": "mumbai",
-}
 
 
 def normalize_title(title: str) -> str:
@@ -44,16 +41,6 @@ def normalize_company(name: str) -> str:
     return " ".join(words)
 
 
-def normalize_location(location: str | None) -> str:
-    """City token only. Country-only or empty values normalise to ''."""
-    if not location:
-        return ""
-    city = re.sub(r"[^a-z0-9]+", " ", location.split(",")[0].lower()).strip()
-    if city in _COUNTRY_ONLY:
-        return ""
-    return _CITY_ALIASES.get(city, city)
-
-
 def _hash(company: str, title: str, city: str) -> str:
     # Normalisers strip "|", so the join cannot be spoofed.
     basis = "|".join((company, title, city))
@@ -61,12 +48,14 @@ def _hash(company: str, title: str, city: str) -> str:
 
 
 def content_hash(p: Posting) -> str:
-    """Identity of a real-world role, independent of which board carries it."""
-    return _hash(
-        normalize_company(p.company_name),
-        normalize_title(p.title),
-        normalize_location(p.location),
-    )
+    """Identity of a real-world role, independent of which board carries it.
+
+    Only the city component of the location goes into the hash -- a region
+    or country alone (or a state code misread as a city) never does. See
+    src/jobpilot/store/location.py.
+    """
+    city, _region, _country = parse_location(p.location)
+    return _hash(normalize_company(p.company_name), normalize_title(p.title), city)
 
 
 class Store:
@@ -93,6 +82,29 @@ class Store:
     def migrate(self) -> None:
         with self._lock, self.conn:
             self.conn.executescript(SCHEMA.read_text(encoding="utf-8"))
+            self._migrate_location_columns()
+
+    def _migrate_location_columns(self) -> None:
+        """Add location_city/region/country to a database that predates them.
+
+        schema.sql's CREATE TABLE IF NOT EXISTS gives a fresh database these
+        columns for free; an existing one needs them added and its rows'
+        free-text `location` parsed into them, or every old row stays a
+        city-less identity forever.
+        """
+        existing = {r["name"] for r in self.conn.execute("PRAGMA table_info(job_postings)")}
+        missing = [c for c in _LOCATION_COLUMNS if c not in existing]
+        if not missing:
+            return
+        for column in missing:
+            self.conn.execute(f"ALTER TABLE job_postings ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+        for row in self.conn.execute("SELECT id, location FROM job_postings").fetchall():
+            city, region, country = parse_location(row["location"])
+            self.conn.execute(
+                "UPDATE job_postings SET location_city=?, location_region=?, "
+                "location_country=? WHERE id=?",
+                (city, region, country, row["id"]),
+            )
 
     # --- events --------------------------------------------------------
     def record_event(
@@ -154,7 +166,7 @@ class Store:
         return self._row_to_seeker(row) if row else None
 
     # --- postings ------------------------------------------------------
-    def _resolve_hash(self, company: str, title: str, city: str) -> str:
+    def _resolve_hash(self, company: str, title: str, city: str, region: str) -> str:
         """Content hash for a sighting whose (source, external_id) is UNKNOWN.
 
         A known key never comes here: its posting is already decided by its own
@@ -174,14 +186,88 @@ class Store:
         # No city on this sighting: adopt the role if exactly one city-specific
         # row exists for it; several cities is ambiguous, so stay separate.
         # Trade-off: if only one city is known so far, a city-less sighting of a
-        # genuinely different-city role merges into it.
-        known = [
-            r["content_hash"] for r in self.conn.execute(
-                "SELECT company_name, content_hash FROM job_postings "
-                "WHERE normalized_title = ?", (title,)
+        # genuinely different-city role merges into it (Ruling 12).
+        rows = [
+            r for r in self.conn.execute(
+                "SELECT company_name, content_hash, location_city, location_region "
+                "FROM job_postings WHERE normalized_title = ?", (title,)
             ) if normalize_company(r["company_name"]) == company
         ]
-        return known[0] if len(known) == 1 else h
+        # A known region narrows the field first: a state-level sighting must
+        # not be refused as ambiguous just because a DIFFERENT state's city is
+        # also known for the same role (this is the fix for I1/the design debt
+        # -- without it, "HR, IN" and a known Pune row would leave two cities
+        # known and the sighting would stay separate for no good reason).
+        if region:
+            same_region = [r for r in rows if r["location_city"] and r["location_region"] == region]
+            if len(same_region) == 1:
+                return same_region[0]["content_hash"]
+        all_hashes = [r["content_hash"] for r in rows]
+        return all_hashes[0] if len(all_hashes) == 1 else h
+
+    def _file_key(self, posting_id: int, p: Posting, now: str) -> None:
+        self.conn.execute(
+            "INSERT INTO posting_sources (posting_id, source, external_id, url, seen_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(source, external_id) DO UPDATE SET "
+            "posting_id = excluded.posting_id, url = excluded.url, seen_at = excluded.seen_at",
+            (posting_id, p.source, p.external_id, p.url, now),
+        )
+
+    def _file_sighting(
+        self, p: Posting, company: str, title: str,
+        city: str, region: str, country: str, now: str,
+    ) -> int:
+        """File a sighting with no row of its own yet: a brand-new key, or a
+        known key just detached from a row it no longer belongs on (see
+        `upsert_posting`). Resolves by content hash and may fold into an
+        existing row; never touches any OTHER key already on that row."""
+        h = self._resolve_hash(company, title, city, region)
+        # `_resolve_hash` can return an EXISTING row's hash that this
+        # sighting never actually confirmed (a city-less or region-narrowed
+        # adoption). Only when the resolved hash IS this sighting's own
+        # city-hash does its city/region/country get to update the row --
+        # otherwise a fallback adoption would silently overwrite a role's
+        # real (possibly still-unknown) identity with a stranger's, exactly
+        # the disagreement the old free-text guard existed to catch.
+        own_hash = _hash(company, title, city)
+        if h == own_hash:
+            gate_city, gate_region, gate_country = city, region, country
+        else:
+            gate_city, gate_region, gate_country = "", "", ""
+        posting_id = int(self.conn.execute(
+            """
+            INSERT INTO job_postings (
+                company_name, title, normalized_title, location,
+                location_city, location_region, location_country,
+                description, canonical_url, posted_at,
+                first_seen_at, last_seen_at, content_hash
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(content_hash) DO UPDATE SET
+                last_seen_at     = excluded.last_seen_at,
+                title            = excluded.title,
+                location         = CASE
+                    WHEN ? != '' OR COALESCE(job_postings.location, '') = ''
+                    THEN COALESCE(excluded.location, job_postings.location)
+                    ELSE job_postings.location END,
+                location_city    = CASE WHEN ? != '' THEN excluded.location_city
+                                    ELSE job_postings.location_city END,
+                location_region  = CASE WHEN ? != '' THEN excluded.location_region
+                                    ELSE job_postings.location_region END,
+                location_country = CASE WHEN ? != '' THEN excluded.location_country
+                                    ELSE job_postings.location_country END,
+                description      = COALESCE(excluded.description, job_postings.description),
+                canonical_url    = COALESCE(job_postings.canonical_url, excluded.canonical_url),
+                posted_at        = COALESCE(excluded.posted_at, job_postings.posted_at)
+            RETURNING id
+            """,
+            (p.company_name, p.title, title, p.location,
+             gate_city, gate_region, gate_country,
+             p.description, p.url, p.posted_at, now, now, h,
+             city, gate_city, gate_region, gate_country),
+        ).fetchone()["id"])
+        self._file_key(posting_id, p, now)
+        return posting_id
 
     def upsert_posting(self, p: Posting) -> int:
         """One row per role across boards; one posting_sources row per board listing.
@@ -197,101 +283,96 @@ class Store:
           A. the sighting stays on the posting its key already names;
           B. its effective location is the more specific of the sighting's and
              the stored one, so a country-only sighting loses no city;
-          C. it merges only when a different posting owns that exact hash.
+          C. it merges only when a different posting owns that exact hash --
+             and if the posting being left behind carries ANOTHER key too,
+             that key is detached and re-filed on its own instead of being
+             dragged into the merge (Rule C would otherwise rewrite a row a
+             different key still depends on; see the R2 location redesign).
         An unknown key keeps the hash path of `_resolve_hash`.
         """
         company = normalize_company(p.company_name)
         title = normalize_title(p.title)
-        city = normalize_location(p.location)
+        city, region, country = parse_location(p.location)
         now = _now()
         with self._lock, self.conn:
             known = self.conn.execute(
                 "SELECT posting_id FROM posting_sources WHERE source = ? AND external_id = ?",
                 (p.source, p.external_id),
             ).fetchone()
-            if known is not None:
-                # Rule A: this posting is this key's, whatever else exists.
-                posting_id = int(known["posting_id"])
-                stored = self.conn.execute(
-                    "SELECT company_name, normalized_title, location, content_hash "
-                    "FROM job_postings WHERE id = ?", (posting_id,)
-                ).fetchone()
-                stored_city = normalize_location(stored["location"])
-                # The location column can disagree with the row's own identity:
-                # Rule D's city-less fallback writes a city into `location` that
-                # the row's hash never saw. Trust the column only when it
-                # reproduces that hash; otherwise the row has no city of its own
-                # and must not borrow a stranger's.
-                if _hash(normalize_company(stored["company_name"]),
-                         stored["normalized_title"],
-                         stored_city) != stored["content_hash"]:
-                    stored_city = ""
-                # Rule B: a sighting with no city token adds no location
-                # information, so the stored city and its rendering both stay;
-                # a sighting that has one wins.
-                if city or not stored_city:
-                    eff_city, eff_location = city, p.location
-                else:
-                    eff_city, eff_location = stored_city, None
-                h = _hash(company, title, eff_city)
-                # Rule C: merge only on an exact collision — the edited listing
-                # has become the same company, title and city as another row.
-                other = self.conn.execute(
-                    "SELECT id FROM job_postings WHERE content_hash = ? AND id != ?",
-                    (h, posting_id),
-                ).fetchone()
-                if other is not None:
-                    self._merge_postings(keep_id=int(other["id"]), drop_id=posting_id)
-                    posting_id = int(other["id"])
-                self.conn.execute(
-                    """
-                    UPDATE job_postings SET
-                        last_seen_at     = ?,
-                        company_name     = ?,
-                        title            = ?,
-                        normalized_title = ?,
-                        content_hash     = ?,
-                        location         = COALESCE(?, location),
-                        description      = COALESCE(?, description),
-                        canonical_url    = COALESCE(canonical_url, ?),
-                        posted_at        = COALESCE(?, posted_at)
-                    WHERE id = ?
-                    """,
-                    (now, p.company_name, p.title, title, h, eff_location, p.description,
-                     p.url, p.posted_at, posting_id),
-                )
+            if known is None:
+                return self._file_sighting(p, company, title, city, region, country, now)
+
+            # Rule A: this posting is this key's, whatever else exists.
+            posting_id = int(known["posting_id"])
+            stored = self.conn.execute(
+                "SELECT location_city, location_region, location_country, content_hash "
+                "FROM job_postings WHERE id = ?", (posting_id,)
+            ).fetchone()
+            stored_city = stored["location_city"]
+            # Rule B: a sighting with no city token adds no location
+            # information, so the stored city and its rendering both stay;
+            # a sighting that has one wins.
+            eff_city = city if (city or not stored_city) else stored_city
+            h = _hash(company, title, eff_city)
+
+            if h != stored["content_hash"]:
+                # This sighting's own facts (city and/or title) would move
+                # the row's identity away from what it currently is. If the
+                # row is shared with another key, moving it -- in place, or
+                # by merging into an existing collision -- would rewrite
+                # that bystander's identity out from under it. Detach
+                # instead: only this key moves, whether or not a
+                # destination already exists.
+                other_key_exists = self.conn.execute(
+                    "SELECT 1 FROM posting_sources WHERE posting_id = ? "
+                    "AND NOT (source = ? AND external_id = ?)",
+                    (posting_id, p.source, p.external_id),
+                ).fetchone() is not None
+                if other_key_exists:
+                    self.conn.execute(
+                        "DELETE FROM posting_sources WHERE source = ? AND external_id = ?",
+                        (p.source, p.external_id),
+                    )
+                    return self._file_sighting(p, company, title, city, region, country, now)
+
+            # Rule C: merge only on an exact collision — the edited listing
+            # has become the same company, title and city as another row.
+            other = self.conn.execute(
+                "SELECT id FROM job_postings WHERE content_hash = ? AND id != ?",
+                (h, posting_id),
+            ).fetchone()
+            if other is not None:
+                self._merge_postings(keep_id=int(other["id"]), drop_id=posting_id)
+                posting_id = int(other["id"])
+
+            if city or not stored_city:
+                eff_location, eff_region, eff_country = p.location, region, country
             else:
-                h = self._resolve_hash(company, title, city)
-                posting_id = int(self.conn.execute(
-                    """
-                    INSERT INTO job_postings (
-                        company_name, title, normalized_title, location,
-                        description, canonical_url, posted_at,
-                        first_seen_at, last_seen_at, content_hash
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?)
-                    ON CONFLICT(content_hash) DO UPDATE SET
-                        last_seen_at  = excluded.last_seen_at,
-                        title         = excluded.title,
-                        location      = CASE
-                            WHEN ? != '' OR COALESCE(job_postings.location, '') = ''
-                            THEN COALESCE(excluded.location, job_postings.location)
-                            ELSE job_postings.location END,
-                        description   = COALESCE(excluded.description, job_postings.description),
-                        canonical_url = COALESCE(job_postings.canonical_url, excluded.canonical_url),
-                        posted_at     = COALESCE(excluded.posted_at, job_postings.posted_at)
-                    RETURNING id
-                    """,
-                    (p.company_name, p.title, title, p.location,
-                     p.description, p.url, p.posted_at, now, now, h, city),
-                ).fetchone()["id"])
+                eff_location = None
+                eff_region, eff_country = stored["location_region"], stored["location_country"]
+
             self.conn.execute(
-                "INSERT INTO posting_sources (posting_id, source, external_id, url, seen_at) "
-                "VALUES (?,?,?,?,?) "
-                "ON CONFLICT(source, external_id) DO UPDATE SET "
-                "posting_id = excluded.posting_id, url = excluded.url, "
-                "seen_at = excluded.seen_at",
-                (posting_id, p.source, p.external_id, p.url, now),
+                """
+                UPDATE job_postings SET
+                    last_seen_at     = ?,
+                    company_name     = ?,
+                    title            = ?,
+                    normalized_title = ?,
+                    content_hash     = ?,
+                    location         = COALESCE(?, location),
+                    location_city    = ?,
+                    location_region  = ?,
+                    location_country = ?,
+                    description      = COALESCE(?, description),
+                    canonical_url    = COALESCE(canonical_url, ?),
+                    posted_at        = COALESCE(?, posted_at)
+                WHERE id = ?
+                """,
+                (now, p.company_name, p.title, title, h, eff_location,
+                 eff_city, eff_region, eff_country, p.description,
+                 p.url, p.posted_at, posting_id),
             )
+            self._file_key(posting_id, p, now)
             return posting_id
 
     def _merge_postings(self, keep_id: int, drop_id: int) -> None:

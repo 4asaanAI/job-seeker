@@ -660,3 +660,189 @@ def test_country_only_adoption_does_not_downgrade_a_city_rows_location(store):
     back = store.upsert_posting(_posting("naukri", "g1", title, co, "India"))
 
     _assert_nothing_lost(store, sid, p, c, back)
+
+
+# --- Ruling 21/29 location redesign: fixes I1 and I3 -----------------------
+
+def test_state_level_indian_location_merges_with_the_full_naukri_listing(store):
+    """I1: Indeed India gives only 'HR, IN'; reading that as a city named
+    'hr' would make the same real job look like two different roles."""
+    naukri = store.upsert_posting(_posting(
+        source="naukri", external_id="n1", location="Gurgaon, Haryana, India"))
+    indeed = store.upsert_posting(_posting(
+        source="indeed", external_id="i1", location="HR, IN"))
+    assert naukri == indeed
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 1
+
+
+def test_region_stops_a_state_level_sighting_folding_into_the_wrong_city(store):
+    """Two cities are known (Gurgaon/Haryana, Pune/Maharashtra); without
+    region awareness a state-level 'HR, IN' sighting would be ambiguous
+    between them and wrongly stay a separate, third row."""
+    gurgaon = store.upsert_posting(_posting(
+        source="naukri", external_id="g1", location="Gurgaon, Haryana, India"))
+    pune = store.upsert_posting(_posting(
+        source="naukri", external_id="p1", location="Pune, Maharashtra, India"))
+    assert gurgaon != pune
+
+    resolved = store.upsert_posting(
+        _posting(source="indeed", external_id="i1", location="HR, IN"))
+
+    assert resolved == gurgaon
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 2
+
+
+def test_remote_and_country_only_us_sightings_of_the_same_job_merge(store):
+    """A stray 'Remote, US' or bare 'United States' must not each become
+    their own phantom city (final-review evidence for Ruling 21)."""
+    a = store.upsert_posting(_posting(
+        source="indeed", external_id="i1", title="Product Analyst", location="Remote, US"))
+    b = store.upsert_posting(_posting(
+        source="linkedin", external_id="l1", title="Product Analyst", location="United States"))
+    assert a == b
+
+
+def test_a_detaching_key_does_not_drag_a_shared_rows_other_key_along(store):
+    """I3, the exact repro: k2 joins k1's Mumbai row via a country-only
+    sighting (Ruling 12). k2 later reports a concrete, DIFFERENT city that
+    collides with an unrelated row. Only k2 may move -- k1's row, its score
+    and its seeker history must be untouched."""
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    mumbai = store.upsert_posting(
+        _posting(source="naukri", external_id="m1", location="Mumbai, India"))
+    store.link_posting(sid, mumbai)
+    _score(store, sid, mumbai, 90.0, "2026-09-19T01:00:00")
+
+    joined = store.upsert_posting(
+        _posting(source="bright", external_id="b1", location="India"))
+    assert joined == mumbai
+    assert _count(
+        store, "SELECT COUNT(*) FROM posting_sources WHERE posting_id = ?", (mumbai,)
+    ) == 2
+
+    pune = store.upsert_posting(
+        _posting(source="xing", external_id="x1", location="Pune, India"))
+    assert pune != mumbai
+
+    moved = store.upsert_posting(
+        _posting(source="bright", external_id="b1", location="Pune, India"))
+
+    assert moved == pune
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 2
+    srcs = {r["source"] for r in store.conn.execute(
+        "SELECT source FROM posting_sources WHERE posting_id = ?", (mumbai,))}
+    assert srcs == {"naukri"}
+    fit = store.conn.execute(
+        "SELECT fit_score FROM scores WHERE seeker_id = ? AND posting_id = ?",
+        (sid, mumbai)).fetchone()
+    assert fit["fit_score"] == 90.0
+    assert _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == 1
+
+
+def test_a_detaching_key_gets_its_own_new_row_when_no_destination_exists(store):
+    """Same as above, but nothing already owns the Pune hash: k2 gets a
+    brand-new row of its own rather than forcing a merge anywhere."""
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    mumbai = store.upsert_posting(
+        _posting(source="naukri", external_id="m1", location="Mumbai, India"))
+    store.link_posting(sid, mumbai)
+    _score(store, sid, mumbai, 90.0, "2026-09-19T01:00:00")
+    joined = store.upsert_posting(
+        _posting(source="bright", external_id="b1", location="India"))
+    assert joined == mumbai
+
+    moved = store.upsert_posting(
+        _posting(source="bright", external_id="b1", location="Pune, India"))
+
+    assert moved != mumbai
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 2
+    assert _count(
+        store, "SELECT COUNT(*) FROM posting_sources WHERE posting_id = ?", (mumbai,)
+    ) == 1
+    fit = store.conn.execute(
+        "SELECT fit_score FROM scores WHERE seeker_id = ? AND posting_id = ?",
+        (sid, mumbai)).fetchone()
+    assert fit["fit_score"] == 90.0
+
+
+def test_a_detaching_key_also_protects_bystanders_from_a_title_driven_merge(store):
+    """The same detach guard, triggered by a TITLE change instead of a city
+    change: k2 joins k1's row via a country-only sighting, then k2's board
+    edits ITS OWN title to collide with an unrelated same-city role. k1 must
+    not be dragged into that merge either."""
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    original = store.upsert_posting(
+        _posting(source="naukri", external_id="n1", title="Senior Merchandiser"))
+    store.link_posting(sid, original)
+    _score(store, sid, original, 90.0, "2026-09-19T01:00:00")
+
+    joined = store.upsert_posting(
+        _posting(source="bright", external_id="b1", title="Senior Merchandiser",
+                  location="India"))
+    assert joined == original
+
+    other_role = store.upsert_posting(
+        _posting(source="indeed", external_id="i1", title="Production Manager"))
+    assert other_role != original
+
+    moved = store.upsert_posting(
+        _posting(source="bright", external_id="b1", title="Production Manager"))
+
+    assert moved == other_role
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 2
+    srcs = {r["source"] for r in store.conn.execute(
+        "SELECT source FROM posting_sources WHERE posting_id = ?", (original,))}
+    assert srcs == {"naukri"}
+    fit = store.conn.execute(
+        "SELECT fit_score FROM scores WHERE seeker_id = ? AND posting_id = ?",
+        (sid, original)).fetchone()
+    assert fit["fit_score"] == 90.0
+
+
+def test_a_single_key_row_still_merges_in_place_with_no_bystanders(store):
+    """The detach guard must not engage when there is nobody to protect: a
+    lone key changing its own city still merges exactly as before."""
+    p, m = (
+        store.upsert_posting(_posting(source="naukri", external_id="g1",
+                                       location="Gurgaon, India")),
+        store.upsert_posting(_posting(source="naukri", external_id="m1",
+                                       location="Mumbai, India")),
+    )
+    assert p != m
+    moved = store.upsert_posting(
+        _posting(source="naukri", external_id="g1", location="Mumbai, India"))
+    assert moved == m
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 1
+
+
+def test_migrate_backfills_location_columns_on_an_existing_database(tmp_path):
+    """A database created before this change has no location_city/region/
+    country columns yet; migrate() must add them AND parse the existing
+    free-text location into them, not leave old rows blank."""
+    db_path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(db_path)
+    raw.execute(
+        "CREATE TABLE job_postings (id INTEGER PRIMARY KEY, company_id INTEGER, "
+        "company_name TEXT NOT NULL, title TEXT NOT NULL, normalized_title TEXT NOT NULL, "
+        "location TEXT, description TEXT, canonical_url TEXT, posted_at TEXT, "
+        "first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, "
+        "content_hash TEXT NOT NULL UNIQUE)"
+    )
+    raw.execute(
+        "INSERT INTO job_postings (company_name, title, normalized_title, location, "
+        "first_seen_at, last_seen_at, content_hash) VALUES (?,?,?,?,?,?,?)",
+        ("Marks & Spencer", "Senior Merchandiser", "senior merchandiser",
+         "Gurgaon, Haryana, India", "t", "t", "legacyhash"),
+    )
+    raw.commit()
+    raw.close()
+
+    s = Store(db_path)
+    s.migrate()
+    row = s.conn.execute(
+        "SELECT location_city, location_region, location_country FROM job_postings"
+    ).fetchone()
+    s.close()
+
+    assert (row["location_city"], row["location_region"], row["location_country"]) == (
+        "gurgaon", "haryana", "india")
