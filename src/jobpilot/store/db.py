@@ -193,6 +193,13 @@ class Store:
                 (seeker_id, posting_id, kind, detail[:2000], _now()),
             )
 
+    def event_count_since(self, seeker_id: int, kind: str, hours: int) -> int:
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with self._lock:
+            return int(self.conn.execute(
+                "SELECT COUNT(*) FROM events WHERE seeker_id = ? AND kind = ? "
+                "AND created_at >= ?", (seeker_id, kind, since)).fetchone()[0])
+
     # --- seekers -------------------------------------------------------
     def add_seeker(
         self, name: str, telegram_user_id: int | None, profile_path: str,

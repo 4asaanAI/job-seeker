@@ -147,33 +147,26 @@ written under `out/` and is recorded in `resume_versions` only after the
 extraction gate passes. PDF validation is available through `pypdf`, but PDF
 conversion is intentionally not automatic.
 
-The Windows checkout contains `.mcp.telegram.json.example` and
-`scripts/telegram.ps1`. To configure the channel:
+## 7b. Telegram bot (open to anyone)
 
-1. Copy the example to `.mcp.telegram.json` and review the pinned seeker ID.
-2. In Claude Code, install/enable `telegram@claude-plugins-official` and run
-   `/telegram:configure <BotFather token>`. The token is stored outside Git in
-   the configured Telegram state directory.
-3. Start `.scripts\telegram.ps1`. It uses only the pinned JobPilot MCP and
-   Telegram `reply`/`react`/`edit_message` tools; built-in tools and unrelated
-   MCP servers are disabled.
-4. Pair the intended sender, then switch Telegram policy to `allowlist` and
-   confirm the numeric ID matches the seeker's `telegram_user_id` in JobPilot.
+`scripts\telegram.ps1` runs `python -m jobpilot.telegram_bot`, an always-on
+service (it restarts itself if it exits). The bot token lives in
+`telegram-state\.env` as `TELEGRAM_BOT_TOKEN=...` (git-ignored).
 
-For a digest, call `build_plain_digest(record=false)`, send its returned
-`text`, and call `record_notification` only after the Telegram reply succeeds.
-The HTML digest is never sent through Telegram.
-
-After a seeker responds, use `set_job_status` for `shortlisted`, `skipped`, or
-`deferred`, and `record_application` for `started`, `applied`, `interview`,
-`rejected`, or `offer`. `my_applications` and `get_followups` are scoped to the
-same seeker; follow-ups are one-time three-day nudges or seven-day expiry
-records, not repeated daily notifications.
+Anyone can message the bot. An unknown sender is onboarded in chat and gets
+their own isolated seeker profile; a known sender is served their own data.
+Each message runs a short `claude --print` session whose only tool is a JobPilot
+MCP process pinned to that one Telegram user, so users cannot see each other.
+Menu commands: `/jobs /search /status /applications /resume /profile /reset /help`.
+Limits: 30 messages per user per hour, 3 manual searches per day, and
+`JOBPILOT_MAX_SEEKERS` (default 100) total users. Private chats only; groups are
+ignored. All sessions run on the Windows user's Claude login.
 
 ## 8. Scheduled routine and Sheets view
 
 Copy `.mcp.scheduled.json.example` to `.mcp.scheduled.json` on the desktop,
-then run `.un.ps1 -Task scheduled`. The runner starts a fresh Claude session
+then run `.
+un.ps1 -Task scheduled`. The runner starts a fresh Claude session
 with no built-in tools, only the JobPilot MCP, no session persistence, and a
 default `$2` API budget. Each attempt is recorded in `machine_runs`; a failed
 Claude process is recorded as `error` rather than disappearing.

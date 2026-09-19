@@ -38,6 +38,7 @@ def build_tools(
     out_dir: Path,
     pinned_seeker_id: int | None = None,
     operator_mode: bool = True,
+    onboard_telegram_id: int | None = None,
 ) -> dict[str, Callable]:
     """Build the plain-callable tool surface used by tests and FastMCP.
 
@@ -45,9 +46,57 @@ def build_tools(
     refuses every call for another. This keeps tenancy from depending on the
     caller passing the right integer.
     """
-    if not operator_mode and pinned_seeker_id is None:
+    if not operator_mode and pinned_seeker_id is None and onboard_telegram_id is None:
         raise ValueError("seeker mode requires JOBPILOT_SEEKER_ID")
     home = jobpilot_home()
+
+    def available_sources() -> list[str]:
+        """List the job-board source names a seeker may subscribe to."""
+        return [n for n, sc in load_config().sites.items()
+                if sc.enabled and n not in PROHIBITED_SOURCES]
+
+    def register_me(
+        name: str, headline: str, location: str, search_terms: list[str],
+        sources: list[str], exclude_keywords: list[str] | None = None,
+        target_companies: list[str] | None = None,
+    ) -> dict:
+        """Create the profile for the Telegram user this session serves.
+
+        Call once, after the user has told you their target role, location and
+        preferences. Identity comes from the session, never from an argument.
+        """
+        import yaml
+        if onboard_telegram_id is None:
+            return {"ok": False, "error": "registration is not available here"}
+        if store.seeker_by_telegram_id(onboard_telegram_id) is not None:
+            return {"ok": False, "error": "already registered"}
+
+        def _clean(items, limit, width):
+            return [str(i).strip()[:width] for i in (items or []) if str(i).strip()][:limit]
+
+        terms = _clean(search_terms, 10, 60)
+        allowed = set(available_sources())
+        chosen = [x for x in _clean(sources, 10, 40) if x in allowed]
+        name, headline, location = (str(v).strip()[:120] for v in (name, headline, location))
+        if not (name and headline and location and terms and chosen):
+            return {"ok": False, "error":
+                    "name, headline, location, search_terms and at least one valid "
+                    f"source ({sorted(allowed)}) are required"}
+        rel = Path("data") / "seekers" / f"tg_{int(onboard_telegram_id)}"
+        (home / rel).mkdir(parents=True, exist_ok=True)
+        (home / rel / "profile.yaml").write_text(yaml.safe_dump({
+            "name": name, "headline": headline, "location": location,
+            "sources": chosen, "search_terms": terms,
+            "exclude_keywords": _clean(exclude_keywords, 20, 60),
+            "target_companies": _clean(target_companies, 20, 80),
+            "min_score": 70, "rubric": "general",
+        }, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        sid = store.add_seeker(name, int(onboard_telegram_id),
+                               (rel / "profile.yaml").as_posix(), 20)
+        return {"ok": True, "seeker_id": sid}
+
+    if onboard_telegram_id is not None:
+        return {"available_sources": available_sources, "register_me": register_me}
 
     def _check(seeker_id: int) -> int:
         sid = int(seeker_id)
@@ -445,9 +494,6 @@ def build_tools(
         "get_followups": get_followups,
     }
 
-    if not operator_mode:
-        return tools
-
     def list_seekers() -> list[dict]:
         """List active seekers; available only to the operator process."""
         return [{"seeker_id": s.id, "name": s.name}
@@ -549,6 +595,22 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "seeker_id": sid, **result.as_dict()}
 
+    def run_my_search(seeker_id: int) -> dict:
+        """Run a job search now for this seeker (at most 3 per day)."""
+        try:
+            sid = _check(seeker_id)
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        if store.event_count_since(sid, "manual_search", 24) >= 3:
+            return {"ok": False, "error": "search limit reached for today; try tomorrow"}
+        store.record_event("manual_search", "", seeker_id=sid)
+        return discover([sid])
+
+    tools["available_sources"] = available_sources
+    tools["run_my_search"] = run_my_search
+    if not operator_mode:
+        return tools
+
     tools.update({
         "list_seekers": list_seekers,
         "add_seeker": add_seeker,
@@ -568,12 +630,14 @@ def main() -> None:
     out_dir = Path(os.environ.get("JOBPILOT_OUT", home / "out"))
     pinned = os.environ.get("JOBPILOT_SEEKER_ID")
     pinned_id = int(pinned) if pinned else None
+    onboard = os.environ.get("JOBPILOT_ONBOARD_TELEGRAM_ID")
 
     store = Store(db_path)
     store.migrate()
     mcp = FastMCP("jobpilot")
     tools = build_tools(store, out_dir, pinned_seeker_id=pinned_id,
-                        operator_mode=pinned_id is None)
+                        operator_mode=pinned_id is None and not onboard,
+                        onboard_telegram_id=int(onboard) if onboard else None)
     for name, fn in tools.items():
         mcp.tool(name=name, description=(fn.__doc__ or "").strip())(fn)
     mcp.run()
