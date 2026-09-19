@@ -193,3 +193,17 @@ vendor = "greenhouse"
 company_name = "Stripe"
 endpoint = "https://boards-api.greenhouse.io/v1/boards/stripe/jobs"
 enabled = true
+
+# Public remote-job feeds. Both ask for attribution: postings link back to the
+# original site. Each is fetched at most once per run.
+[ats_sources.remoteok]
+vendor = "remoteok"
+company_name = "RemoteOK"
+endpoint = "https://remoteok.com/api"
+enabled = true
+
+[ats_sources.remotive]
+vendor = "remotive"
+company_name = "Remotive"
+endpoint = "https://remotive.com/api/remote-jobs?limit=200"
+enabled = true

@@ -50,6 +50,10 @@ def _nested(item: dict, *keys: str) -> Any:
 def _items(payload: object, vendor: str) -> list[dict]:
     if vendor == "greenhouse":
         value = payload.get("jobs", []) if isinstance(payload, dict) else []
+    elif vendor == "remoteok":
+        value = payload if isinstance(payload, list) else []
+    elif vendor == "remotive":
+        value = payload.get("jobs", []) if isinstance(payload, dict) else []
     elif vendor == "lever":
         value = payload if isinstance(payload, list) else []
     elif vendor == "workday":
@@ -73,7 +77,24 @@ def _items(payload: object, vendor: str) -> list[dict]:
 
 def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
     vendor = cfg.vendor
-    if vendor == "greenhouse":
+    row_company = ""
+    if vendor == "remoteok":
+        external_id = _nested(item, "id", "slug")
+        title = _nested(item, "position")
+        location = _nested(item, "location") or "Remote"
+        url = _nested(item, "url", "apply_url")
+        description = _nested(item, "description")
+        posted_at = _nested(item, "date")
+        row_company = _nested(item, "company")
+    elif vendor == "remotive":
+        external_id = _nested(item, "id")
+        title = _nested(item, "title")
+        location = _nested(item, "candidate_required_location") or "Remote"
+        url = _nested(item, "url")
+        description = _nested(item, "description")
+        posted_at = _nested(item, "publication_date")
+        row_company = _nested(item, "company_name")
+    elif vendor == "greenhouse":
         external_id = _nested(item, "id", "requisition_id")
         title = _nested(item, "title", "name")
         location = _nested(item.get("location", {}), "name") if isinstance(item.get("location"), dict) else _nested(item, "location")
@@ -105,7 +126,7 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
 
     external_id = _text(external_id)
     title = _text(title)
-    company = _text(cfg.company_name)
+    company = _text(row_company) or _text(cfg.company_name)
     if not external_id or not title or not company:
         return None
     description = _text(description)[:MAX_DESCRIPTION_CHARS] or None
