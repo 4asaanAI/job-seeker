@@ -230,3 +230,25 @@ fetch_timeout_seconds = {values['fetch_timeout_seconds']}
 
     with pytest.raises(ValueError, match=message):
         load_config(f)
+
+
+def test_load_config_reads_disabled_structured_source_without_network(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text(
+        GOOD + """
+
+[structured_sources.acme_careers]
+company_name = "Acme & Co"
+endpoint = "https://careers.example.test/jobs"
+enabled = false
+canary_min_results = 2
+fetch_timeout_seconds = 8.0
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(f)
+
+    assert cfg.structured_sources["acme_careers"].company_name == "Acme & Co"
+    assert cfg.structured_sources["acme_careers"].canary_min_results == 2
+    assert cfg.structured_sources["acme_careers"].enabled is False

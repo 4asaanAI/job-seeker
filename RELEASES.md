@@ -154,3 +154,14 @@ discovery-pipeline health isolation. No production endpoint is enabled by
 default because the exact employer tenant URLs still need operator verification.
 
 Gate evidence: **300 offline tests passed**. No live ATS endpoint was contacted.
+
+The following R4/R5 increment adds structured `JobPosting` JSON-LD career-page
+sources, a facts-only structured resume loader, ATS-safe DOCX rendering with a
+blocking DOCX/PDF extraction gate, per-seeker resume-version records, and a
+plain-text digest for chat delivery. The Windows checkout also has a dedicated
+Telegram launcher using the installed official Telegram plugin, strict MCP
+configuration, a pinned seeker process, and no built-in tools. No bot token or
+Telegram sender was configured automatically.
+
+Gate evidence: **314 offline tests passed**. No live structured-page endpoint,
+resume from a real seeker, or Telegram message was used by the test suite.

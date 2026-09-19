@@ -4,10 +4,11 @@ The repository is now on `main` with the R3 MCP server. The supported operator
 interface is Claude Code (or another MCP client); there is no browser UI yet.
 Telegram delivery remains a later, separately secured integration.
 
-R4 also provides a no-network-in-tests adapter for official employer ATS JSON
-endpoints. It supports `greenhouse`, `lever`, `workday`, and `successfactors`.
-The endpoint is operator configuration, not model or seeker input; JobPilot
-does not infer an API URL from a careers page.
+R4 also provides no-network-in-tests adapters for official employer ATS JSON
+endpoints and ordinary career pages containing `JobPosting` JSON-LD. ATS JSON
+supports `greenhouse`, `lever`, `workday`, and `successfactors`. Both endpoint
+types are operator configuration, not model or seeker input; JobPilot does not
+infer an API URL from a careers page.
 
 ## 1. Verify the safe offline demo
 
@@ -123,3 +124,36 @@ refuses empty, malformed, or description-free data.
 Each configured endpoint is fetched once per source instance and filtered
 locally for the seeker's terms and location. Tests inject a fetcher and never
 make network requests.
+
+For a JSON-LD career page, use `[structured_sources.<key>]` with
+`company_name`, an HTML `endpoint`, `enabled`, and a canary floor. Add the same
+source key to the seeker's profile. A page with no valid `JobPosting` records
+is blocked/error rather than reported as a quiet employer.
+
+## 7. Resume output and Telegram
+
+Create a private `base_resume.yaml` under `data/seekers/<name>/`. The schema is
+structured facts (`experience`, `education`, `skills`, and optional
+`required_facts`); the renderer accepts only IDs and exact skill values from
+that file. It cannot accept free-form model claims. Through MCP, call
+`resume_facts`, then `render_resume` for a linked posting. The returned DOCX is
+written under `out/` and is recorded in `resume_versions` only after the
+extraction gate passes. PDF validation is available through `pypdf`, but PDF
+conversion is intentionally not automatic.
+
+The Windows checkout contains `.mcp.telegram.json.example` and
+`scripts/telegram.ps1`. To configure the channel:
+
+1. Copy the example to `.mcp.telegram.json` and review the pinned seeker ID.
+2. In Claude Code, install/enable `telegram@claude-plugins-official` and run
+   `/telegram:configure <BotFather token>`. The token is stored outside Git in
+   the configured Telegram state directory.
+3. Start `.scripts\telegram.ps1`. It uses only the pinned JobPilot MCP and
+   Telegram `reply`/`react`/`edit_message` tools; built-in tools and unrelated
+   MCP servers are disabled.
+4. Pair the intended sender, then switch Telegram policy to `allowlist` and
+   confirm the numeric ID matches the seeker's `telegram_user_id` in JobPilot.
+
+For a digest, call `build_plain_digest(record=false)`, send its returned
+`text`, and call `record_notification` only after the Telegram reply succeeds.
+The HTML digest is never sent through Telegram.

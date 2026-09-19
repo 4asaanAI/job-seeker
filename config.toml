@@ -20,6 +20,16 @@ min_request_gap_seconds = 4.0
 # canary_min_results = 1
 # fetch_timeout_seconds = 20.0
 
+# Ordinary career page with JobPosting JSON-LD (Layer 2). This is deliberately
+# separate from ATS JSON: the endpoint is an HTML page, not a guessed API.
+#
+# [structured_sources.example_careers]
+# company_name = "Example employer"
+# endpoint = "https://careers.example.test/jobs"
+# enabled = false
+# canary_min_results = 1
+# fetch_timeout_seconds = 20.0
+
 # ---- India ----
 [sites.naukri_in]
 site = "naukri"

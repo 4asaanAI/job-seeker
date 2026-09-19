@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from jobpilot.server import build_tools
 from jobpilot.store.db import Store
@@ -226,3 +227,49 @@ def test_pinned_process_scopes_new_m2_tools(tmp_path):
     assert refused_history["ok"] is False
     assert "pinned" in refused_history["error"]
     store2.close()
+
+
+def test_resume_tools_render_and_record_only_structured_facts(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    base_path = tmp_path / "data" / "seekers" / "a" / "base_resume.yaml"
+    base_path.parent.mkdir(parents=True)
+    base_path.write_text(
+        "name: A\nheadline: Analyst\n"
+        "required_facts: [A, Analyst, Acme]\n"
+        "experience:\n"
+        "  - id: current\n    employer: Acme\n    title: Analyst\n    dates: 2024 - Present\n"
+        "    bullets: [{id: b1, text: Analysed product data}]\n"
+        "skills: [SQL]\n",
+        encoding="utf-8",
+    )
+    tools, store = _tools(tmp_path)
+    sid, pid = _seed(store)
+
+    facts = tools["resume_facts"](sid, "data/seekers/a/base_resume.yaml")
+    assert facts["ok"] is True
+    assert facts["experience"][0]["id"] == "current"
+    rendered = tools["render_resume"](
+        sid, pid, "data/seekers/a/base_resume.yaml", ["current"], ["SQL"]
+    )
+
+    assert rendered["ok"] is True
+    assert rendered["validation"]["ok"] is True
+    assert Path(rendered["path"]).exists()
+    history = tools["my_resumes"](sid, pid)
+    assert history["ok"] is True
+    assert history["items"][0]["id"] == rendered["resume_version_id"]
+    store.close()
+
+
+def test_resume_tools_refuse_unlinked_postings_and_path_escape(operator):
+    tools, store = operator
+    sid, pid = _seed(store)
+    other = store.upsert_posting(
+        Posting(company_name="Other", source="indeed", external_id="other-resume",
+                title="Other", location="Austin", description="d",
+                url="https://x.test/other-resume", posted_at="2026-09-18")
+    )
+    assert tools["resume_facts"](sid, "../secret.yaml")["ok"] is False
+    refused = tools["render_resume"](sid, other, "base.yaml")
+    assert refused["ok"] is False
+    assert "linked" in refused["error"]

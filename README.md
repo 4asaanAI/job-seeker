@@ -14,8 +14,11 @@ enabled. Naukri India is kept in the configuration but disabled after its live
 canary returned HTTP 406 (recaptcha required); re-enable it only after a
 deliberate cooldown retry. LinkedIn is intentionally not contacted.
 No ATS endpoint is enabled until its exact public JSON URL is verified against
-the employer careers page. Telegram delivery, structured career-page parsing,
-Wigolo integration, and resume generation remain later milestones. The MCP
+the employer careers page. Structured `JobPosting` JSON-LD pages are now also
+supported as separately configured Layer 2 sources. The official Telegram
+plugin is installed on the Windows desktop, and JobPilot now has a plain-text
+digest plus a pinned, restricted launcher; a bot token and pairing are still
+operator setup steps. Wigolo integration remains later. The MCP
 surface also includes per-seeker status/history views, watchlists, and
 explicit one-page browser-investigation handoffs.
 

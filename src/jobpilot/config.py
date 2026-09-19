@@ -44,6 +44,16 @@ class ATSConfig:
 
 
 @dataclass(frozen=True)
+class StructuredConfig:
+    name: str
+    company_name: str
+    endpoint: str
+    enabled: bool
+    canary_min_results: int = 1
+    fetch_timeout_seconds: float = 20.0
+
+
+@dataclass(frozen=True)
 class Config:
     home: Path
     data_dir: Path
@@ -52,6 +62,7 @@ class Config:
     min_request_gap_seconds: float
     sites: dict[str, SiteConfig]
     ats_sources: dict[str, ATSConfig] = field(default_factory=dict)
+    structured_sources: dict[str, StructuredConfig] = field(default_factory=dict)
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -122,6 +133,35 @@ def load_config(path: Path | None = None) -> Config:
             fetch_timeout_seconds=timeout,
         )
 
+    structured_sources: dict[str, StructuredConfig] = {}
+    for name, block in raw.get("structured_sources", {}).items():
+        endpoint = str(block.get("endpoint", "")).strip()
+        if not endpoint.startswith(("https://", "http://")):
+            raise ValueError(
+                f"structured source '{name}' endpoint must be an HTTP(S) URL"
+            )
+        company_name = str(block.get("company_name", name)).strip()
+        if not company_name:
+            raise ValueError(f"structured source '{name}' company_name must not be empty")
+        minimum = int(block.get("canary_min_results", 1))
+        if minimum < 1:
+            raise ValueError(
+                f"structured source '{name}' canary_min_results must be >= 1"
+            )
+        timeout = float(block.get("fetch_timeout_seconds", 20.0))
+        if not isfinite(timeout) or timeout <= 0:
+            raise ValueError(
+                f"structured source '{name}' fetch_timeout_seconds must be > 0"
+            )
+        structured_sources[name] = StructuredConfig(
+            name=name,
+            company_name=company_name,
+            endpoint=endpoint,
+            enabled=bool(block.get("enabled", False)),
+            canary_min_results=minimum,
+            fetch_timeout_seconds=timeout,
+        )
+
     base = home
     return Config(
         home=base,
@@ -131,4 +171,5 @@ def load_config(path: Path | None = None) -> Config:
         min_request_gap_seconds=float(raw["limits"]["min_request_gap_seconds"]),
         sites=sites,
         ats_sources=ats_sources,
+        structured_sources=structured_sources,
     )

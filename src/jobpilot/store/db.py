@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import secrets
 import sqlite3
@@ -909,3 +910,54 @@ class Store:
                 (seeker_id, posting_id),
             ).fetchone()
         return dict(row) if row else None
+
+    # --- resume versions ----------------------------------------------
+    def record_resume_version(
+        self,
+        seeker_id: int,
+        posting_id: int,
+        path: str,
+        format: str,
+        validation_report: dict,
+        extraction_ok: bool,
+    ) -> int:
+        """Record a generated resume only for a posting linked to this seeker."""
+        if not self.is_linked(seeker_id, posting_id):
+            raise ValueError(
+                f"posting {posting_id} is not linked to seeker {seeker_id}; "
+                "refusing to record a resume for an unrelated job"
+            )
+        if format not in ("docx", "pdf"):
+            raise ValueError(f"unsupported resume format: {format}")
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO resume_versions "
+                "(seeker_id, posting_id, path, format, generated_at, "
+                "validation_report, extraction_ok) VALUES (?,?,?,?,?,?,?)",
+                (seeker_id, posting_id, path, format, _now(),
+                 json.dumps(validation_report, ensure_ascii=False, sort_keys=True),
+                 int(extraction_ok)),
+            )
+            return int(cur.lastrowid)
+
+    def resume_versions(self, seeker_id: int, posting_id: int | None = None) -> list[dict]:
+        """Return only resume records belonging to this seeker."""
+        sql = (
+            "SELECT id, seeker_id, posting_id, path, format, generated_at, "
+            "validation_report, extraction_ok FROM resume_versions "
+            "WHERE seeker_id = ?"
+        )
+        params: list[object] = [seeker_id]
+        if posting_id is not None:
+            sql += " AND posting_id = ?"
+            params.append(posting_id)
+        sql += " ORDER BY id DESC"
+        with self._lock:
+            rows = self.conn.execute(sql, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["validation_report"] = json.loads(item["validation_report"] or "{}")
+            item["extraction_ok"] = bool(item["extraction_ok"])
+            result.append(item)
+        return result

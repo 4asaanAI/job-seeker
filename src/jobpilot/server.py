@@ -7,16 +7,20 @@ from __future__ import annotations
 
 import os
 import ntpath
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 from .config import load_config
 from .digest.render import render_digest
+from .digest.plain import render_plain_digest
 from .paths import jobpilot_home
 from .pipeline import SeekerTarget, run_discovery
 from .profiles import load_companies, load_profile
+from .resume import ResumeValidationError, load_base_resume, render_docx
 from .scoring import build_scoring_batch
 from .sources.ats_json import ATSJsonSource
+from .sources.jsonld_source import JsonLdSource
 from .sources.jobspy_source import JobSpySource
 from .store.db import Store
 
@@ -68,6 +72,27 @@ def build_tools(
                 )),
             )
         return seeker, path, profile
+
+    def _home_relative_path(raw_path: str, label: str) -> Path:
+        """Resolve a caller-supplied path without allowing escape from home."""
+        candidate = Path(str(raw_path))
+        windows_path = ntpath.normpath(str(raw_path))
+        if (
+            not str(raw_path).strip()
+            or candidate.is_absolute()
+            or ntpath.isabs(str(raw_path))
+            or str(raw_path).startswith(("/", "\\"))
+            or ".." in candidate.parts
+            or ".." in windows_path.replace("\\", "/").split("/")
+        ):
+            raise ValueError(f"{label} must be relative to JOBPILOT_HOME")
+        resolved_home = home.resolve()
+        resolved = (home / candidate).resolve()
+        try:
+            resolved.relative_to(resolved_home)
+        except ValueError as exc:
+            raise ValueError(f"{label} must stay inside JOBPILOT_HOME") from exc
+        return resolved
 
     def resolve_telegram_sender(telegram_user_id: int) -> dict:
         """Resolve a verified numeric Telegram sender to one active seeker.
@@ -149,6 +174,21 @@ def build_tools(
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "path": str(path)}
+
+    def build_plain_digest(
+        seeker_id: int, min_score: float = 70.0, limit: int = 5,
+        record: bool = False,
+    ) -> dict:
+        """Build a Telegram-safe plain-text digest; HTML is never sent to chat."""
+        try:
+            sid = _check(seeker_id)
+            digest = render_plain_digest(
+                store, sid, min_score, limit, channel="telegram", record=record
+            )
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, "text": digest.text,
+                "posting_ids": list(digest.posting_ids), "recorded": digest.recorded}
 
     def investigate_posting(seeker_id: int, posting_id: int) -> dict:
         """Return one linked posting as a browser-investigation handoff.
@@ -252,6 +292,87 @@ def build_tools(
         return {"ok": True, "seeker_id": sid, "company_id": company_id,
                 "name": " ".join(name.split())}
 
+    def resume_facts(seeker_id: int, base_resume_path: str) -> dict:
+        """Expose structured resume facts so an approved caller can choose order only."""
+        try:
+            sid = _check(seeker_id)
+            path = _home_relative_path(base_resume_path, "base_resume_path")
+            base = load_base_resume(path)
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "seeker_id": sid,
+            "name": base.name,
+            "headline": base.headline,
+            "contact": list(base.contact),
+            "summary": base.summary,
+            "required_facts": list(base.required_facts),
+            "experience": [
+                {"id": item.id, "employer": item.employer, "title": item.title,
+                 "dates": item.dates,
+                 "bullets": [{"id": bid, "text": text} for bid, text in item.bullets]}
+                for item in base.experience
+            ],
+            "education": [
+                {"id": item.id, "institution": item.institution,
+                 "degree": item.degree, "dates": item.dates}
+                for item in base.education
+            ],
+            "skills": list(base.skills),
+        }
+
+    def render_resume(
+        seeker_id: int,
+        posting_id: int,
+        base_resume_path: str,
+        experience_order: list[str] | None = None,
+        skills: list[str] | None = None,
+    ) -> dict:
+        """Render a facts-only DOCX for a linked job and run the blocking gate."""
+        try:
+            sid = _check(seeker_id)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            base_path = _home_relative_path(base_resume_path, "base_resume_path")
+            base = load_base_resume(base_path)
+            seeker = store.get_seeker(sid)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            output_dir = Path(out_dir) / "seekers" / f"{sid}-{seeker.output_token}"
+            output = output_dir / f"resume-{int(posting_id)}-{stamp}.docx"
+            report = render_docx(
+                base, output, experience_order=experience_order, skills=skills
+            )
+            version_id = store.record_resume_version(
+                sid, int(posting_id), str(output), "docx", report.as_dict(), report.ok
+            )
+        except ResumeValidationError as exc:
+            return {"ok": False, "error": str(exc), "validation": exc.report.as_dict()}
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "seeker_id": sid,
+            "posting_id": int(posting_id),
+            "resume_version_id": version_id,
+            "path": str(output),
+            "format": "docx",
+            "validation": report.as_dict(),
+            "note": "Only facts from the structured base resume were rendered; review before sending.",
+        }
+
+    def my_resumes(seeker_id: int, posting_id: int | None = None) -> dict:
+        """List only this seeker's generated resume versions."""
+        try:
+            sid = _check(seeker_id)
+            if posting_id is not None and store.posting_view(sid, int(posting_id)) is None:
+                raise ValueError("posting is not linked to this seeker")
+            return {"ok": True, "seeker_id": sid,
+                    "items": store.resume_versions(sid, posting_id)}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
     tools: dict[str, Callable] = {
         "resolve_telegram_sender": resolve_telegram_sender,
         "get_scoring_batch": get_scoring_batch,
@@ -259,6 +380,7 @@ def build_tools(
         "get_notifiable": get_notifiable,
         "record_notification": record_notification,
         "build_digest": build_digest,
+        "build_plain_digest": build_plain_digest,
         "investigate_posting": investigate_posting,
         "verify_still_open": verify_still_open,
         "check_company_careers": check_company_careers,
@@ -266,6 +388,9 @@ def build_tools(
         "my_sources": my_sources,
         "my_history": my_history,
         "add_target_company": add_target_company,
+        "resume_facts": resume_facts,
+        "render_resume": render_resume,
+        "my_resumes": my_resumes,
     }
 
     if not operator_mode:
@@ -319,6 +444,11 @@ def build_tools(
             ATSJsonSource(acfg)
             for acfg in cfg.ats_sources.values()
             if acfg.enabled
+        )
+        sources.extend(
+            JsonLdSource(scfg)
+            for scfg in cfg.structured_sources.values()
+            if scfg.enabled
         )
         results = run_discovery(store, sources, targets)
         return {

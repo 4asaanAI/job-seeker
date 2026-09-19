@@ -18,6 +18,8 @@ __pycache__/
 *.egg-info/
 *.pdf
 .env
+.mcp.telegram.json
+telegram-state/
 tests/fixtures/live/
 
 # Local Claude handoff transcript; never publish conversation history.
