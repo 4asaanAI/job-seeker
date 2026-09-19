@@ -225,6 +225,7 @@ def test_cap_counts_canaries_across_sources_and_seekers(rig, capsys):
     write_profile(rig.root, "b", ["indeed_us"], ["b1", "b2"])
     # two searches per seeker is 4 unique searches on us + 2 on in + 2 canaries
     assert rig.run("--terms", "2") != 0
+    assert "limit is 6" in capsys.readouterr().out
     assert rig.calls == []
 
 
@@ -233,10 +234,27 @@ def test_runtime_guard_refuses_a_seventh_request():
     shared = {"n": 0, "cap": 6}
     g = demo.Guard(lambda **k: calls.append(k) or [], shared)
     for _ in range(6):
-        g()
+        g(**OK_KW)
     with pytest.raises(demo.Stop):
-        g()
+        g(**OK_KW)
     assert len(calls) == 6
+
+
+OK_KW = {"site_name": ["indeed"], "country_indeed": "usa"}
+
+
+@pytest.mark.parametrize("kw", [
+    {"site_name": ["linkedin"], "country_indeed": "usa"},
+    {"site_name": ["indeed", "naukri"], "country_indeed": "india"},
+    {"site_name": ["indeed"], "country_indeed": "uk"},
+    {"country_indeed": "usa"},
+])
+def test_guard_rechecks_site_and_country_at_call_time(kw):
+    calls = []
+    g = demo.Guard(lambda **k: calls.append(k) or [], {"n": 0, "cap": 6})
+    with pytest.raises(demo.Stop):
+        g(**kw)
+    assert calls == [] and g.shared["n"] == 0
 
 
 KEYWORDS = ["403", "406", "429", "captcha", "recaptcha", "forbidden", "blocked",
@@ -327,3 +345,130 @@ def test_live_keep_keeps_the_temp_dir(rig, capsys):
         assert (kept / "demo.db").exists()
     finally:
         shutil.rmtree(kept)
+
+
+# ------------------------------------------- fix round 1
+@pytest.mark.parametrize("code", [500, 503, 999])
+def test_any_non_ok_status_line_is_a_block(jobspy_logger, code):
+    w = demo.BlockWatch()
+    jobspy_logger.addHandler(w)
+    emit(jobspy_logger, f"responded with status code: {code} (submit GitHub issue)")
+    assert w.take_hit() is not None
+
+
+@pytest.mark.parametrize("code", [500, 503, 999])
+def test_status_line_stops_the_run(rig, jobspy_logger, capsys, code):
+    write_profile(rig.root, "a", ["indeed_us", "indeed_in"], ["t1"])
+    rig.on_call = lambda n: emit(
+        jobspy_logger, f"responded with status code: {code} (submit GitHub issue)")
+    assert rig.run() == 3
+    assert len(rig.calls) == 1
+
+
+def test_plan_shows_every_request_including_health_checks(rig, capsys):
+    write_profile(rig.root, "a", ["indeed_us", "indeed_in"], ["t1"])
+    rig.answer = "no"
+    rig.run()
+    out = capsys.readouterr().out
+    assert "health check for indeed_us: 'business analyst', no location, 10 results" in out
+    assert "health check for indeed_in: 'merchandiser', no location, 10 results" in out
+    assert "search 't1' in 'Austin, TX'" in out
+
+
+def test_plan_discloses_calls_versus_page_loads(rig, capsys):
+    write_profile(rig.root, "a", ["indeed_us"], ["t1"])
+    rig.answer = "no"
+    rig.run()
+    out = capsys.readouterr().out
+    assert "up to about two pages" in out and "twice the call count" in out
+    assert "up to about two pages" in demo.__doc__
+
+
+def test_terminal_required_for_the_typed_yes(rig, capsys):
+    write_profile(rig.root, "a", ["indeed_us"], ["t1"])
+    rc = demo.main(["--live"], sleep=rig.sleeps.append, scraper=rig.scraper,
+                   seekers_dir=rig.root)          # no injected input: pytest stdin is no tty
+    assert rc != 0 and rig.calls == []
+    assert "interactive terminal" in capsys.readouterr().out
+
+
+def test_store_failure_does_not_leak_the_temp_dir(rig, monkeypatch, tmp_root):
+    write_profile(rig.root, "a", ["indeed_us"], ["t1"])
+
+    def bad(*a, **k):
+        raise OSError("cannot open")
+
+    monkeypatch.setattr(demo, "Store", bad)
+    with pytest.raises(OSError):
+        rig.run()
+    assert list(tmp_root.iterdir()) == []
+
+
+# --- through jobspy's REAL verbose handling; only the HTTP session is faked
+class _Resp:
+    ok = False
+
+    def __init__(self, code):
+        self.status_code = code
+
+
+class _Session:
+    posts = 0
+
+    def post(self, *a, **k):
+        _Session.posts += 1
+        return _Resp(403)
+
+
+@pytest.fixture
+def real_jobspy(monkeypatch):
+    """The genuine jobspy.scrape_jobs and Indeed scraper; the session is fake,
+    so a 403 is logged through jobspy's own loggers with no socket opened."""
+    import jobspy
+    import jobspy.indeed
+    from jobpilot.sources import jobspy_source
+
+    _Session.posts = 0
+    monkeypatch.setattr(jobspy.indeed, "create_session", lambda **k: _Session())
+    monkeypatch.setattr(demo, "_default_scraper", jobspy_source._default_scraper)
+    watch = demo.BlockWatch()
+    loggers = demo.attach_watch(watch)
+    assert any(lg.name == "JobSpy:Indeed" for lg in loggers)
+    yield watch
+    for lg in loggers:
+        lg.removeHandler(watch)
+
+
+SCRAPE = dict(site_name=["indeed"], search_term="x", results_wanted=10,
+              country_indeed="usa", linkedin_fetch_description=False)
+
+
+def test_old_default_scraper_is_blind_to_a_403(real_jobspy):
+    """Documents the bug: with jobspy's default verbose=0 the INFO line is dropped."""
+    from jobpilot.sources import jobspy_source
+
+    assert jobspy_source._default_scraper(**SCRAPE) == []
+    assert _Session.posts == 1
+    assert real_jobspy.take_hit() is None
+
+
+def test_live_scraper_sees_a_403_through_real_verbose_handling(real_jobspy):
+    assert demo.real_scraper(**SCRAPE) == []
+    assert _Session.posts == 1
+    assert real_jobspy.take_hit() is not None
+
+
+def test_guard_with_live_scraper_stops_on_a_real_403(real_jobspy):
+    g = demo.Guard(demo.real_scraper, {"n": 0, "cap": 6}, real_jobspy)
+    with pytest.raises(demo.Stop, match="blocking us"):
+        g(**SCRAPE)
+    assert _Session.posts == 1
+
+
+def test_live_run_with_the_real_scraper_stops_on_a_403(rig, real_jobspy, capsys):
+    write_profile(rig.root, "a", ["indeed_us", "indeed_in"], ["t1"])
+    rc = demo.main(["--live"], input_fn=rig.input, sleep=rig.sleeps.append,
+                   seekers_dir=rig.root)          # scraper=None: the real path
+    out = capsys.readouterr().out
+    assert rc == 3 and BLOCK_MSG in out
+    assert _Session.posts == 1                    # the first canary only

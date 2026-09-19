@@ -23,12 +23,20 @@ What --live does (extra safety rules, none can be switched off)
       lists (naukri, linkedin, glassdoor, ...) is skipped.
     * By default one search term per seeker, in the profile's own location only,
       10 results per request. --terms N allows more terms, but the whole run may
-      never plan more than 6 requests (health checks included); otherwise it
-      refuses to start.
+      never plan more than 6 scraper calls (health checks included); otherwise
+      it refuses to start. Note that 6 counts scraper calls, not page loads:
+      each call may load up to about two pages (Indeed keeps paging until it has
+      10 unique results), so real page loads can be up to about twice the call
+      count. The 8 second pause applies between calls, not between those pages.
     * At least 8 seconds between requests.
-    * Says exactly what it will do, then waits for you to type: yes
+    * Says exactly what it will do (including each source's health-check
+      search), then waits for you to type: yes. This needs an interactive
+      terminal; piped input is refused.
     * After every request it checks JobSpy's log for signs of blocking (403, 406,
-      429, captcha, forbidden, blocked, too many). On any hit it stops at once,
+      429, captcha, forbidden, blocked, too many, or any "responded with status
+      code" line, which JobSpy logs for every non-OK answer). The live scraper
+      runs with JobSpy's verbose=2, because at its default level JobSpy hides
+      exactly those lines. On any hit it stops at once,
       makes no further request and does not retry. Any error from the scraper
       also stops the run.
     * No login, no accounts, no proxies, no special headers.
@@ -65,7 +73,9 @@ DEMO_MIN_SCORE = 70.0
 PLACEHOLDER_SCORES = (90.0, 80.0, 60.0)
 BLOCK_MSG = "stopped: the site looks like it is blocking us; nothing further was requested"
 BLOCK_WORDS = re.compile(
-    r"(?<!\d)(?:403|406|429)(?!\d)|captcha|forbidden|blocked|too many", re.I)
+    r"(?<!\d)(?:403|406|429)(?!\d)|captcha|forbidden|blocked|too many"
+    r"|responded with status code", re.I)
+ALLOWED_COUNTRIES = frozenset({"india", "usa"})
 
 
 # ------------------------------------------------------------- safety pieces
@@ -99,6 +109,14 @@ def attach_watch(watch: BlockWatch) -> list[logging.Logger]:
     return loggers
 
 
+def real_scraper(**kwargs):
+    """The real JobSpy scrape, at verbose=2. At jobspy's default verbose=0 it
+    resets every JobSpy logger to ERROR and Indeed's block message (logged at
+    INFO, followed by an empty result and no exception) would never reach the
+    block watch. The level is set inside scrape_jobs, before any request."""
+    return _default_scraper(**{**kwargs, "verbose": 2})
+
+
 class Guard:
     """Wraps a scraper: request budget, block check after every call, and a
     record of every raw row so rejects can be explained. One per source; the
@@ -109,6 +127,10 @@ class Guard:
         self.rows: dict[tuple, dict] = {}
 
     def __call__(self, **kwargs):
+        if (kwargs.get("site_name") != ["indeed"]
+                or kwargs.get("country_indeed") not in ALLOWED_COUNTRIES):
+            raise Stop("stopped: request was not for Indeed India or US; "
+                       "nothing further was requested")
         cap = self.shared.get("cap")
         if cap is not None and self.shared["n"] >= cap:
             raise Stop(f"stopped: request limit of {cap} reached; nothing further was requested")
@@ -225,8 +247,9 @@ def demo_profile(name: str, term: str, exclude=()) -> Profile:
 
 def offline(keep: bool) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="jobpilot-demo-"))
-    store = Store(tmp / "demo.db")
+    store = None
     try:
+        store = Store(tmp / "demo.db")
         store.migrate()
         print("JobPilot R1 demo (offline: no internet, throwaway database)")
         print("Both seekers below are SYNTHETIC. The job sample is a real capture "
@@ -267,7 +290,8 @@ def offline(keep: bool) -> int:
               f"{links() - before_links} new links, {left} notifiable")
         return 0
     finally:
-        store.close()
+        if store:
+            store.close()
         finish_dir(tmp, keep)
 
 
@@ -324,16 +348,30 @@ def live(n_terms: int, keep: bool, input_fn, sleep, scraper, seekers_dir) -> int
     total = sum(1 + n for n in searches.values())
 
     head("What will happen")
+    for name, cfg in cfgs.items():
+        c = cfg.canary
+        print(f"  health check for {name}: {c.search_term!r}, "
+              f"{'in ' + repr(c.location) if c.location else 'no location'}, "
+              f"{c.results_wanted} results")
     for folder, p in picked:
         for term in p.search_terms:
             print(f"  {folder}: {', '.join(p.sources)}; search {term!r} in {p.location!r}")
     print(f"Health checks: {len(cfgs)} (one per source)   Searches: {sum(searches.values())}")
     print(f"Total requests: {total}   Results per request: {RESULTS_PER_REQUEST}   "
           f"Pause between requests: at least {MIN_GAP_SECONDS:.0f} seconds")
+    print(f"Note: the limit of {MAX_REQUESTS} counts scraper calls. Each call may load up to "
+          "about two pages, so real page loads can be up to about twice the call count.")
     if total > MAX_REQUESTS:
         print(f"Refusing to start: {total} requests planned, limit is {MAX_REQUESTS}. "
               "Nothing was requested.")
         return 2
+
+    if input_fn is None:  # the real prompt: a person must be at the keyboard
+        if not sys.stdin.isatty():
+            print("Refusing to start: --live needs an interactive terminal so a person "
+                  "can type yes. Nothing was requested.")
+            return 2
+        input_fn = input
 
     real = scraper is None
     if real:
@@ -354,14 +392,15 @@ def live(n_terms: int, keep: bool, input_fn, sleep, scraper, seekers_dir) -> int
             return 1
 
         tmp = Path(tempfile.mkdtemp(prefix="jobpilot-demo-"))
-        store = Store(tmp / "demo.db")
+        store = None
         try:
+            store = Store(tmp / "demo.db")
             store.migrate()
             seekers = [(f, store.add_seeker(f, None, f"data/seekers/{f}/profile.yaml"))
                        for f, _ in picked]
             targets = [SeekerTarget(sid, p) for (_, sid), (_, p) in zip(seekers, picked)]
             sources, guards = make_sources(
-                list(cfgs.values()), scraper or _default_scraper, sleep, MIN_GAP_SECONDS,
+                list(cfgs.values()), scraper or real_scraper, sleep, MIN_GAP_SECONDS,
                 {"n": 0, "cap": MAX_REQUESTS}, watch)
             try:
                 results = run_discovery(store, sources, targets)
@@ -376,14 +415,15 @@ def live(n_terms: int, keep: bool, input_fn, sleep, scraper, seekers_dir) -> int
             never_told_twice(store, seekers)
             return 0
         finally:
-            store.close()
+            if store:
+                store.close()
             finish_dir(tmp, keep)
     finally:
         for lg in attached:
             lg.removeHandler(watch)
 
 
-def main(argv=None, *, input_fn=input, sleep=time.sleep, scraper=None,
+def main(argv=None, *, input_fn=None, sleep=time.sleep, scraper=None,
          seekers_dir=None) -> int:
     ap = argparse.ArgumentParser(description="JobPilot R1 demo (offline by default).")
     ap.add_argument("--live", action="store_true", help="small careful live Indeed check")
