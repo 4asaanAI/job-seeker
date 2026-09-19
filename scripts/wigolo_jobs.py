@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     done = subprocess.run(
         [exe, "fetch", args.url, "--render-js=always", "--json", "--include-full-markdown"],
-        capture_output=True, text=True, timeout=120, check=False,
+        capture_output=True, text=True, encoding="utf-8", timeout=120, check=False,
     )
     if done.returncode != 0:
         print(done.stderr.strip()[:500], file=sys.stderr)
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         print("wigolo returned non-JSON stdout", file=sys.stderr)
         return 3
     jobs = [j for j in parse_jobs(page.get("markdown", "")) if matches(j, args.query, args.location)]
-    print(json.dumps({"jobs": jobs}))
+    sys.stdout.buffer.write(json.dumps({"jobs": jobs}).encode("ascii"))
     return 0
 
 
