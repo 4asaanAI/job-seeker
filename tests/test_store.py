@@ -107,24 +107,171 @@ def test_title_and_location_are_last_writer_wins_across_sources(store):
     assert (row["title"], row["location"]) == ("Senior  Merchandiser", "Gurugram, Haryana")
 
 
-def test_edited_title_repoints_source_and_leaves_no_orphan(store):
-    old = store.upsert_posting(_posting(title="Senior Merchandiser"))
-    new = store.upsert_posting(_posting(title="Senior Merchandiser II"))
-    assert new != old
+def _count(store, sql, params=()):
+    return store.conn.execute(sql, params).fetchone()[0]
 
+
+def _score(store, sid, pid, fit, scored_at):
+    store.conn.execute(
+        "INSERT INTO scores (seeker_id, posting_id, fit_score, reasoning, scored_at) "
+        "VALUES (?,?,?,?,?)", (sid, pid, fit, "r", scored_at))
+    store.conn.commit()
+
+
+def _notify(store, sid, pid, kind="first"):
+    store.conn.execute(
+        "INSERT INTO notifications (seeker_id, posting_id, channel, kind, delivered_at) "
+        "VALUES (?,?,?,?,?)", (sid, pid, "telegram", kind, "2026-09-19T00:00:00"))
+    store.conn.commit()
+
+
+def test_title_edit_keeps_the_posting_id_and_leaves_no_sourceless_row(store):
+    original = store.upsert_posting(_posting(title="Senior Merchandiser"))
+    edited = store.upsert_posting(_posting(title="Senior Merchandiser II"))
+
+    assert edited == original
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 1
     rows = store.conn.execute(
         "SELECT posting_id FROM posting_sources WHERE source = 'naukri' AND external_id = 'X1'"
     ).fetchall()
-    assert [r["posting_id"] for r in rows] == [new]
-    # The pre-edit row keeps zero sources (deleting could break seeker_jobs FKs);
-    # the point is that the live listing resolves to `new`, never to the stale row.
-    sourceless = store.conn.execute(
-        "SELECT jp.id FROM job_postings jp "
-        "LEFT JOIN posting_sources ps ON ps.posting_id = jp.id "
-        "WHERE ps.posting_id IS NULL"
+    assert [r["posting_id"] for r in rows] == [original]
+    assert _count(
+        store,
+        "SELECT COUNT(*) FROM job_postings jp WHERE NOT EXISTS "
+        "(SELECT 1 FROM posting_sources ps WHERE ps.posting_id = jp.id)",
+    ) == 0
+    row = store.conn.execute(
+        "SELECT title, normalized_title FROM job_postings WHERE id = ?", (original,)
+    ).fetchone()
+    assert (row["title"], row["normalized_title"]) == (
+        "Senior Merchandiser II", "senior merchandiser ii")
+
+
+def test_notification_suppression_survives_a_title_edit(store):
+    """Headline promise: a job the seeker was told about is not re-announced
+    because a board edited its title. (Store.notifiable_postings arrives in a
+    later task; this asserts the state it reads: the notified posting id is
+    the one the edited listing resolves to, and no new unnotified link exists.)"""
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    pid = store.upsert_posting(_posting(title="Senior Merchandiser"))
+    store.link_posting(sid, pid)
+    _score(store, sid, pid, 90.0, "2026-09-19T01:00:00")
+    _notify(store, sid, pid, "first")
+
+    edited = store.upsert_posting(_posting(title="Senior Merchandiser II"))
+    store.link_posting(sid, edited)  # discovery links every posting it upserts
+
+    assert edited == pid
+    assert _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == 1
+    unnotified = store.conn.execute(
+        "SELECT sj.posting_id FROM seeker_jobs sj WHERE sj.seeker_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM notifications n WHERE n.seeker_id = sj.seeker_id "
+        "  AND n.posting_id = sj.posting_id AND n.kind = 'first')", (sid,)
     ).fetchall()
-    assert [r["id"] for r in sourceless] == [old]
-    assert store.upsert_posting(_posting(title="Senior Merchandiser II")) == new
+    assert unnotified == []
+
+
+def _two_known_roles(store):
+    """P = naukri listing of 'Sr Merch'; Q = indeed listing of 'Production Manager'."""
+    p = store.upsert_posting(_posting(source="naukri", external_id="n1", title="Sr Merch"))
+    q = store.upsert_posting(_posting(source="indeed", external_id="i1",
+                                      title="Production Manager"))
+    assert p != q
+    return p, q
+
+
+def test_edit_that_collides_with_a_known_role_merges_into_it(store):
+    p, q = _two_known_roles(store)
+    a = store.add_seeker("A", 1, "a.yaml", 20)
+    b = store.add_seeker("B", 2, "b.yaml", 20)
+    for sid in (a, b):
+        store.link_posting(sid, p)
+        store.link_posting(sid, q)
+    store.conn.execute("UPDATE seeker_jobs SET status = 'presented' "
+                       "WHERE seeker_id = ? AND posting_id = ?", (a, p))
+    store.conn.execute("UPDATE seeker_jobs SET status = 'scored' "
+                       "WHERE seeker_id = ? AND posting_id = ?", (a, q))
+    store.conn.commit()
+    _score(store, a, p, 80.0, "2026-09-19T09:00:00")   # later on P: P's survives for A
+    _score(store, a, q, 10.0, "2026-09-19T01:00:00")
+    _score(store, b, p, 20.0, "2026-09-19T01:00:00")
+    _score(store, b, q, 70.0, "2026-09-19T09:00:00")   # later on Q: Q's survives for B
+
+    merged = store.upsert_posting(_posting(source="naukri", external_id="n1",
+                                           title="Production Manager"))
+
+    assert merged == q
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 1
+    srcs = store.conn.execute(
+        "SELECT source, posting_id FROM posting_sources ORDER BY source").fetchall()
+    assert [(r["source"], r["posting_id"]) for r in srcs] == [("indeed", q), ("naukri", q)]
+    for sid in (a, b):
+        assert _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == 1
+    status = store.conn.execute(
+        "SELECT status FROM seeker_jobs WHERE seeker_id = ?", (a,)).fetchone()["status"]
+    assert status == "presented"
+    fit = {r["seeker_id"]: r["fit_score"] for r in store.conn.execute(
+        "SELECT seeker_id, fit_score FROM scores")}
+    assert fit == {a: 80.0, b: 70.0}
+
+
+def test_merge_moves_notification_history(store):
+    p, q = _two_known_roles(store)
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    store.link_posting(sid, p)
+    _notify(store, sid, p, "first")
+    store.record_event("seen", "x", seeker_id=sid, posting_id=p)
+
+    merged = store.upsert_posting(_posting(source="naukri", external_id="n1",
+                                           title="Production Manager"))
+    assert merged == q
+    store.link_posting(sid, merged)
+    notified = store.conn.execute(
+        "SELECT posting_id FROM notifications WHERE seeker_id = ? AND kind = 'first'",
+        (sid,)).fetchall()
+    assert [r["posting_id"] for r in notified] == [q]
+    assert _count(store, "SELECT COUNT(*) FROM events WHERE posting_id = ?", (q,)) == 1
+    assert _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == 1
+
+
+def test_merge_colliding_applications_keeps_one_row(store):
+    p, q = _two_known_roles(store)
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    store.conn.execute("INSERT INTO applications (seeker_id, posting_id, status, applied_at) "
+                       "VALUES (?,?,?,?)", (sid, p, "applied", "2026-09-18"))
+    store.conn.execute("INSERT INTO applications (seeker_id, posting_id, status) "
+                       "VALUES (?,?,?)", (sid, q, "interested"))
+    store.conn.commit()
+    store.upsert_posting(_posting(source="naukri", external_id="n1", title="Production Manager"))
+    rows = store.conn.execute("SELECT posting_id, status FROM applications").fetchall()
+    assert [(r["posting_id"], r["status"]) for r in rows] == [(q, "applied")]
+
+
+def test_failure_inside_a_merge_rolls_everything_back(store):
+    p, q = _two_known_roles(store)
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    store.link_posting(sid, p)
+    store.link_posting(sid, q)
+    _score(store, sid, p, 80.0, "2026-09-19T09:00:00")
+    _notify(store, sid, p, "first")
+    # Deleting the dropped posting is the merge's last step; make it blow up.
+    store.conn.execute("CREATE TRIGGER boom BEFORE DELETE ON job_postings "
+                       "BEGIN SELECT RAISE(ABORT, 'boom'); END")
+    store.conn.commit()
+
+    with pytest.raises(sqlite3.DatabaseError, match="boom"):
+        store.upsert_posting(_posting(source="naukri", external_id="n1",
+                                      title="Production Manager"))
+
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 2
+    srcs = store.conn.execute(
+        "SELECT source, posting_id FROM posting_sources ORDER BY source").fetchall()
+    assert [(r["source"], r["posting_id"]) for r in srcs] == [("indeed", q), ("naukri", p)]
+    assert _count(store, "SELECT COUNT(*) FROM seeker_jobs") == 2
+    assert _count(store, "SELECT COUNT(*) FROM scores WHERE posting_id = ?", (p,)) == 1
+    assert _count(store, "SELECT COUNT(*) FROM notifications WHERE posting_id = ?", (p,)) == 1
+    title = store.conn.execute("SELECT title FROM job_postings WHERE id = ?", (p,)).fetchone()
+    assert title["title"] == "Sr Merch"
 
 
 def test_company_renderings_merge(store):

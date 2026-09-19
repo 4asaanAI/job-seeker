@@ -13,6 +13,8 @@ from .models import Posting, Seeker, SeekerJob
 
 SCHEMA = Path(__file__).parent / "schema.sql"
 MAX_REASONING_CHARS = 300
+# Unknown (later-milestone) statuses rank above these, as more advanced.
+_STATUS_RANK = {"discovered": 0, "scored": 1, "presented": 2}
 
 
 def _now() -> str:
@@ -152,57 +154,91 @@ class Store:
         return self._row_to_seeker(row) if row else None
 
     # --- postings ------------------------------------------------------
+    def _resolve_hash(self, company: str, title: str, city: str) -> str:
+        """Content hash for a sighting, adopting an existing row that is the same role."""
+        h = _hash(company, title, city)
+        if city:
+            cityless = _hash(company, title, "")
+            if self.conn.execute(
+                "SELECT 1 FROM job_postings WHERE content_hash = ?", (cityless,)
+            ).fetchone():
+                return cityless
+            return h
+        # No city on this sighting: adopt the role if exactly one city-specific
+        # row exists for it; several cities is ambiguous, so stay separate.
+        # Trade-off: if only one city is known so far, a city-less sighting of a
+        # genuinely different-city role merges into it.
+        known = [
+            r["content_hash"] for r in self.conn.execute(
+                "SELECT company_name, content_hash FROM job_postings "
+                "WHERE normalized_title = ?", (title,)
+            ) if normalize_company(r["company_name"]) == company
+        ]
+        return known[0] if len(known) == 1 else h
+
     def upsert_posting(self, p: Posting) -> int:
         """One row per role across boards; one posting_sources row per board listing.
 
-        Identity is the content hash. A sighting with a city adopts an earlier
-        row that had no city (backfilling location); a sighting with no city
-        adopts the single city-specific row for the same company and title.
+        (source, external_id) is the primary identity: a listing a board edits
+        keeps its posting id, so seeker_jobs, scores and notifications follow it.
+        The content hash is secondary: it merges the same role seen on another
+        board, and if an edited listing becomes a role already known, the two
+        postings are merged.
         """
         company = normalize_company(p.company_name)
         title = normalize_title(p.title)
         city = normalize_location(p.location)
         now = _now()
         with self._lock, self.conn:
-            h = _hash(company, title, city)
-            if city:
-                cityless = _hash(company, title, "")
-                if self.conn.execute(
-                    "SELECT 1 FROM job_postings WHERE content_hash = ?", (cityless,)
-                ).fetchone():
-                    h = cityless
+            h = self._resolve_hash(company, title, city)
+            known = self.conn.execute(
+                "SELECT posting_id FROM posting_sources WHERE source = ? AND external_id = ?",
+                (p.source, p.external_id),
+            ).fetchone()
+            if known is not None:
+                posting_id = int(known["posting_id"])
+                other = self.conn.execute(
+                    "SELECT id FROM job_postings WHERE content_hash = ?", (h,)
+                ).fetchone()
+                if other is not None and other["id"] != posting_id:
+                    self._merge_postings(keep_id=other["id"], drop_id=posting_id)
+                    posting_id = int(other["id"])
+                self.conn.execute(
+                    """
+                    UPDATE job_postings SET
+                        last_seen_at     = ?,
+                        title            = ?,
+                        normalized_title = ?,
+                        content_hash     = ?,
+                        location         = COALESCE(?, location),
+                        description      = COALESCE(?, description),
+                        canonical_url    = COALESCE(canonical_url, ?),
+                        posted_at        = COALESCE(?, posted_at)
+                    WHERE id = ?
+                    """,
+                    (now, p.title, title, h, p.location, p.description,
+                     p.url, p.posted_at, posting_id),
+                )
             else:
-                # No city on this sighting: adopt the role if exactly one
-                # city-specific row exists for it. Several cities is ambiguous.
-                known = [
-                    r["content_hash"] for r in self.conn.execute(
-                        "SELECT company_name, content_hash FROM job_postings "
-                        "WHERE normalized_title = ?", (title,)
-                    ) if normalize_company(r["company_name"]) == company
-                ]
-                if len(known) == 1:
-                    h = known[0]
-            posting_id = self.conn.execute(
-                """
-                INSERT INTO job_postings (
-                    company_name, title, normalized_title, location,
-                    description, canonical_url, posted_at,
-                    first_seen_at, last_seen_at, content_hash
-                ) VALUES (?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(content_hash) DO UPDATE SET
-                    last_seen_at  = excluded.last_seen_at,
-                    title         = excluded.title,
-                    location      = COALESCE(excluded.location, job_postings.location),
-                    description   = COALESCE(excluded.description, job_postings.description),
-                    canonical_url = COALESCE(job_postings.canonical_url, excluded.canonical_url),
-                    posted_at     = COALESCE(excluded.posted_at, job_postings.posted_at)
-                RETURNING id
-                """,
-                (p.company_name, p.title, title, p.location,
-                 p.description, p.url, p.posted_at, now, now, h),
-            ).fetchone()["id"]
-            # A board can edit a title in place: repoint the source at the
-            # posting this sighting resolved to, or the old row is orphaned.
+                posting_id = int(self.conn.execute(
+                    """
+                    INSERT INTO job_postings (
+                        company_name, title, normalized_title, location,
+                        description, canonical_url, posted_at,
+                        first_seen_at, last_seen_at, content_hash
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(content_hash) DO UPDATE SET
+                        last_seen_at  = excluded.last_seen_at,
+                        title         = excluded.title,
+                        location      = COALESCE(excluded.location, job_postings.location),
+                        description   = COALESCE(excluded.description, job_postings.description),
+                        canonical_url = COALESCE(job_postings.canonical_url, excluded.canonical_url),
+                        posted_at     = COALESCE(excluded.posted_at, job_postings.posted_at)
+                    RETURNING id
+                    """,
+                    (p.company_name, p.title, title, p.location,
+                     p.description, p.url, p.posted_at, now, now, h),
+                ).fetchone()["id"])
             self.conn.execute(
                 "INSERT INTO posting_sources (posting_id, source, external_id, url, seen_at) "
                 "VALUES (?,?,?,?,?) "
@@ -211,7 +247,70 @@ class Store:
                 "seen_at = excluded.seen_at",
                 (posting_id, p.source, p.external_id, p.url, now),
             )
-            return int(posting_id)
+            return posting_id
+
+    def _merge_postings(self, keep_id: int, drop_id: int) -> None:
+        """Fold drop into keep. Caller holds the lock and the transaction."""
+        c = self.conn
+        c.execute("UPDATE posting_sources SET posting_id = ? WHERE posting_id = ?",
+                  (keep_id, drop_id))
+        c.execute(
+            "UPDATE job_postings SET first_seen_at = MIN(first_seen_at, "
+            "(SELECT first_seen_at FROM job_postings WHERE id = ?)) WHERE id = ?",
+            (drop_id, keep_id))
+
+        # seeker_jobs: one row per seeker, keeping the more advanced status.
+        for r in c.execute("SELECT * FROM seeker_jobs WHERE posting_id = ?",
+                           (drop_id,)).fetchall():
+            mine = c.execute(
+                "SELECT status FROM seeker_jobs WHERE seeker_id = ? AND posting_id = ?",
+                (r["seeker_id"], keep_id)).fetchone()
+            if mine is None:
+                c.execute("INSERT INTO seeker_jobs (seeker_id, posting_id, status, "
+                          "first_seen_at) VALUES (?,?,?,?)",
+                          (r["seeker_id"], keep_id, r["status"], r["first_seen_at"]))
+            elif _STATUS_RANK.get(r["status"], 3) > _STATUS_RANK.get(mine["status"], 3):
+                c.execute("UPDATE seeker_jobs SET status = ? "
+                          "WHERE seeker_id = ? AND posting_id = ?",
+                          (r["status"], r["seeker_id"], keep_id))
+        c.execute("DELETE FROM seeker_jobs WHERE posting_id = ?", (drop_id,))
+
+        # scores: one row per seeker, keeping the later scored_at.
+        for r in c.execute("SELECT * FROM scores WHERE posting_id = ?", (drop_id,)).fetchall():
+            mine = c.execute(
+                "SELECT scored_at FROM scores WHERE seeker_id = ? AND posting_id = ?",
+                (r["seeker_id"], keep_id)).fetchone()
+            if mine is not None and mine["scored_at"] >= r["scored_at"]:
+                c.execute("DELETE FROM scores WHERE seeker_id = ? AND posting_id = ?",
+                          (r["seeker_id"], drop_id))
+                continue
+            if mine is not None:
+                c.execute("DELETE FROM scores WHERE seeker_id = ? AND posting_id = ?",
+                          (r["seeker_id"], keep_id))
+            c.execute("UPDATE scores SET posting_id = ? WHERE seeker_id = ? AND posting_id = ?",
+                      (keep_id, r["seeker_id"], drop_id))
+
+        # applications: one row per seeker; an applied one beats one that is not.
+        for r in c.execute("SELECT * FROM applications WHERE posting_id = ?",
+                           (drop_id,)).fetchall():
+            mine = c.execute(
+                "SELECT applied_at FROM applications WHERE seeker_id = ? AND posting_id = ?",
+                (r["seeker_id"], keep_id)).fetchone()
+            if mine is not None and (mine["applied_at"] or not r["applied_at"]):
+                c.execute("DELETE FROM applications WHERE seeker_id = ? AND posting_id = ?",
+                          (r["seeker_id"], drop_id))
+                continue
+            if mine is not None:
+                c.execute("DELETE FROM applications WHERE seeker_id = ? AND posting_id = ?",
+                          (r["seeker_id"], keep_id))
+            c.execute("UPDATE applications SET posting_id = ? "
+                      "WHERE seeker_id = ? AND posting_id = ?",
+                      (keep_id, r["seeker_id"], drop_id))
+
+        for table in ("notifications", "events", "resume_versions"):
+            c.execute(f"UPDATE {table} SET posting_id = ? WHERE posting_id = ?",
+                      (keep_id, drop_id))
+        c.execute("DELETE FROM job_postings WHERE id = ?", (drop_id,))
 
     # --- seeker/posting links -----------------------------------------
     def link_posting(self, seeker_id: int, posting_id: int) -> None:
