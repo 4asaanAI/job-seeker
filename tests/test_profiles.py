@@ -5,10 +5,10 @@ from jobpilot.store.db import Store
 
 PROFILE = """
 name: Test Seeker
-headline: Senior Merchandiser - Product Development
+headline: Merchandiser - Sample Track
 location: Gurgaon
 sources: [naukri_in, indeed_in]
-accounts: [Ralph Lauren, Marks & Spencer]
+accounts: [Acme Apparel, Brand Two]
 search_terms:
   - merchandiser
   - product development merchandiser
@@ -36,7 +36,7 @@ def _write(tmp_path, text, name="profile.yaml"):
 def test_load_profile(tmp_path):
     prof = load_profile(_write(tmp_path, PROFILE))
     assert prof.name == "Test Seeker"
-    assert "Ralph Lauren" in prof.accounts
+    assert "Acme Apparel" in prof.accounts
     assert prof.min_score == 70.0
     assert prof.exclude_keywords == ["retail store"]
     assert prof.sources == ["naukri_in", "indeed_in"]

@@ -2,33 +2,29 @@
 
 **Date:** 2026-09-19
 **Status:** Awaiting review
-**Owner:** Abhimanyu Singh (operator) — built on behalf of Test Seeker (job seeker)
+**Owner:** Abhimanyu Singh (operator) — built on behalf of Alex (job seeker)
 
 ## 1. Context
 
-Test Seeker is a Senior Merchandiser (Product Development) at Acme Exports
-Pvt. Ltd., [redacted], living in Gurugram. She wants to move from the export
-house side to the **brand / buying office side** of apparel sourcing.
+Alex is a Senior Merchandiser (Product Development) on the export-house
+side of apparel, based in Gurugram. She wants to move to the **brand / buying
+office side** of apparel sourcing.
 
 She is non-technical. She will never run a command or read a log. Abhimanyu
 operates the system on her behalf. She struggles to sustain a job search on her
 own, so the system must reduce the effort of applying to near zero and nudge
 proactively.
 
-### Her profile (from resume, 2026-09-19)
+### Her profile (role-level facts only; personal details are kept out of this repository)
 
 | Field | Value |
 |---|---|
-| Current role | Senior Merchandiser - Product Development, Acme Exports ([redacted]) |
-| Prior | Merchandiser, Acme Exports ([redacted]); Management Trainee ([redacted]) |
-| Total experience | ~4 years, single employer |
-| Accounts handled | **Ralph Lauren (USA)**, **Marks & Spencer (UK)** |
+| Experience | About 4 years of product-development merchandising on the export-house side, single employer |
+| Accounts handled | Two named apparel brands, one US and one UK (the strongest targeting signal) |
 | Domain | Product development, costing & margin, TNA / critical path, sampling & approvals, vendor management, buyer communication |
-| Education | [redacted], [redacted], [redacted], [redacted] (confirmed) |
 | Location | Gurugram, India |
-| Contact | [redacted], [redacted] |
 
-**Ralph Lauren and M&S experience is the strongest targeting signal in the
+**Her two named-brand account experience is the strongest targeting signal in the
 profile.** Both maintain sourcing/buying offices in the Delhi NCR region. Job
 scoring weights account adjacency heavily.
 
@@ -356,7 +352,7 @@ This is enforced in the store layer, not left to callers.
 **Per job:** `brain.tailor(base_resume, job)` reframes export-side language into
 buying-office language. This is a genuine translation, not keyword insertion:
 "buyer PO execution and TNA follow-up" becomes "critical path ownership and
-supplier capability management". Ralph Lauren and M&S experience is surfaced
+supplier capability management". Her named-brand account experience is surfaced
 first whenever the target is a US/UK brand.
 
 **Hard rule:** the tailoring layer may reframe, reorder and re-emphasise. It
