@@ -162,7 +162,7 @@ def test_shipped_config_loads_and_every_source_is_market_tagged():
         assert s.country_indeed == ("usa" if key.endswith("_us") else "india"), key
     assert sites["naukri_in"].site == "naukri"
     assert sites["indeed_us"].site == "indeed"
-    assert sites["naukri_in"].enabled
+    assert not sites["naukri_in"].enabled
     assert sites["indeed_us"].enabled
     assert not sites["linkedin_in"].enabled
     assert not sites["linkedin_us"].enabled
