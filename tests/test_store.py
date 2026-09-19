@@ -37,6 +37,14 @@ def test_add_and_get_seeker(store):
     assert s.output_token  # random, non-empty
 
 
+def test_new_seeker_defaults_to_review_required(store):
+    """Spec 17.7: the first weeks of digests queue for the operator's
+    approval, per seeker, until cleared -- not a global mode. A newly
+    onboarded seeker must start gated even after others have been cleared."""
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    assert store.get_seeker(sid).review_required is True
+
+
 def test_get_unknown_seeker_raises_not_stopiteration(store):
     with pytest.raises(ValueError, match="no seeker"):
         store.get_seeker(9999)
@@ -846,3 +854,30 @@ def test_migrate_backfills_location_columns_on_an_existing_database(tmp_path):
 
     assert (row["location_city"], row["location_region"], row["location_country"]) == (
         "gurgaon", "haryana", "india")
+
+
+def test_migrate_adds_review_required_to_an_existing_database(tmp_path):
+    """A database created before spec 17.7's digest review gate has no
+    review_required column; migrate() must add it, defaulting existing (and
+    new) seekers to gated, not silently ungated."""
+    db_path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(db_path)
+    raw.execute(
+        "CREATE TABLE seekers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+        "telegram_user_id INTEGER UNIQUE, profile_path TEXT NOT NULL, "
+        "output_token TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, "
+        "daily_cap INTEGER NOT NULL DEFAULT 20)"
+    )
+    raw.execute(
+        "INSERT INTO seekers (name, profile_path, output_token) VALUES (?,?,?)",
+        ("Alex", "a.yaml", "tok"),
+    )
+    raw.commit()
+    raw.close()
+
+    s = Store(db_path)
+    s.migrate()
+    seeker = s.get_seeker(1)
+    s.close()
+
+    assert seeker.review_required is True

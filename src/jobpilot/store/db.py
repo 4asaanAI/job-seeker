@@ -83,21 +83,33 @@ class Store:
         with self._lock, self.conn:
             self.conn.executescript(SCHEMA.read_text(encoding="utf-8"))
             self._migrate_location_columns()
+            self._add_missing_columns("seekers", {"review_required": "INTEGER NOT NULL DEFAULT 1"})
+
+    def _add_missing_columns(self, table: str, columns: dict[str, str]) -> list[str]:
+        """Add any of `columns` (name -> SQL type/default) missing from `table`.
+
+        schema.sql's CREATE TABLE IF NOT EXISTS gives a fresh database every
+        column for free; an existing database needs them added by hand.
+        `table` and the keys of `columns` are always internal constants, never
+        caller-supplied, so building the ALTER TABLE text is safe. Returns the
+        names actually added, so a caller can backfill just those.
+        """
+        existing = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+        added = [c for c in columns if c not in existing]
+        for column in added:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {columns[column]}")
+        return added
 
     def _migrate_location_columns(self) -> None:
-        """Add location_city/region/country to a database that predates them.
-
-        schema.sql's CREATE TABLE IF NOT EXISTS gives a fresh database these
-        columns for free; an existing one needs them added and its rows'
-        free-text `location` parsed into them, or every old row stays a
-        city-less identity forever.
+        """Add location_city/region/country to a database that predates them,
+        and parse each existing row's free-text `location` into them -- or
+        every old row stays a city-less identity forever.
         """
-        existing = {r["name"] for r in self.conn.execute("PRAGMA table_info(job_postings)")}
-        missing = [c for c in _LOCATION_COLUMNS if c not in existing]
-        if not missing:
+        added = self._add_missing_columns(
+            "job_postings", {c: "TEXT NOT NULL DEFAULT ''" for c in _LOCATION_COLUMNS}
+        )
+        if not added:
             return
-        for column in missing:
-            self.conn.execute(f"ALTER TABLE job_postings ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         for row in self.conn.execute("SELECT id, location FROM job_postings").fetchall():
             city, region, country = parse_location(row["location"])
             self.conn.execute(
@@ -138,6 +150,7 @@ class Store:
             id=r["id"], name=r["name"], telegram_user_id=r["telegram_user_id"],
             profile_path=r["profile_path"], output_token=r["output_token"],
             active=bool(r["active"]), daily_cap=r["daily_cap"],
+            review_required=bool(r["review_required"]),
         )
 
     def list_seekers(self, active_only: bool = True) -> list[Seeker]:

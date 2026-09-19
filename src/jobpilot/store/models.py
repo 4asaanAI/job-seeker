@@ -13,6 +13,7 @@ class Seeker:
     output_token: str
     active: bool
     daily_cap: int
+    review_required: bool = True
 
 
 @dataclass(frozen=True)

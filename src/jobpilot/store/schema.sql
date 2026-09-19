@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS seekers (
     profile_path     TEXT NOT NULL,
     output_token     TEXT NOT NULL,
     active           INTEGER NOT NULL DEFAULT 1,
-    daily_cap        INTEGER NOT NULL DEFAULT 20
+    daily_cap        INTEGER NOT NULL DEFAULT 20,
+    -- Spec 17.7: the first weeks of digests queue for the operator's review
+    -- before reaching this seeker; a global flag would gate a later-onboarded
+    -- seeker the same as one already cleared, which is wrong.
+    review_required  INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS seeker_jobs (
