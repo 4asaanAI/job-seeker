@@ -1,0 +1,8 @@
+profile/
+*.db
+out/
+__pycache__/
+.venv/
+venv/
+*.pdf
+fixtures/live/
