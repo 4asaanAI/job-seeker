@@ -523,3 +523,44 @@ class Store:
             )
             for r in rows
         ]
+
+    # --- source health -------------------------------------------------
+    def record_source_run(
+        self, source: str, canary_ok: bool, canary_count: int, raw_count: int,
+        results_count: int, status: str, notes: str = "",
+        latency_ms: int | None = None, http_status_summary: str | None = None,
+    ) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO source_runs (source, run_at, canary_ok, canary_count, "
+                "raw_count, results_count, latency_ms, http_status_summary, status, notes) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (source, _now(), int(canary_ok), canary_count, raw_count,
+                 results_count, latency_ms, http_status_summary, status, notes[:2000]),
+            )
+
+    def recent_counts(self, source: str, limit: int) -> list[int]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT results_count FROM source_runs WHERE source = ? AND status = 'healthy' "
+                "ORDER BY id DESC LIMIT ?",
+                (source, limit),
+            ).fetchall()
+        return [int(r["results_count"]) for r in rows]
+
+    def source_health_summary(self, since: str | None = None) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT source, run_at, canary_ok, canary_count, raw_count, "
+                "       results_count, status, notes "
+                "FROM source_runs WHERE id IN "
+                "(SELECT MAX(id) FROM source_runs GROUP BY source) "
+                "ORDER BY source"
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            # A source whose last run predates the window is stale, not absent.
+            d["stale"] = bool(since is not None and d["run_at"] < since)
+            out.append(d)
+        return out
