@@ -431,6 +431,7 @@ class Store:
             )
 
     def unscored_jobs(self, seeker_id: int, limit: int) -> list[SeekerJob]:
+        limit = max(0, int(limit))  # SQLite treats a negative LIMIT as unlimited
         with self._lock:
             rows = self.conn.execute(
                 """
@@ -491,6 +492,7 @@ class Store:
     def notifiable_postings(
         self, seeker_id: int, min_score: float, limit: int
     ) -> list[SeekerJob]:
+        limit = max(0, int(limit))  # SQLite treats a negative LIMIT as unlimited
         with self._lock:
             rows = self.conn.execute(
                 """
@@ -543,6 +545,7 @@ class Store:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT results_count FROM source_runs WHERE source = ? AND status = 'healthy' "
+                "AND results_count > 0 "
                 "ORDER BY id DESC LIMIT ?",
                 (source, limit),
             ).fetchall()

@@ -22,7 +22,7 @@ def classify(
     point of the system is that "we got nothing" is only allowed to mean
     "there is nothing" when every other explanation has been ruled out.
     """
-    if error:
+    if error is not None:
         return (
             SourceStatus.ERROR,
             f"Source call failed: {error}. Result count carries no information.",
@@ -45,12 +45,12 @@ def classify(
         )
 
     usable = [h for h in history if h > 0]
-    if results_count > 0 and len(usable) >= MIN_HISTORY:
+    if len(usable) >= MIN_HISTORY:
         median = statistics.median(usable)
         if results_count < median * DEGRADED_FRACTION:
-            return (
-                SourceStatus.DEGRADED,
-                f"Returned {results_count} against a recent median of {median:.0f}.",
-            )
+            note = f"Returned {results_count} against a recent median of {median:.0f}."
+            if results_count == 0:
+                note += " Could be a block that began after the canary passed."
+            return (SourceStatus.DEGRADED, note)
 
     return (SourceStatus.HEALTHY, f"Returned {results_count} results.")

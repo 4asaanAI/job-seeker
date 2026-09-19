@@ -133,3 +133,18 @@ def test_notifying_an_unlinked_posting_raises_and_writes_nothing(store):
     store.link_posting(b, pid)
     store.record_score(b, pid, 95.0, "Strong fit", "claude")
     assert [j.posting_id for j in store.notifiable_postings(b, 70.0, 5)] == [pid]
+
+
+@pytest.mark.parametrize("limit", [-1, 0])
+def test_notifiable_postings_non_positive_limit_returns_nothing(store, limit):
+    """SQLite treats a negative LIMIT as unlimited; that must not leak."""
+    sid, _ = _seed(store)
+    assert store.notifiable_postings(sid, 70.0, limit) == []
+
+
+@pytest.mark.parametrize("limit", [-1, 0])
+def test_unscored_jobs_non_positive_limit_returns_nothing(store, limit):
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    pid = store.upsert_posting(_posting("n1", "Role One"))
+    store.link_posting(sid, pid)
+    assert store.unscored_jobs(sid, limit) == []
