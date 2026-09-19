@@ -24,6 +24,11 @@ class SiteConfig:
     results_wanted: int
     fetch_descriptions: bool
     canary: CanaryConfig
+    site: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.site:
+            object.__setattr__(self, "site", self.name)
 
 
 @dataclass(frozen=True)
@@ -72,6 +77,7 @@ def load_config(path: Path | None = None) -> Config:
                 results_wanted=int(c.get("results_wanted", 20)),
                 min_results=int(c["min_results"]),
             ),
+            site=block.get("site", name),
         )
 
     base = home

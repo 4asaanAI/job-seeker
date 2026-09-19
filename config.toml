@@ -6,50 +6,95 @@ out_dir = "out"
 score_batch = 40
 min_request_gap_seconds = 4.0
 
-[sites.naukri]
+# ---- India ----
+[sites.naukri_in]
+site = "naukri"
 enabled = true
 country_indeed = "india"
 hours_old = 168
 results_wanted = 50
 fetch_descriptions = true
 
-[sites.naukri.canary]
+[sites.naukri_in.canary]
 search_term = "merchandiser"
 results_wanted = 20
 min_results = 10
 
-[sites.indeed]
+[sites.indeed_in]
+site = "indeed"
 enabled = true
 country_indeed = "india"
 hours_old = 168
 results_wanted = 50
 fetch_descriptions = true
 
-[sites.indeed.canary]
+[sites.indeed_in.canary]
 search_term = "merchandiser"
 results_wanted = 20
 min_results = 5
 
-[sites.linkedin]
+[sites.linkedin_in]
+site = "linkedin"
 enabled = true
 country_indeed = "india"
 hours_old = 168
 results_wanted = 20
 fetch_descriptions = true
 
-[sites.linkedin.canary]
+[sites.linkedin_in.canary]
 search_term = "merchandiser"
 results_wanted = 10
 min_results = 3
 
-[sites.glassdoor]
+[sites.glassdoor_in]
+site = "glassdoor"
 enabled = false
 country_indeed = "india"
 hours_old = 168
 results_wanted = 20
 fetch_descriptions = false
 
-[sites.glassdoor.canary]
+[sites.glassdoor_in.canary]
 search_term = "merchandiser"
+results_wanted = 10
+min_results = 3
+
+# ---- United States ----
+[sites.indeed_us]
+site = "indeed"
+enabled = true
+country_indeed = "usa"
+hours_old = 168
+results_wanted = 50
+fetch_descriptions = true
+
+[sites.indeed_us.canary]
+search_term = "business analyst"
+results_wanted = 20
+min_results = 5
+
+[sites.linkedin_us]
+site = "linkedin"
+enabled = true
+country_indeed = "usa"
+hours_old = 168
+results_wanted = 20
+fetch_descriptions = true
+
+[sites.linkedin_us.canary]
+search_term = "business analyst"
+results_wanted = 10
+min_results = 3
+
+[sites.glassdoor_us]
+site = "glassdoor"
+enabled = false
+country_indeed = "usa"
+hours_old = 168
+results_wanted = 20
+fetch_descriptions = false
+
+[sites.glassdoor_us.canary]
+search_term = "business analyst"
 results_wanted = 10
 min_results = 3
