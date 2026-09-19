@@ -1,0 +1,55 @@
+[paths]
+data_dir = "data"
+out_dir = "out"
+
+[limits]
+score_batch = 40
+min_request_gap_seconds = 4.0
+
+[sites.naukri]
+enabled = true
+country_indeed = "india"
+hours_old = 168
+results_wanted = 50
+fetch_descriptions = true
+
+[sites.naukri.canary]
+search_term = "merchandiser"
+results_wanted = 20
+min_results = 10
+
+[sites.indeed]
+enabled = true
+country_indeed = "india"
+hours_old = 168
+results_wanted = 50
+fetch_descriptions = true
+
+[sites.indeed.canary]
+search_term = "merchandiser"
+results_wanted = 20
+min_results = 5
+
+[sites.linkedin]
+enabled = true
+country_indeed = "india"
+hours_old = 168
+results_wanted = 20
+fetch_descriptions = true
+
+[sites.linkedin.canary]
+search_term = "merchandiser"
+results_wanted = 10
+min_results = 3
+
+[sites.glassdoor]
+enabled = false
+country_indeed = "india"
+hours_old = 168
+results_wanted = 20
+fetch_descriptions = false
+
+[sites.glassdoor.canary]
+search_term = "merchandiser"
+results_wanted = 10
+min_results = 3
