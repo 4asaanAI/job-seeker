@@ -158,11 +158,14 @@ class Store:
         """Content hash for a sighting, adopting an existing row that is the same role."""
         h = _hash(company, title, city)
         if city:
+            # An exact-city row wins; only fall back to a city-less row when none
+            # exists, or a re-sighting of a known city listing would fold into it.
             cityless = _hash(company, title, "")
-            if self.conn.execute(
-                "SELECT 1 FROM job_postings WHERE content_hash = ?", (cityless,)
-            ).fetchone():
-                return cityless
+            for candidate in (h, cityless):
+                if self.conn.execute(
+                    "SELECT 1 FROM job_postings WHERE content_hash = ?", (candidate,)
+                ).fetchone():
+                    return candidate
             return h
         # No city on this sighting: adopt the role if exactly one city-specific
         # row exists for it; several cities is ambiguous, so stay separate.

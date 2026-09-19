@@ -299,6 +299,53 @@ def test_same_role_in_different_cities_is_not_merged(store):
     assert a != b
 
 
+def _three_known_shapes(store):
+    """Gurgaon, Mumbai and a country-only listing of the same company and title."""
+    g = store.upsert_posting(_posting(source="naukri", external_id="g1", location="Gurgaon, India"))
+    m = store.upsert_posting(_posting(source="naukri", external_id="m1", location="Mumbai, India"))
+    c = store.upsert_posting(_posting(source="indeed", external_id="c1", location="India"))
+    assert len({g, m, c}) == 3
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    store.link_posting(sid, g)
+    store.link_posting(sid, m)
+    _score(store, sid, g, 90.0, "2026-09-19T01:00:00")
+    _score(store, sid, m, 40.0, "2026-09-19T01:00:00")
+    return g, m, c, sid
+
+
+def test_resighting_a_city_listing_never_merges_it_into_the_cityless_row(store):
+    g, m, c, sid = _three_known_shapes(store)
+
+    again_g = store.upsert_posting(_posting(source="naukri", external_id="g1",
+                                            location="Gurgaon, India"))
+    again_m = store.upsert_posting(_posting(source="naukri", external_id="m1",
+                                            location="Mumbai, India"))
+
+    assert (again_g, again_m) == (g, m)
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 3
+    links = store.conn.execute(
+        "SELECT posting_id FROM seeker_jobs WHERE seeker_id = ? ORDER BY posting_id", (sid,)
+    ).fetchall()
+    assert [r["posting_id"] for r in links] == sorted([g, m])
+    fit = {r["posting_id"]: r["fit_score"] for r in store.conn.execute(
+        "SELECT posting_id, fit_score FROM scores WHERE seeker_id = ?", (sid,))}
+    assert fit == {g: 90.0, m: 40.0}
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "OPEN, awaiting coordinator ruling: a city-less re-sighting of a known city listing "
+    "resolves (ambiguous, several cities known) to the city-less row's hash and merges "
+    "into it. Remove this marker when fixed."))
+def test_resighting_a_city_listing_with_country_only_location_destroys_nothing(store):
+    g, m, c, sid = _three_known_shapes(store)
+
+    store.upsert_posting(_posting(source="naukri", external_id="g1", location="India"))
+
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 3
+    assert _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == 2
+    assert _count(store, "SELECT COUNT(*) FROM scores WHERE seeker_id = ?", (sid,)) == 2
+
+
 def test_cpp_and_csharp_titles_are_not_merged(store):
     a = store.upsert_posting(_posting(external_id="a", title="C++ Developer"))
     b = store.upsert_posting(_posting(external_id="b", title="C# Developer"))
