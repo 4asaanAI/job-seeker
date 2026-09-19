@@ -332,10 +332,6 @@ def test_resighting_a_city_listing_never_merges_it_into_the_cityless_row(store):
     assert fit == {g: 90.0, m: 40.0}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "OPEN, awaiting coordinator ruling: a city-less re-sighting of a known city listing "
-    "resolves (ambiguous, several cities known) to the city-less row's hash and merges "
-    "into it. Remove this marker when fixed."))
 def test_resighting_a_city_listing_with_country_only_location_destroys_nothing(store):
     g, m, c, sid = _three_known_shapes(store)
 
@@ -344,6 +340,133 @@ def test_resighting_a_city_listing_with_country_only_location_destroys_nothing(s
     assert _count(store, "SELECT COUNT(*) FROM job_postings") == 3
     assert _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == 2
     assert _count(store, "SELECT COUNT(*) FROM scores WHERE seeker_id = ?", (sid,)) == 2
+
+
+def test_known_single_city_listing_resighted_country_only_keeps_its_city(store):
+    """Only one city known: a country-only re-sighting must not overwrite it.
+
+    The board dropped the city from its own listing; that is not new location
+    information, so neither the stored string nor the identity may change.
+    """
+    pid = store.upsert_posting(_posting(source="naukri", external_id="g1",
+                                        location="Gurgaon, India"))
+    again = store.upsert_posting(_posting(source="naukri", external_id="g1",
+                                          location="India"))
+    assert again == pid
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 1
+    loc = store.conn.execute(
+        "SELECT location FROM job_postings WHERE id = ?", (pid,)).fetchone()["location"]
+    assert "Gurgaon" in loc
+
+
+def _world(store, world):
+    """Build one starting world and link a seeker with scores to its city rows.
+
+    P = Gurgaon (naukri/g1), M = Mumbai (naukri/m1), C = country-only (indeed/c1).
+    A world holding a city-less row but only ONE known city is not reachable
+    through upsert_posting: with a single city known, a city-less sighting is
+    adopted by it (Ruling 12), so "cityless" carries both cities as well.
+    The seeker is linked to P (and M), never to C, so a merge in either
+    direction moves rows rather than colliding: the counts below can only drop
+    if something was destroyed.
+    """
+    ids = {"P": store.upsert_posting(
+        _posting(source="naukri", external_id="g1", location="Gurgaon, India"))}
+    if world in ("cities", "cityless"):
+        ids["M"] = store.upsert_posting(
+            _posting(source="naukri", external_id="m1", location="Mumbai, India"))
+    if world == "cityless":
+        ids["C"] = store.upsert_posting(
+            _posting(source="indeed", external_id="c1", location="India"))
+    assert len(set(ids.values())) == len(ids)  # the world really has distinct rows
+
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    store.link_posting(sid, ids["P"])
+    _score(store, sid, ids["P"], 90.0, "2026-09-19T01:00:00")
+    if "M" in ids:
+        store.link_posting(sid, ids["M"])
+        _score(store, sid, ids["M"], 40.0, "2026-09-19T01:00:00")
+    return ids, sid
+
+
+# The whole identity matrix, as a specification:
+#   world  -- what already exists: "alone" = P only, "cities" = P + M,
+#             "cityless" = P + M + C.
+#   key    -- "known" re-sights naukri/g1 (P's own key); "unknown" is a new key.
+#   city   -- the sighting's location: same city as P, a different city, or
+#             country-only (no city token).
+#   rows   -- job_postings rows afterwards; id -- the posting id returned.
+_MATRIX = [
+    # --- world "alone": P (Gurgaon) is the only row ------------------------
+    ("alone", "known", "Gurgaon, India", 1, "P",
+     "Rule A: the key's own posting, and the city is unchanged"),
+    ("alone", "known", "Pune, India", 1, "P",
+     "Rule A: the board moved its own listing to Pune; identity follows it, no new row"),
+    ("alone", "known", "India", 1, "P",
+     "Rule B: no city token, so P's Gurgaon stands; Rule C: no exact collision, no merge"),
+    ("alone", "unknown", "Gurgaon, India", 1, "P",
+     "Rule D: the exact hash is P's, so another board's sighting of the same role folds in"),
+    ("alone", "unknown", "Pune, India", 2, "NEW",
+     "Rule D: a different city is a different role and no city-less row exists"),
+    ("alone", "unknown", "India", 1, "P",
+     "Rule D / Ruling 12: exactly one city known, so the city-less sighting adopts it"),
+    # --- world "cities": P (Gurgaon) and M (Mumbai) ------------------------
+    ("cities", "known", "Gurgaon, India", 2, "P",
+     "Rule A: the key's own posting; M is a different city and is untouched"),
+    ("cities", "known", "Pune, India", 2, "P",
+     "Rule A/C: P moves to Pune in place; no posting owns the Pune hash, so no merge"),
+    ("cities", "known", "India", 2, "P",
+     "Rule B: the sighting adds no location information, so P keeps Gurgaon"),
+    ("cities", "unknown", "Gurgaon, India", 2, "P",
+     "Rule D: exact hash match on P"),
+    ("cities", "unknown", "Pune, India", 3, "NEW",
+     "Rule D: no exact hash, no city-less row to fall back to, so a third city row"),
+    ("cities", "unknown", "India", 3, "NEW",
+     "Rule D: two cities known makes adoption ambiguous, so the city-less row stays apart"),
+    # --- world "cityless": P (Gurgaon), M (Mumbai), C (country-only) -------
+    ("cityless", "known", "Gurgaon, India", 3, "P",
+     "Rule A: the key's own posting; the city-less row C never captures it"),
+    ("cityless", "known", "Pune, India", 3, "P",
+     "Rule A/C: P moves to Pune in place; C does not own the Pune hash, so no merge"),
+    ("cityless", "known", "India", 3, "P",
+     "THE DEFECT: Rule A+B keep P's Gurgaon identity instead of folding it into C"),
+    ("cityless", "unknown", "Gurgaon, India", 3, "P",
+     "Rule D: exact hash match on P wins over the city-less fallback"),
+    ("cityless", "unknown", "Pune, India", 3, "C",
+     "Rule D: no exact hash, so the city-less fallback folds this sighting into C"),
+    ("cityless", "unknown", "India", 3, "C",
+     "Rule D: adoption is ambiguous with two cities, so the city-less hash finds C"),
+]
+
+
+@pytest.mark.parametrize(
+    "world,key,location,rows,expect,reason", _MATRIX,
+    ids=[f"{w}-{k}-{loc.split(',')[0].lower()}" for w, k, loc, _, _, _ in _MATRIX],
+)
+def test_sighting_identity_matrix(store, world, key, location, rows, expect, reason):
+    ids, sid = _world(store, world)
+    linked = _count(store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,))
+    fits_before = sorted(
+        r[0] for r in store.conn.execute(
+            "SELECT fit_score FROM scores WHERE seeker_id = ?", (sid,)))
+
+    source, external_id = ("naukri", "g1") if key == "known" else ("bright", "b1")
+    got = store.upsert_posting(
+        _posting(source=source, external_id=external_id, location=location))
+
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == rows, reason
+    if expect == "NEW":
+        assert got not in set(ids.values()), reason
+    else:
+        assert got == ids[expect], reason
+    # Nothing the seeker owns may be destroyed, whatever the sighting did.
+    assert _count(
+        store, "SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?", (sid,)) == linked, reason
+    assert _count(
+        store, "SELECT COUNT(*) FROM scores WHERE seeker_id = ?", (sid,)) == linked, reason
+    assert sorted(
+        r[0] for r in store.conn.execute(
+            "SELECT fit_score FROM scores WHERE seeker_id = ?", (sid,))) == fits_before, reason
 
 
 def test_cpp_and_csharp_titles_are_not_merged(store):

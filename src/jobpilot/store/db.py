@@ -155,7 +155,11 @@ class Store:
 
     # --- postings ------------------------------------------------------
     def _resolve_hash(self, company: str, title: str, city: str) -> str:
-        """Content hash for a sighting, adopting an existing row that is the same role."""
+        """Content hash for a sighting whose (source, external_id) is UNKNOWN.
+
+        A known key never comes here: its posting is already decided by its own
+        key (see `upsert_posting`), so neither fallback below may reassign it.
+        """
         h = _hash(company, title, city)
         if city:
             # An exact-city row wins; only fall back to a city-less row when none
@@ -187,24 +191,46 @@ class Store:
         The content hash is secondary: it merges the same role seen on another
         board, and if an edited listing becomes a role already known, the two
         postings are merged.
+
+        A known key is resolved by three rules, because a wrong merge destroys
+        a seeker's saved job and its score:
+          A. the sighting stays on the posting its key already names;
+          B. its effective location is the more specific of the sighting's and
+             the stored one, so a country-only sighting loses no city;
+          C. it merges only when a different posting owns that exact hash.
+        An unknown key keeps the hash path of `_resolve_hash`.
         """
         company = normalize_company(p.company_name)
         title = normalize_title(p.title)
         city = normalize_location(p.location)
         now = _now()
         with self._lock, self.conn:
-            h = self._resolve_hash(company, title, city)
             known = self.conn.execute(
                 "SELECT posting_id FROM posting_sources WHERE source = ? AND external_id = ?",
                 (p.source, p.external_id),
             ).fetchone()
             if known is not None:
+                # Rule A: this posting is this key's, whatever else exists.
                 posting_id = int(known["posting_id"])
+                stored_city = normalize_location(self.conn.execute(
+                    "SELECT location FROM job_postings WHERE id = ?", (posting_id,)
+                ).fetchone()["location"])
+                # Rule B: a sighting with no city token adds no location
+                # information, so the stored city and its rendering both stay;
+                # a sighting that has one wins.
+                if city or not stored_city:
+                    eff_city, eff_location = city, p.location
+                else:
+                    eff_city, eff_location = stored_city, None
+                h = _hash(company, title, eff_city)
+                # Rule C: merge only on an exact collision — the edited listing
+                # has become the same company, title and city as another row.
                 other = self.conn.execute(
-                    "SELECT id FROM job_postings WHERE content_hash = ?", (h,)
+                    "SELECT id FROM job_postings WHERE content_hash = ? AND id != ?",
+                    (h, posting_id),
                 ).fetchone()
-                if other is not None and other["id"] != posting_id:
-                    self._merge_postings(keep_id=other["id"], drop_id=posting_id)
+                if other is not None:
+                    self._merge_postings(keep_id=int(other["id"]), drop_id=posting_id)
                     posting_id = int(other["id"])
                 self.conn.execute(
                     """
@@ -219,10 +245,11 @@ class Store:
                         posted_at        = COALESCE(?, posted_at)
                     WHERE id = ?
                     """,
-                    (now, p.title, title, h, p.location, p.description,
+                    (now, p.title, title, h, eff_location, p.description,
                      p.url, p.posted_at, posting_id),
                 )
             else:
+                h = self._resolve_hash(company, title, city)
                 posting_id = int(self.conn.execute(
                     """
                     INSERT INTO job_postings (
