@@ -580,6 +580,39 @@ Not adopted, for three reasons:
 Recorded as a fallback with real numbers if ATS coverage proves insufficient.
 Revisit only with evidence, not in advance.
 
+### 17.5 Wigolo as the crawl layer (R4)
+
+`KnockOutEZ/wigolo` is already installed and in use on DESKTOP-G47CCOU as
+LayaaOS's main search-and-crawl path, with SearXNG as its fallback
+([[Projects/Layaa AI/open-source-tooling-shortlist]]). It gives agents web
+search, fetching and crawling on the operator's own machine with no API keys
+and no per-query cost.
+
+**Adopted for R4**, where it fills the exact gap this design has: tier-3 and
+tier-4 employers and buying agents with no usable ATS JSON endpoint. Those are
+generic career pages, which is crawling - and the LayaaOS sweep recorded that
+crawling had no service configured at all before Wigolo.
+
+Division of labour, so nothing is used for the wrong job:
+
+| Source | Tool | Why |
+|---|---|---|
+| Naukri, Indeed, LinkedIn, Glassdoor | JobSpy | Structured board results, already parsed |
+| Workday / SuccessFactors / Greenhouse / Lever employers | ATS JSON (R4) | Authoritative, complete, permitted, no parsing guesswork |
+| Employers with only an ordinary careers page | **Wigolo** | Real crawling, free, already running on the target machine |
+| One page needing JS interaction or a human-eye check | Claude's built-in browser | Interactive; too expensive for bulk |
+
+**Licence boundary, carried over from the vault's warning.** Wigolo is
+**AGPL-3.0**. It is safe to *run* as a separate tool and unsafe to *embed* in
+anything sold. JobPilot is a personal tool and is not sold, so this is not a
+problem here - but the boundary is kept anyway, because the same machine hosts
+commercial work: **JobPilot calls Wigolo as a separate process over its own
+interface and never vendors, imports or bundles its code.** Same treatment as
+[[Decisions/dify-licence]] and [[Decisions/gitnexus-licence]].
+
+**Cost:** none. It runs locally and is already provisioned. It also removes any
+remaining argument for Apify (§17.3).
+
 ### 17.4 Google Sheets as the seeker-facing view (M3)
 
 Each seeker gets a Google Sheet showing every job found, its score, its status
