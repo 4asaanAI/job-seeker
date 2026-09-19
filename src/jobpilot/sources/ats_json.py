@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from urllib.parse import parse_qs, quote, urlparse
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
@@ -17,7 +18,7 @@ from ..store.models import Posting
 from .base import MAX_DESCRIPTION_CHARS, safe_url
 
 
-COUNTRYWIDE = frozenset({"united states", "usa", "us", "india", "remote", "anywhere"})
+COUNTRYWIDE = frozenset({"united states", "usa", "us", "remote", "anywhere"})
 
 
 def _default_fetcher(url: str, timeout: float) -> object:
@@ -26,6 +27,18 @@ def _default_fetcher(url: str, timeout: float) -> object:
         if getattr(response, "status", 200) >= 400:
             raise RuntimeError(f"ATS endpoint returned HTTP {response.status}")
         return json.load(response)
+
+
+def _default_poster(url: str, body: dict, timeout: float) -> object:
+    request = Request(url, data=json.dumps(body).encode(), headers={
+        "User-Agent": "JobPilot/0.4", "Content-Type": "application/json",
+        "Accept": "application/json"})
+    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - config URL
+        return json.load(response)
+
+
+SEARCHED = frozenset({"workday_cxs", "oracle_hcm"})
+MAX_PAGES = 5
 
 
 def _text(value: Any) -> str:
@@ -78,7 +91,27 @@ def _items(payload: object, vendor: str) -> list[dict]:
 def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
     vendor = cfg.vendor
     row_company = ""
-    if vendor == "remoteok":
+    if vendor == "workday_cxs":
+        parts = urlparse(cfg.endpoint).path.strip("/").split("/")
+        site = parts[3] if len(parts) > 3 else ""
+        origin = "{0.scheme}://{0.netloc}".format(urlparse(cfg.endpoint))
+        external_id = _nested(item, "externalPath")
+        title = _nested(item, "title")
+        location = _nested(item, "locationsText")
+        url = f"{origin}/{site}{external_id}" if external_id else ""
+        description = ""
+        posted_at = ""
+    elif vendor == "oracle_hcm":
+        query = parse_qs(urlparse(cfg.endpoint).query)
+        site = (query.get("siteNumber") or ["CX_1"])[0]
+        origin = "{0.scheme}://{0.netloc}".format(urlparse(cfg.endpoint))
+        external_id = _nested(item, "Id")
+        title = _nested(item, "Title")
+        location = _nested(item, "PrimaryLocation")
+        url = f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{external_id}"
+        description = _nested(item, "ShortDescriptionStr")
+        posted_at = _nested(item, "PostedDate")
+    elif vendor == "remoteok":
         external_id = _nested(item, "id", "slug")
         title = _nested(item, "position")
         location = _nested(item, "location") or "Remote"
@@ -149,10 +182,13 @@ class ATSJsonSource:
         self,
         cfg: ATSConfig,
         fetcher: Callable[[str, float], object] | None = None,
+        poster: Callable[[str, dict, float], object] | None = None,
     ):
         self.cfg = cfg
         self.name = cfg.name
         self._fetcher = fetcher or _default_fetcher
+        self._poster = poster or _default_poster
+        self._terms: dict[str, tuple[list[dict], list[Posting]]] = {}
         self._rows: list[dict] | None = None
         self._postings: list[Posting] | None = None
 
@@ -167,14 +203,50 @@ class ATSJsonSource:
             self._rows, self._postings = rows, postings
         return self._rows, self._postings
 
+    def _fetch_term(self, term: str, pages: int = MAX_PAGES):
+        """Server-side keyword search for boards too large to download whole."""
+        key = (term or "").casefold().strip()
+        if key in self._terms and pages == MAX_PAGES:
+            return self._terms[key]
+        rows: list[dict] = []
+        timeout = self.cfg.fetch_timeout_seconds
+        for page in range(pages):
+            if self.cfg.vendor == "workday_cxs":
+                data = self._poster(self.cfg.endpoint, {
+                    "appliedFacets": {}, "limit": 20, "offset": page * 20,
+                    "searchText": key}, timeout)
+                batch = data.get("jobPostings", []) if isinstance(data, dict) else []
+                size = 20
+            else:
+                clean = re.sub(r"[^\w ]", " ", key).strip()
+                base = self.cfg.endpoint
+                site = (parse_qs(urlparse(base).query).get("siteNumber") or ["CX_1"])[0]
+                url = (base.split("?")[0] + "?onlyData=true&expand=requisitionList"
+                       f"&finder=findReqs;siteNumber={site},limit=50,offset={page * 50}"
+                       + (f",keyword={quote(clean)}" if clean else "")
+                       + ",sortBy=POSTING_DATES_DESC")
+                data = self._fetcher(url, timeout)
+                items = data.get("items", []) if isinstance(data, dict) else []
+                batch = (items[0].get("requisitionList", []) if items else [])
+                size = 50
+            rows.extend(b for b in batch if isinstance(b, dict))
+            if len(batch) < size:
+                break
+        postings = [p for row in rows if (p := _to_posting(row, self.cfg)) is not None]
+        if pages == MAX_PAGES:
+            self._terms[key] = (rows, postings)
+        return rows, postings
+
     def canary(self) -> tuple[bool, int, int]:
         """Fetch the configured endpoint and require normalized jobs."""
-        rows, postings = self._load()
+        rows, postings = (self._fetch_term("", pages=1)
+                          if self.cfg.vendor in SEARCHED else self._load())
         return len(postings) >= self.cfg.canary_min_results, len(rows), len(postings)
 
     def search(self, term: str, location: str | None) -> tuple[list[Posting], int]:
         """Filter the cached official ATS response for one seeker query."""
-        rows, postings = self._load()
+        rows, postings = (self._fetch_term(term) if self.cfg.vendor in SEARCHED
+                          else self._load())
         wanted = (term or "").casefold().strip()
         place = (location or "").casefold().strip()
         if place in COUNTRYWIDE:
@@ -183,7 +255,8 @@ class ATSJsonSource:
         for posting in postings:
             haystack = " ".join((posting.title, posting.company_name,
                                   posting.description or "")).casefold()
-            if wanted and wanted not in haystack:
+            if (wanted and self.cfg.vendor not in SEARCHED
+                    and wanted not in haystack):
                 continue
             if place and place not in (posting.location or "").casefold():
                 continue

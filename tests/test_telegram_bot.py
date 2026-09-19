@@ -212,3 +212,47 @@ def test_remote_feed_vendors_keep_each_rows_company():
                                                         "url": "https://remotive.com/9",
                                                         "candidate_required_location": "USA"}]})
     assert [j.company_name for j in rv.search("data", None)[0]] == ["Beta"]
+
+
+def test_workday_cxs_searches_server_side_and_builds_links():
+    from jobpilot.config import ATSConfig
+    from jobpilot.sources.ats_json import ATSJsonSource
+    calls = []
+
+    def poster(url, body, timeout):
+        calls.append(body)
+        rows = [{"title": "Merchandiser", "externalPath": f"/job/Gurgaon/M_{body['offset']}",
+                 "locationsText": "Gurgaon"} for _ in range(20 if body["offset"] < 20 else 3)]
+        return {"total": 23, "jobPostings": rows}
+
+    src = ATSJsonSource(ATSConfig(
+        name="pvh", vendor="workday_cxs", company_name="PVH", enabled=True,
+        endpoint="https://pvh.wd1.myworkdayjobs.com/wday/cxs/pvh/PVH_Careers/jobs"), poster=poster)
+    jobs, raw = src.search("senior merchandiser", "Gurgaon")
+    assert raw == 23 and len(jobs) == 23 and len(calls) == 2
+    assert calls[0]["searchText"] == "senior merchandiser"
+    assert jobs[0].url == "https://pvh.wd1.myworkdayjobs.com/PVH_Careers/job/Gurgaon/M_0"
+    src.search("senior merchandiser", "Gurgaon")
+    assert len(calls) == 2
+    assert src.canary()[0] and len(calls) == 3
+
+
+def test_oracle_hcm_builds_keyword_query_and_links():
+    from jobpilot.config import ATSConfig
+    from jobpilot.sources.ats_json import ATSJsonSource
+    urls = []
+
+    def fetcher(url, timeout):
+        urls.append(url)
+        return {"items": [{"requisitionList": [
+            {"Id": "77", "Title": "Sourcing Merchandiser", "PrimaryLocation": "Bangalore, India",
+             "PostedDate": "2026-09-19"}]}]}
+
+    src = ATSJsonSource(ATSConfig(
+        name="ms", vendor="oracle_hcm", company_name="M&S", enabled=True,
+        endpoint="https://x.fa.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?siteNumber=CX_1"),
+        fetcher=fetcher)
+    jobs, _ = src.search("merchandiser", "Bangalore")
+    assert "keyword=merchandiser" in urls[0] and "siteNumber=CX_1" in urls[0]
+    assert jobs[0].url == "https://x.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/77"
+    assert src.search("merchandiser", "Mumbai")[0] == []

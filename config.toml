@@ -207,3 +207,68 @@ vendor = "remotive"
 company_name = "Remotive"
 endpoint = "https://remotive.com/api/remote-jobs?limit=200"
 enabled = true
+
+# --- Workday and Oracle connectors (2026-09-20, live-tested) -------------
+# Server-side keyword search per employer; only the matched jobs are fetched.
+[ats_sources.pvh]
+vendor = "workday_cxs"
+company_name = "PVH"
+endpoint = "https://pvh.wd1.myworkdayjobs.com/wday/cxs/pvh/PVH_Careers/jobs"
+enabled = true
+
+[ats_sources.gap]
+vendor = "workday_cxs"
+company_name = "Gap Inc"
+endpoint = "https://gapinc.wd1.myworkdayjobs.com/wday/cxs/gapinc/GAPINC/jobs"
+enabled = true
+
+[ats_sources.target]
+vendor = "workday_cxs"
+company_name = "Target"
+endpoint = "https://target.wd5.myworkdayjobs.com/wday/cxs/target/targetcareers/jobs"
+enabled = true
+
+[ats_sources.nike]
+vendor = "workday_cxs"
+company_name = "Nike"
+endpoint = "https://nike.wd1.myworkdayjobs.com/wday/cxs/nike/nke/jobs"
+enabled = true
+
+[ats_sources.marks_and_spencer]
+vendor = "oracle_hcm"
+company_name = "Marks & Spencer"
+endpoint = "https://fa-eqid-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&siteNumber=CX_1"
+enabled = true
+
+# --- More Lever/Ashby boards, live-tested 2026-09-20 ----------------------
+[wigolo_sources.openai]
+company_name = "OpenAI"
+endpoint = "https://jobs.ashbyhq.com/openai"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "engineer"
+enabled = true
+fetch_timeout_seconds = 180.0
+
+[wigolo_sources.linear]
+company_name = "Linear"
+endpoint = "https://jobs.ashbyhq.com/linear"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "engineer"
+enabled = true
+fetch_timeout_seconds = 180.0
+
+[wigolo_sources.snowflake]
+company_name = "Snowflake"
+endpoint = "https://jobs.ashbyhq.com/snowflake"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "manager"
+enabled = true
+fetch_timeout_seconds = 180.0
+
+[wigolo_sources.vanta]
+company_name = "Vanta"
+endpoint = "https://jobs.ashbyhq.com/vanta"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "manager"
+enabled = true
+fetch_timeout_seconds = 180.0
