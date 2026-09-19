@@ -693,6 +693,12 @@ ledger and tenancy are market-neutral already.
   recorded as an optional profile field and read by their rubric. It is never
   inferred from a name, a nationality or where someone studied.
 
+**Startups and US seekers (R4 note).** Startups mostly publish jobs through Greenhouse,
+Lever and Ashby, whose public job boards are readable as JSON. The R4 ATS fetchers
+therefore serve a "startups preferred" seeker directly. Startup-specific boards such as
+Wellfound and Y Combinator's Work at a Startup are worth evaluating in R4, but their terms
+on automated access must be checked before either is scraped.
+
 ### 17.4 Google Sheets as the seeker-facing view (M3)
 
 Each seeker gets a Google Sheet showing every job found, its score, its status
