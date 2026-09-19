@@ -30,8 +30,8 @@ def test_parse_jobs_extracts_title_url_location():
     assert jobs[0]["external_id"] != jobs[1]["external_id"]
 
 
-def test_matches_filters_query_and_location():
+def test_matches_filters_on_title_only():
     jobs = wj.parse_jobs(MD)
     assert [j["title"] for j in jobs if wj.matches(j, "accountant", None)] == ["Staff Accountant"]
-    assert [j["title"] for j in jobs if wj.matches(j, "", "atlanta")] == ["Staff Accountant"]
+    assert len([j for j in jobs if wj.matches(j, "", "atlanta")]) == 3
     assert wj.parse_jobs("no links here") == []

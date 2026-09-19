@@ -135,3 +135,61 @@ fetch_descriptions = false
 search_term = "business analyst"
 results_wanted = 10
 min_results = 3
+
+# --- Employers chosen from seekers' resumes (live-tested 2026-09-19) ------
+# Lever and Ashby boards are crawled by Wigolo through scripts/wigolo_jobs.py.
+# {python} and {home} are expanded by JobPilot at run time.
+[wigolo_sources.palantir]
+company_name = "Palantir"
+endpoint = "https://jobs.lever.co/palantir"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "manager"
+enabled = true
+fetch_timeout_seconds = 180.0
+
+[wigolo_sources.ramp]
+company_name = "Ramp"
+endpoint = "https://jobs.ashbyhq.com/ramp"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "manager"
+enabled = true
+fetch_timeout_seconds = 180.0
+
+[wigolo_sources.notion]
+company_name = "Notion"
+endpoint = "https://jobs.ashbyhq.com/notion"
+command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
+canary_term = "manager"
+enabled = true
+fetch_timeout_seconds = 180.0
+
+# Greenhouse boards use the official public JSON feed.
+[ats_sources.anthropic]
+vendor = "greenhouse"
+company_name = "Anthropic"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/anthropic/jobs"
+enabled = true
+
+[ats_sources.databricks]
+vendor = "greenhouse"
+company_name = "Databricks"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/databricks/jobs"
+enabled = true
+
+[ats_sources.figma]
+vendor = "greenhouse"
+company_name = "Figma"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/figma/jobs"
+enabled = true
+
+[ats_sources.airbnb]
+vendor = "greenhouse"
+company_name = "Airbnb"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs"
+enabled = true
+
+[ats_sources.stripe]
+vendor = "greenhouse"
+company_name = "Stripe"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/stripe/jobs"
+enabled = true

@@ -10,10 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from datetime import datetime
 from typing import Any, Callable
 
 from ..config import WigoloConfig
+from ..paths import jobpilot_home
 from ..store.models import Posting
 from .base import MAX_DESCRIPTION_CHARS, safe_url
 
@@ -52,7 +54,10 @@ class WigoloSource:
         self._runner = runner or subprocess.run
 
     def _run(self, term: str, location: str | None) -> tuple[list[Posting], int]:
-        command = [*self.cfg.command, "--url", self.cfg.endpoint,
+        home = str(jobpilot_home())
+        base = [part.replace("{python}", sys.executable).replace("{home}", home)
+                for part in self.cfg.command]
+        command = [*base, "--url", self.cfg.endpoint,
                    "--query", term, "--format", "json"]
         if location:
             command.extend(["--location", location])

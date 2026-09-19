@@ -13,6 +13,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
+from pathlib import Path
+
+CACHE_SECONDS = 1800
 
 LINK = re.compile(r"^#{1,6}\s*\[(?P<title>[^\]]+)\]\((?P<url>https?://[^)\s]+)\)\s*$")
 
@@ -36,11 +41,30 @@ def parse_jobs(markdown: str) -> list[dict]:
     return jobs
 
 
-def matches(job: dict, query: str, location: str | None) -> bool:
+def matches(job: dict, query: str, location: str | None = None) -> bool:
+    """Title match only; location is left to scoring (boards use many formats)."""
     words = [w for w in re.findall(r"\w+", query.lower()) if len(w) > 2]
-    if words and not any(w in job["title"].lower() for w in words):
-        return False
-    return not location or location.lower() in job["location"].lower()
+    return not words or any(w in job["title"].lower() for w in words)
+
+
+def fetch_markdown(url: str, exe: str) -> str:
+    """Fetch through Wigolo, reusing a 30-minute cache so repeated queries are cheap."""
+    cache = Path(tempfile.gettempdir()) / ("wigolo_jobs_" + hashlib.sha256(url.encode()).hexdigest()[:16] + ".md")
+    if cache.exists() and time.time() - cache.stat().st_mtime < CACHE_SECONDS:
+        return cache.read_text(encoding="utf-8")
+    done = subprocess.run(
+        [exe, "fetch", url, "--render-js=always", "--json", "--include-full-markdown"],
+        capture_output=True, text=True, encoding="utf-8", timeout=120, check=False,
+    )
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.strip()[:500] or f"wigolo exited {done.returncode}")
+    try:
+        markdown = json.loads(done.stdout).get("markdown", "")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("wigolo returned non-JSON stdout") from exc
+    if markdown:
+        cache.write_text(markdown, encoding="utf-8")
+    return markdown
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,19 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     if not exe:
         print("wigolo executable not found on PATH", file=sys.stderr)
         return 2
-    done = subprocess.run(
-        [exe, "fetch", args.url, "--render-js=always", "--json", "--include-full-markdown"],
-        capture_output=True, text=True, encoding="utf-8", timeout=120, check=False,
-    )
-    if done.returncode != 0:
-        print(done.stderr.strip()[:500], file=sys.stderr)
-        return done.returncode
     try:
-        page = json.loads(done.stdout)
-    except json.JSONDecodeError:
-        print("wigolo returned non-JSON stdout", file=sys.stderr)
+        markdown = fetch_markdown(args.url, exe)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         return 3
-    jobs = [j for j in parse_jobs(page.get("markdown", "")) if matches(j, args.query, args.location)]
+    jobs = [j for j in parse_jobs(markdown) if matches(j, args.query)]
     sys.stdout.buffer.write(json.dumps({"jobs": jobs}).encode("ascii"))
     return 0
 

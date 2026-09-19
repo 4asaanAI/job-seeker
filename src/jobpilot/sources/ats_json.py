@@ -17,6 +17,9 @@ from ..store.models import Posting
 from .base import MAX_DESCRIPTION_CHARS, safe_url
 
 
+COUNTRYWIDE = frozenset({"united states", "usa", "us", "india", "remote", "anywhere"})
+
+
 def _default_fetcher(url: str, timeout: float) -> object:
     request = Request(url, headers={"User-Agent": "JobPilot/0.3"})
     with urlopen(request, timeout=timeout) as response:  # noqa: S310 - config URL
@@ -153,6 +156,8 @@ class ATSJsonSource:
         rows, postings = self._load()
         wanted = (term or "").casefold().strip()
         place = (location or "").casefold().strip()
+        if place in COUNTRYWIDE:
+            place = ""
         found = []
         for posting in postings:
             haystack = " ".join((posting.title, posting.company_name,
