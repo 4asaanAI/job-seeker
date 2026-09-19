@@ -23,6 +23,7 @@ from .sheets import GoogleSheetsExporter, load_google_services
 from .sources.ats_json import ATSJsonSource
 from .sources.jsonld_source import JsonLdSource
 from .sources.jobspy_source import JobSpySource
+from .sources.wigolo_source import WigoloSource
 from .store.db import Store
 
 UNTRUSTED = (
@@ -374,6 +375,52 @@ def build_tools(
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
+    def set_job_status(seeker_id: int, posting_id: int, status: str) -> dict:
+        """Record a seeker's explicit shortlist/skip/defer/expiry decision."""
+        try:
+            sid = _check(seeker_id)
+            store.set_job_status(sid, int(posting_id), status)
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id),
+                "status": status}
+
+    def record_application(
+        seeker_id: int,
+        posting_id: int,
+        status: str,
+        notes: str = "",
+        resume_version_id: int | None = None,
+    ) -> dict:
+        """Record a seeker-approved application transition and optional resume version."""
+        try:
+            sid = _check(seeker_id)
+            store.record_application(
+                sid, int(posting_id), status, notes, resume_version_id
+            )
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id),
+                "status": status}
+
+    def my_applications(seeker_id: int, limit: int = 100) -> dict:
+        """List only this seeker's application records."""
+        try:
+            sid = _check(seeker_id)
+            return {"ok": True, "seeker_id": sid,
+                    "items": store.applications(sid, limit)}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_followups(seeker_id: int, limit: int = 5) -> dict:
+        """List deliberate three-day nudges and seven-day expiry candidates."""
+        try:
+            sid = _check(seeker_id)
+            return {"ok": True, "seeker_id": sid,
+                    "items": store.pending_followups(sid, limit)}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
     tools: dict[str, Callable] = {
         "resolve_telegram_sender": resolve_telegram_sender,
         "get_scoring_batch": get_scoring_batch,
@@ -392,6 +439,10 @@ def build_tools(
         "resume_facts": resume_facts,
         "render_resume": render_resume,
         "my_resumes": my_resumes,
+        "set_job_status": set_job_status,
+        "record_application": record_application,
+        "my_applications": my_applications,
+        "get_followups": get_followups,
     }
 
     if not operator_mode:
@@ -450,6 +501,11 @@ def build_tools(
             JsonLdSource(scfg)
             for scfg in cfg.structured_sources.values()
             if scfg.enabled
+        )
+        sources.extend(
+            WigoloSource(wcfg)
+            for wcfg in cfg.wigolo_sources.values()
+            if wcfg.enabled
         )
         results = run_discovery(store, sources, targets)
         return {

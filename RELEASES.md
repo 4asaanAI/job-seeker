@@ -175,3 +175,18 @@ unconfigured.
 
 Gate evidence: **319 offline tests passed**. No Google service-account or
 Telegram credential was committed or exercised.
+
+The R4 discovery boundary is complete in code with a separate-process Wigolo
+adapter. It accepts an operator-configured wrapper contract, uses argv without
+shell execution, applies the same canary/health isolation as other sources,
+and keeps the AGPL component outside this repository. The current machine did
+not expose a `wigolo` executable, so no live Wigolo source is enabled.
+
+Gate evidence: **322 offline tests passed**. No crawl process was started.
+
+The final workflow increment adds seeker-controlled job status transitions,
+application records tied to validated resume versions, one-time follow-up
+nudge/expiry candidates, and notification suppression for completed/skipped
+roles.
+
+Gate evidence: **324 offline tests passed**.

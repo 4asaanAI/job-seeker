@@ -54,6 +54,19 @@ class StructuredConfig:
 
 
 @dataclass(frozen=True)
+class WigoloConfig:
+    name: str
+    company_name: str
+    endpoint: str
+    command: tuple[str, ...]
+    canary_term: str
+    canary_location: str | None
+    enabled: bool
+    canary_min_results: int = 1
+    fetch_timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
 class Config:
     home: Path
     data_dir: Path
@@ -63,6 +76,7 @@ class Config:
     sites: dict[str, SiteConfig]
     ats_sources: dict[str, ATSConfig] = field(default_factory=dict)
     structured_sources: dict[str, StructuredConfig] = field(default_factory=dict)
+    wigolo_sources: dict[str, WigoloConfig] = field(default_factory=dict)
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -162,6 +176,38 @@ def load_config(path: Path | None = None) -> Config:
             fetch_timeout_seconds=timeout,
         )
 
+    wigolo_sources: dict[str, WigoloConfig] = {}
+    for name, block in raw.get("wigolo_sources", {}).items():
+        endpoint = str(block.get("endpoint", "")).strip()
+        if not endpoint.startswith(("https://", "http://")):
+            raise ValueError(f"Wigolo source '{name}' endpoint must be an HTTP(S) URL")
+        company_name = str(block.get("company_name", name)).strip()
+        command_raw = block.get("command", [])
+        if not isinstance(command_raw, list) or not command_raw or not all(command_raw):
+            raise ValueError(
+                f"Wigolo source '{name}' command must be a non-empty argv list"
+            )
+        canary_term = str(block.get("canary_term", "")).strip()
+        if not canary_term:
+            raise ValueError(f"Wigolo source '{name}' canary_term must not be empty")
+        minimum = int(block.get("canary_min_results", 1))
+        if minimum < 1:
+            raise ValueError(f"Wigolo source '{name}' canary_min_results must be >= 1")
+        timeout = float(block.get("fetch_timeout_seconds", 30.0))
+        if not isfinite(timeout) or timeout <= 0:
+            raise ValueError(f"Wigolo source '{name}' fetch_timeout_seconds must be > 0")
+        wigolo_sources[name] = WigoloConfig(
+            name=name,
+            company_name=company_name,
+            endpoint=endpoint,
+            command=tuple(str(item) for item in command_raw),
+            canary_term=canary_term,
+            canary_location=block.get("canary_location"),
+            enabled=bool(block.get("enabled", False)),
+            canary_min_results=minimum,
+            fetch_timeout_seconds=timeout,
+        )
+
     base = home
     return Config(
         home=base,
@@ -172,4 +218,5 @@ def load_config(path: Path | None = None) -> Config:
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,
+        wigolo_sources=wigolo_sources,
     )

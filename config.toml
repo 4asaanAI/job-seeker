@@ -20,6 +20,19 @@ min_request_gap_seconds = 4.0
 # canary_min_results = 1
 # fetch_timeout_seconds = 20.0
 
+# Separate-process Wigolo wrapper (R4). JobPilot never imports or bundles
+# Wigolo. The command must print the documented JSON contract to stdout.
+#
+# [wigolo_sources.example_careers]
+# company_name = "Example employer"
+# endpoint = "https://careers.example.test/jobs"
+# command = ["wigolo-wrapper"]
+# canary_term = "business analyst"
+# canary_location = "Austin"
+# enabled = false
+# canary_min_results = 1
+# fetch_timeout_seconds = 30.0
+
 # Ordinary career page with JobPosting JSON-LD (Layer 2). This is deliberately
 # separate from ATS JSON: the endpoint is an HTML page, not a guessed API.
 #

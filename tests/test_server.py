@@ -273,3 +273,39 @@ def test_resume_tools_refuse_unlinked_postings_and_path_escape(operator):
     refused = tools["render_resume"](sid, other, "base.yaml")
     assert refused["ok"] is False
     assert "linked" in refused["error"]
+
+
+def test_seeker_actions_and_application_records_are_scoped(operator):
+    tools, store = operator
+    sid, pid = _seed(store)
+
+    assert tools["set_job_status"](sid, pid, "shortlisted")["ok"] is True
+    assert tools["record_application"](
+        sid, pid, "applied", notes="submitted on employer portal"
+    )["ok"] is True
+    applications = tools["my_applications"](sid)
+    assert applications["ok"] is True
+    assert applications["items"][0]["status"] == "applied"
+    assert store.seeker_jobs(sid)[0].status == "applied"
+    assert tools["get_notifiable"](sid, 70, 5) == []
+
+    other = store.add_seeker("Other", 2, "other.yaml", 20)
+    refused = tools["record_application"](other, pid, "applied")
+    assert refused["ok"] is False
+    assert "not linked" in refused["error"]
+
+
+def test_followups_are_one_time_nudge_then_expiry(operator):
+    tools, store = operator
+    sid, pid = _seed(store)
+    assert tools["record_score"](sid, pid, 90, "fit")["ok"]
+    assert tools["record_notification"](sid, pid, "test", "first")["ok"]
+    store.conn.execute(
+        "UPDATE notifications SET delivered_at = '2026-09-10T00:00:00+00:00' "
+        "WHERE seeker_id = ? AND posting_id = ? AND kind = 'first'", (sid, pid)
+    )
+    followup = tools["get_followups"](sid)
+    assert followup["ok"] is True
+    assert followup["items"][0]["kind"] == "expiry"
+    assert tools["record_notification"](sid, pid, "test", "expiry")["ok"]
+    assert tools["get_followups"](sid)["items"] == []

@@ -130,6 +130,12 @@ For a JSON-LD career page, use `[structured_sources.<key>]` with
 source key to the seeker's profile. A page with no valid `JobPosting` records
 is blocked/error rather than reported as a quiet employer.
 
+For a career page that needs crawling, use `[wigolo_sources.<key>]` with an
+operator-provided `command` argv list. JobPilot invokes that command as a
+separate process with `--url`, `--query`, optional `--location`, and
+`--format json`; stdout must be a list or `{ "jobs": [...] }`. JobPilot does
+not import, vendor, or bundle Wigolo. No Wigolo command is enabled by default.
+
 ## 7. Resume output and Telegram
 
 Create a private `base_resume.yaml` under `data/seekers/<name>/`. The schema is
@@ -157,6 +163,12 @@ The Windows checkout contains `.mcp.telegram.json.example` and
 For a digest, call `build_plain_digest(record=false)`, send its returned
 `text`, and call `record_notification` only after the Telegram reply succeeds.
 The HTML digest is never sent through Telegram.
+
+After a seeker responds, use `set_job_status` for `shortlisted`, `skipped`, or
+`deferred`, and `record_application` for `started`, `applied`, `interview`,
+`rejected`, or `offer`. `my_applications` and `get_followups` are scoped to the
+same seeker; follow-ups are one-time three-day nudges or seven-day expiry
+records, not repeated daily notifications.
 
 ## 8. Scheduled routine and Sheets view
 

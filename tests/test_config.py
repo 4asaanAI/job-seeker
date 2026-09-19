@@ -252,3 +252,29 @@ fetch_timeout_seconds = 8.0
     assert cfg.structured_sources["acme_careers"].company_name == "Acme & Co"
     assert cfg.structured_sources["acme_careers"].canary_min_results == 2
     assert cfg.structured_sources["acme_careers"].enabled is False
+
+
+def test_load_config_reads_disabled_wigolo_process_source(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text(
+        GOOD + """
+
+[wigolo_sources.acme_careers]
+company_name = "Acme & Co"
+endpoint = "https://careers.example.test/jobs"
+command = ["wigolo-wrapper"]
+canary_term = "analyst"
+canary_location = "Austin"
+enabled = false
+canary_min_results = 1
+fetch_timeout_seconds = 12.0
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(f)
+
+    source = cfg.wigolo_sources["acme_careers"]
+    assert source.command == ("wigolo-wrapper",)
+    assert source.canary_term == "analyst"
+    assert source.enabled is False

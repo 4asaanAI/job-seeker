@@ -18,7 +18,9 @@ the employer careers page. Structured `JobPosting` JSON-LD pages are now also
 supported as separately configured Layer 2 sources. The official Telegram
 plugin is installed on the Windows desktop, and JobPilot now has a plain-text
 digest plus a pinned, restricted launcher; a bot token and pairing are still
-operator setup steps. Wigolo integration remains later. The MCP
+operator setup steps. A separate-process Wigolo wrapper boundary is now
+supported for ordinary career pages, but no Wigolo executable is currently
+configured on this machine. The MCP
 surface also includes per-seeker status/history views, watchlists, and
 explicit one-page browser-investigation handoffs.
 

@@ -17,6 +17,13 @@ SCHEMA = Path(__file__).parent / "schema.sql"
 MAX_REASONING_CHARS = 300
 # Unknown (later-milestone) statuses rank above these, as more advanced.
 _STATUS_RANK = {"discovered": 0, "scored": 1, "presented": 2}
+JOB_STATUSES = {
+    "discovered", "scored", "shortlisted", "presented", "applied",
+    "skipped", "deferred", "expired",
+}
+APPLICATION_STATUSES = {
+    "started", "applied", "withdrawn", "rejected", "interview", "offer",
+}
 
 # Columns added after the original schema; migrate() adds and backfills any
 # that are missing from a database created before they existed.
@@ -652,9 +659,11 @@ class Store:
                 (seeker_id, posting_id, channel, kind, _now(), message_ref),
             )
             self.conn.execute(
-                "UPDATE seeker_jobs SET status = 'presented' "
-                "WHERE seeker_id = ? AND posting_id = ? AND status = 'scored'",
-                (seeker_id, posting_id),
+                "UPDATE seeker_jobs SET status = CASE WHEN ? = 'expiry' "
+                "THEN 'expired' WHEN ? = 'first' AND status = 'scored' "
+                "THEN 'presented' ELSE status END "
+                "WHERE seeker_id = ? AND posting_id = ?",
+                (kind, kind, seeker_id, posting_id),
             )
 
     def notifiable_postings(
@@ -673,6 +682,7 @@ class Store:
                   ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id
                 WHERE sj.seeker_id = ?
                   AND s.fit_score >= ?
+                  AND sj.status NOT IN ('skipped', 'applied', 'expired')
                   AND NOT EXISTS (
                         SELECT 1 FROM notifications n
                         WHERE n.seeker_id = sj.seeker_id
@@ -1012,3 +1022,117 @@ class Store:
                 (machine,),
             ).fetchone()
         return dict(row) if row else None
+
+    # --- seeker actions and applications ------------------------------
+    def set_job_status(self, seeker_id: int, posting_id: int, status: str) -> None:
+        if status not in JOB_STATUSES:
+            raise ValueError(f"unknown job status: {status}")
+        with self._lock, self.conn:
+            updated = self.conn.execute(
+                "UPDATE seeker_jobs SET status = ? WHERE seeker_id = ? AND posting_id = ?",
+                (status, seeker_id, posting_id),
+            ).rowcount
+            if updated != 1:
+                raise ValueError(
+                    f"posting {posting_id} is not linked to seeker {seeker_id}"
+                )
+            self.conn.execute(
+                "INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (seeker_id, posting_id, "job_status", status, _now()),
+            )
+
+    def record_application(
+        self,
+        seeker_id: int,
+        posting_id: int,
+        status: str,
+        notes: str = "",
+        resume_version_id: int | None = None,
+    ) -> None:
+        if status not in APPLICATION_STATUSES:
+            raise ValueError(f"unknown application status: {status}")
+        clean_notes = " ".join(str(notes or "").split())[:1000]
+        with self._lock, self.conn:
+            if not self.is_linked(seeker_id, posting_id):
+                raise ValueError(
+                    f"posting {posting_id} is not linked to seeker {seeker_id}"
+                )
+            if resume_version_id is not None:
+                valid = self.conn.execute(
+                    "SELECT 1 FROM resume_versions WHERE id = ? AND seeker_id = ? "
+                    "AND posting_id = ? AND extraction_ok = 1",
+                    (resume_version_id, seeker_id, posting_id),
+                ).fetchone()
+                if valid is None:
+                    raise ValueError("resume_version_id is not a validated version for this posting")
+            applied_at = _now() if status in ("started", "applied") else None
+            self.conn.execute(
+                "INSERT INTO applications "
+                "(seeker_id, posting_id, status, resume_version_id, applied_at, notes) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(seeker_id, posting_id) DO UPDATE SET "
+                "status=excluded.status, resume_version_id=excluded.resume_version_id, "
+                "applied_at=COALESCE(excluded.applied_at, applications.applied_at), "
+                "notes=excluded.notes",
+                (seeker_id, posting_id, status, resume_version_id, applied_at, clean_notes),
+            )
+            if status == "applied":
+                self.conn.execute(
+                    "UPDATE seeker_jobs SET status = 'applied' "
+                    "WHERE seeker_id = ? AND posting_id = ?",
+                    (seeker_id, posting_id),
+                )
+            self.conn.execute(
+                "INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (seeker_id, posting_id, "application", status, _now()),
+            )
+
+    def applications(self, seeker_id: int, limit: int = 100) -> list[dict]:
+        limit = max(0, min(int(limit), 500))
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT a.seeker_id, a.posting_id, a.status, a.resume_version_id, "
+                "       a.applied_at, a.response_at, a.notes, jp.title, "
+                "       jp.company_name, jp.canonical_url AS url "
+                "FROM applications a JOIN job_postings jp ON jp.id = a.posting_id "
+                "WHERE a.seeker_id = ? ORDER BY COALESCE(a.applied_at, '') DESC, "
+                "a.posting_id DESC LIMIT ?",
+                (seeker_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def pending_followups(self, seeker_id: int, limit: int = 5) -> list[dict]:
+        """Return deliberate 3-day nudges and 7-day expiry candidates."""
+        limit = max(0, min(int(limit), 100))
+        now = datetime.now(timezone.utc)
+        nudge_cutoff = (now - timedelta(days=3)).isoformat()
+        expiry_cutoff = (now - timedelta(days=7)).isoformat()
+        with self._lock:
+            self.get_seeker(seeker_id)
+            rows = self.conn.execute(
+                "SELECT n.posting_id, MIN(n.delivered_at) AS first_delivered_at, "
+                "       jp.title, jp.company_name, jp.canonical_url AS url, "
+                "       s.fit_score, s.reasoning, sj.status "
+                "FROM notifications n JOIN job_postings jp ON jp.id = n.posting_id "
+                "JOIN seeker_jobs sj ON sj.seeker_id = n.seeker_id "
+                "   AND sj.posting_id = n.posting_id "
+                "LEFT JOIN scores s ON s.seeker_id = n.seeker_id "
+                "   AND s.posting_id = n.posting_id "
+                "WHERE n.seeker_id = ? AND n.kind = 'first' "
+                "  AND n.delivered_at <= ? "
+                "  AND sj.status NOT IN ('skipped', 'applied', 'expired') "
+                "  AND NOT EXISTS (SELECT 1 FROM notifications later "
+                "                  WHERE later.seeker_id = n.seeker_id "
+                "                    AND later.posting_id = n.posting_id "
+                "                    AND later.kind IN ('nudge', 'expiry')) "
+                "GROUP BY n.posting_id ORDER BY first_delivered_at ASC LIMIT ?",
+                (seeker_id, nudge_cutoff, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["kind"] = "expiry" if item["first_delivered_at"] <= expiry_cutoff else "nudge"
+            result.append(item)
+        return result
