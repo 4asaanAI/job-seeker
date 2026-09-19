@@ -116,3 +116,20 @@ def test_unscored_jobs_is_per_seeker(store):
 
     assert [j.posting_id for j in store.unscored_jobs(a, 10)] == [pa]
     assert [j.posting_id for j in store.unscored_jobs(b, 10)] == [pb]
+
+
+def test_notifying_an_unlinked_posting_raises_and_writes_nothing(store):
+    a = store.add_seeker("Alex", 1, "a.yaml", 20)
+    b = store.add_seeker("Priya", 2, "b.yaml", 20)
+    pid = store.upsert_posting(_posting())
+    store.link_posting(a, pid)
+
+    with pytest.raises(ValueError, match="not linked"):
+        store.record_notification(b, pid, "digest", "first")
+
+    assert store.conn.execute("SELECT COUNT(*) FROM notifications").fetchone()[0] == 0
+    assert store.conn.in_transaction is False
+
+    store.link_posting(b, pid)
+    store.record_score(b, pid, 95.0, "Strong fit", "claude")
+    assert [j.posting_id for j in store.notifiable_postings(b, 70.0, 5)] == [pid]

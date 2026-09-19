@@ -470,6 +470,12 @@ class Store:
         if kind not in ("first", "nudge", "expiry"):
             raise ValueError(f"unknown notification kind: {kind}")
         with self._lock, self.conn:
+            if not self.is_linked(seeker_id, posting_id):
+                raise ValueError(
+                    f"posting {posting_id} is not linked to seeker {seeker_id}; "
+                    "refusing to record a notification that would suppress a job "
+                    "the seeker has not been shown"
+                )
             self.conn.execute(
                 "INSERT INTO notifications "
                 "(seeker_id, posting_id, channel, kind, delivered_at, message_ref) "
