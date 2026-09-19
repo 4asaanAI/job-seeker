@@ -1,6 +1,6 @@
 [project]
 name = "jobpilot"
-version = "0.1.0"
+version = "0.3.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "python-jobspy @ git+https://github.com/speedyapply/JobSpy@fda080a373e8226f3fd60635323f5da9af9892b1",

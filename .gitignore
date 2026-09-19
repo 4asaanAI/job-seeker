@@ -15,6 +15,10 @@ out/
 venv/
 __pycache__/
 *.pyc
+*.egg-info/
 *.pdf
 .env
 tests/fixtures/live/
+
+# Local Claude handoff transcript; never publish conversation history.
+2026-09-19-143438-local-command-caveatcaveat-the-messages-below.txt

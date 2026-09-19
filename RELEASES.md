@@ -101,4 +101,29 @@ Released locally on 2026-09-19 as annotated tag `v0.2.0` at commit `80df9d9`.
 
 ## v0.3.0 - R3 Claude-driven on the desktop
 
-_Not yet released._
+Implemented locally on 2026-09-19. Release/tagging waits for the deployment
+gate on the Windows desktop.
+
+### What shipped
+- FastMCP stdio server with operator and seeker tool surfaces.
+- Process-level `JOBPILOT_SEEKER_ID` pinning and verified Telegram-sender
+  resolution, preventing cross-seeker roster or job-history access.
+- Operator discovery, source-health, scoring, notification, and HTML-digest
+  tools with docstrings exposed to the MCP client.
+- Windows `run.ps1`, an MCP configuration example, live smoke wrapper, and
+  redacted fixture-capture script.
+- LinkedIn source entries disabled and excluded from the live server path;
+  JobPilot does not contact LinkedIn.
+
+### Gate evidence so far
+- Full offline suite: **283 passed**.
+- FastMCP registration is checked after installing the declared dependency in
+  the local environment; the Windows deployment and live source gate remain
+  outstanding.
+- Repository: `https://github.com/4asaanAI/job-seeker`.
+
+### Remaining R3 gate
+- Install the project on the Windows desktop at `E:\Github\Aasaan AI\jobpilot\`.
+- Run `run.ps1 -Task test` and the guarded `run.ps1 -Task smoke`.
+- Register the MCP server with Claude Code and perform one operator `discover`
+  call through MCP.

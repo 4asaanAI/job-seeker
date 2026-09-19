@@ -1,8 +1,8 @@
-# JobPilot v0.2 usage
+# JobPilot v0.3 usage
 
-The repository is now merged into `main` at tag `v0.2.0`. R2 is a local Python
-engine; it does not yet include a web UI, Telegram bot, or MCP server. Those
-interfaces belong to R3.
+The repository is now on `main` with the R3 MCP server. The supported operator
+interface is Claude Code (or another MCP client); there is no browser UI yet.
+Telegram delivery remains a later, separately secured integration.
 
 ## 1. Verify the safe offline demo
 
@@ -52,14 +52,43 @@ The generated file is under the configured output directory:
 out/seekers/<seeker-id>-<output-token>/digest-<timestamp>.html
 ```
 
-Open that HTML file in a browser to inspect the current R2 digest. The
-`review_required` flag is stored per seeker, but the approval workflow that
-enforces it is R3 work.
+Open that HTML file in a browser to inspect the current digest. The
+`review_required` flag is stored per seeker; an operator approval workflow for
+Telegram rollout remains a later channel-integration step.
 
-## 4. Telegram / UI status
+## 4. Start the MCP server through Claude Code
 
-There is currently no Telegram bot or browser UI to connect to. Do not create a
-Telegram token or expect `/start` to work against this checkout yet. R3 must
-first add `src/jobpilot/server.py`, its MCP tools, sender-ID scoping, and the
-Telegram channel registration. Until then, the offline/live demo and the HTML
-digest are the supported manual interfaces.
+Install the declared dependencies, then register the local stdio server:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+claude mcp add jobpilot --scope user -- \
+  "$PWD/.venv/bin/python" -m jobpilot.server
+```
+
+The operator surface provides `list_seekers`, `add_seeker`, `discover`, and
+`source_health`, plus the scoring and digest tools. Ask Claude to run
+`discover`, then request a scoring batch, record scores, and build a digest.
+The server resolves relative profile paths from `JOBPILOT_HOME`, not from the
+client's current directory.
+
+For a seeker-facing process, set `JOBPILOT_SEEKER_ID` to one database seeker
+ID. That process exposes no roster or discovery tools and refuses requests for
+other seeker IDs. `resolve_telegram_sender` is the only supported mapping from
+a verified numeric Telegram sender to a seeker; Telegram transport itself is
+not included yet.
+
+## 5. Windows entry point
+
+From the deployed checkout on the Windows desktop:
+
+```powershell
+.\run.ps1 -Task test
+.\run.ps1 -Task smoke
+.\run.ps1 -Task serve
+```
+
+`smoke` is a live public-site check and requires the explicit `--yes` guard.
+It skips LinkedIn by policy. `capture_fixture.py` is also live-only and must
+not be run in a loop; it refuses empty, malformed, or description-free data.

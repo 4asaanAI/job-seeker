@@ -164,7 +164,8 @@ def test_shipped_config_loads_and_every_source_is_market_tagged():
     assert sites["indeed_us"].site == "indeed"
     assert sites["naukri_in"].enabled
     assert sites["indeed_us"].enabled
-    assert sites["linkedin_us"].enabled
+    assert not sites["linkedin_in"].enabled
+    assert not sites["linkedin_us"].enabled
     assert not sites["glassdoor_in"].enabled
     assert not sites["glassdoor_us"].enabled
     assert not {"naukri", "indeed", "linkedin", "glassdoor"} & sites.keys()

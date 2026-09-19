@@ -35,7 +35,7 @@ min_results = 5
 
 [sites.linkedin_in]
 site = "linkedin"
-enabled = true
+enabled = false
 country_indeed = "india"
 hours_old = 168
 results_wanted = 20
@@ -75,7 +75,7 @@ min_results = 5
 
 [sites.linkedin_us]
 site = "linkedin"
-enabled = true
+enabled = false
 country_indeed = "usa"
 hours_old = 168
 results_wanted = 20

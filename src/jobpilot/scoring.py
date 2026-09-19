@@ -76,10 +76,17 @@ def _is_target_company(company_name: str, targets: list[str]) -> bool:
 
 
 def build_scoring_batch(
-    store: Store, seeker_id: int, profile: Profile, limit: int
+    store: Store, seeker_id: int, profile: Profile, limit: int,
+    profile_path: Path | None = None,
 ) -> dict:
-    """Everything Claude needs to score one batch for one seeker."""
+    """Everything Claude needs to score one batch for one seeker.
+
+    ``profile_path`` lets callers such as the MCP server resolve relative
+    paths against ``JOBPILOT_HOME`` instead of the process current directory.
+    The default preserves the library interface used by existing callers.
+    """
     seeker = store.get_seeker(seeker_id)
+    resolved_profile_path = profile_path or Path(seeker.profile_path)
     jobs = []
     for job in store.unscored_jobs(seeker_id, limit):
         jobs.append({
@@ -92,7 +99,7 @@ def build_scoring_batch(
         })
     return {
         "seeker_id": seeker_id,
-        "rubric": load_rubric(Path(seeker.profile_path), profile.rubric),
+        "rubric": load_rubric(resolved_profile_path, profile.rubric),
         "profile_summary": _profile_summary(profile),
         "jobs": jobs,
         "note": UNTRUSTED_NOTE,
