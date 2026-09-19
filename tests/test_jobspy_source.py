@@ -185,3 +185,18 @@ def test_scraper_exception_propagates_so_the_caller_can_label_it():
     src = JobSpySource(make_cfg(), scraper=boom, sleeper=no_sleep)
     with pytest.raises(RuntimeError, match="429"):
         src.canary()
+
+
+def test_real_indeed_us_capture_normalises():
+    """Captured, not hand-written: the adapter must cope with real Indeed rows."""
+    path = Path(__file__).parent / "fixtures" / "jobspy_indeed_us.json"
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    src = JobSpySource(make_cfg(name="indeed"), scraper=lambda **kw: rows, sleeper=no_sleep)
+    postings, raw = src.search("product analyst", "United States")
+
+    assert raw == 10
+    # One captured row has no company name; the adapter rejects it as unusable.
+    assert len(postings) == 9
+    assert all(p.source == "indeed" and p.external_id.startswith("in-") for p in postings)
+    assert all(p.description and p.title for p in postings)
+    assert len({p.external_id for p in postings}) == 9

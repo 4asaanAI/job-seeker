@@ -3,7 +3,7 @@ name = "jobpilot"
 version = "0.2.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "python-jobspy @ git+https://github.com/speedyapply/JobSpy@main",
+    "python-jobspy @ git+https://github.com/speedyapply/JobSpy@fda080a373e8226f3fd60635323f5da9af9892b1",
     "fastmcp>=2.0.0,<5.0.0",
     "PyYAML>=6.0,<7.0",
     "Jinja2>=3.1,<4.0",
