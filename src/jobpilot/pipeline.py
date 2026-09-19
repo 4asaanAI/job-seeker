@@ -7,9 +7,20 @@ from dataclasses import dataclass
 from .profiles import Profile
 from .sources.base import SourceResult, SourceStatus
 from .sources.health import classify
-from .sources.jobspy_source import JobSpySource
 from .store.db import Store
 from .store.models import Posting
+
+
+class DiscoverySource:
+    """Structural source contract shared by JobSpy and official ATS adapters."""
+
+    name: str
+
+    def canary(self) -> tuple[bool, int, int]:
+        raise NotImplementedError
+
+    def search(self, term: str, location: str | None) -> tuple[list[Posting], int]:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -49,7 +60,7 @@ def _plan_searches(
 
 
 def _run_one_site(
-    store: Store, source: JobSpySource, targets: list[SeekerTarget]
+    store: Store, source: DiscoverySource, targets: list[SeekerTarget]
 ) -> SourceResult:
     """Everything for one site, isolated. A failure here reaches no other site.
 
@@ -125,7 +136,7 @@ def _persist(
 
 
 def run_discovery(
-    store: Store, sources: list[JobSpySource], targets: list[SeekerTarget]
+    store: Store, sources: list[DiscoverySource], targets: list[SeekerTarget]
 ) -> list[SourceResult]:
     """Run each subscribed site independently; one result and row per site.
 

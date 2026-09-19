@@ -7,13 +7,17 @@ ledger.
 
 ## Current status
 
-R3 adds the MCP server and Windows entry point. Indeed India/US is currently
+R3 adds the MCP server and Windows entry point. The post-R3 line also includes
+the first R4 building block: config-driven official ATS JSON adapters for
+Greenhouse, Lever, Workday, and SuccessFactors. Indeed India/US is currently
 enabled. Naukri India is kept in the configuration but disabled after its live
 canary returned HTTP 406 (recaptcha required); re-enable it only after a
 deliberate cooldown retry. LinkedIn is intentionally not contacted.
-Telegram delivery and ATS-specific employer-board adapters are later work.
-The current MCP surface also includes per-seeker status/history views,
-watchlists, and explicit one-page browser-investigation handoffs.
+No ATS endpoint is enabled until its exact public JSON URL is verified against
+the employer careers page. Telegram delivery, structured career-page parsing,
+Wigolo integration, and resume generation remain later milestones. The MCP
+surface also includes per-seeker status/history views, watchlists, and
+explicit one-page browser-investigation handoffs.
 
 ## macOS development
 

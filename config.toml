@@ -6,6 +6,20 @@ out_dir = "out"
 score_batch = 40
 min_request_gap_seconds = 4.0
 
+# ---- Official employer ATS JSON (R4) ----
+# Add one block per verified public JSON endpoint, then add the same source key
+# to the seeker's profile. Keep these disabled until the endpoint has been
+# checked against its employer careers page. JobPilot never guesses endpoints
+# from a careers URL and never accepts an endpoint from a seeker message.
+#
+# [ats_sources.example_greenhouse]
+# vendor = "greenhouse" # greenhouse | lever | workday | successfactors
+# company_name = "Example employer"
+# endpoint = "https://boards.greenhouse.io/example/jobs.json"
+# enabled = false
+# canary_min_results = 1
+# fetch_timeout_seconds = 20.0
+
 # ---- India ----
 [sites.naukri_in]
 site = "naukri"

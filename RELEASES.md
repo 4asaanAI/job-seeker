@@ -135,7 +135,7 @@ and MCP registration gate.
 - Run `discover` only when you want a fresh live search; the operator surface
   is intentionally separate from a pinned seeker-facing process.
 
-## Main after v0.3.0 - M2 interface groundwork
+## Main after v0.3.0 - M2 interface and R4 ATS groundwork
 
 The post-R3 main line adds the seeker-scoped introspection and watchlist tools:
 `my_status`, `my_sources`, `my_history`, `add_target_company`,
@@ -143,6 +143,14 @@ The post-R3 main line adds the seeker-scoped introspection and watchlist tools:
 The browser tools are honest handoffs to Claude's one-page browser; they do not
 pretend that the MCP server itself performed a live verification.
 
-Gate evidence: **287 offline tests passed**. ATS JSON fetchers, Wigolo, the
-resume engine, Telegram transport, and Google Sheets remain subsequent
-milestones.
+Gate evidence for the interface groundwork: **287 offline tests passed**.
+Wigolo, the resume engine, Telegram transport, and Google Sheets remain
+subsequent milestones.
+
+The next R4 increment now adds the vendor-neutral official ATS JSON contract:
+config validation, Greenhouse/Lever/Workday/SuccessFactors normalization,
+one-response-per-source caching, local term/location filtering, URL safety, and
+discovery-pipeline health isolation. No production endpoint is enabled by
+default because the exact employer tenant URLs still need operator verification.
+
+Gate evidence: **300 offline tests passed**. No live ATS endpoint was contacted.

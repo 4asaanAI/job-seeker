@@ -169,3 +169,64 @@ def test_shipped_config_loads_and_every_source_is_market_tagged():
     assert not sites["glassdoor_in"].enabled
     assert not sites["glassdoor_us"].enabled
     assert not {"naukri", "indeed", "linkedin", "glassdoor"} & sites.keys()
+
+
+def test_load_config_reads_disabled_ats_source_without_network(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text(
+        GOOD + """
+
+[ats_sources.acme_greenhouse]
+vendor = "greenhouse"
+company_name = "Acme & Co"
+endpoint = "https://boards.greenhouse.io/acme/jobs.json"
+enabled = false
+canary_min_results = 2
+fetch_timeout_seconds = 7.5
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(f)
+
+    assert cfg.ats_sources["acme_greenhouse"].vendor == "greenhouse"
+    assert cfg.ats_sources["acme_greenhouse"].company_name == "Acme & Co"
+    assert cfg.ats_sources["acme_greenhouse"].canary_min_results == 2
+    assert cfg.ats_sources["acme_greenhouse"].fetch_timeout_seconds == 7.5
+    assert cfg.ats_sources["acme_greenhouse"].enabled is False
+
+
+@pytest.mark.parametrize(
+    "field, value, message",
+    [
+        ("vendor", '"unknown"', "unsupported vendor"),
+        ("endpoint", '"file:///tmp/jobs.json"', r"HTTP\(S\) URL"),
+        ("canary_min_results", "0", "min_results"),
+        ("fetch_timeout_seconds", "0", "timeout"),
+    ],
+)
+def test_invalid_ats_source_configuration_is_rejected(tmp_path, field, value, message):
+    values = {
+        "vendor": '"greenhouse"',
+        "company_name": '"Bad"',
+        "endpoint": '"https://example.test/jobs.json"',
+        "enabled": "false",
+        "canary_min_results": "1",
+        "fetch_timeout_seconds": "20",
+    }
+    values[field] = value
+    body = f"""
+
+[ats_sources.bad]
+vendor = {values['vendor']}
+company_name = {values['company_name']}
+endpoint = {values['endpoint']}
+enabled = {values['enabled']}
+canary_min_results = {values['canary_min_results']}
+fetch_timeout_seconds = {values['fetch_timeout_seconds']}
+"""
+    f = tmp_path / "config.toml"
+    f.write_text(GOOD + body, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_config(f)

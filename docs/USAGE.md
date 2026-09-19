@@ -1,8 +1,13 @@
-# JobPilot v0.3 usage
+# JobPilot v0.3/R4 usage
 
 The repository is now on `main` with the R3 MCP server. The supported operator
 interface is Claude Code (or another MCP client); there is no browser UI yet.
 Telegram delivery remains a later, separately secured integration.
+
+R4 also provides a no-network-in-tests adapter for official employer ATS JSON
+endpoints. It supports `greenhouse`, `lever`, `workday`, and `successfactors`.
+The endpoint is operator configuration, not model or seeker input; JobPilot
+does not infer an API URL from a careers page.
 
 ## 1. Verify the safe offline demo
 
@@ -100,3 +105,21 @@ Naukri is currently disabled after a 406 recaptcha response; Indeed is the
 active India/US smoke source. The run skips LinkedIn by policy.
 `capture_fixture.py` is also live-only and must not be run in a loop; it
 refuses empty, malformed, or description-free data.
+
+## 6. Enable an official ATS endpoint
+
+1. Verify the employer's public careers page and the exact JSON endpoint it
+   calls. Do not paste a careers-page URL into `endpoint` unless it is actually
+   a JSON response.
+2. Add a block to `config.toml`, following the commented example. Use a unique
+   source key such as `ralph_lauren_workday`, set `enabled = true`, and choose a
+   canary floor of at least one normalized posting.
+3. Add that exact source key to the intended seeker's `sources` list. A source
+   is skipped for seekers who do not subscribe to it.
+4. Run the offline tests, then run one guarded discovery and inspect
+   `source_health`. A transport error, empty canary, or malformed vendor payload
+   is recorded as error/blocked rather than reported as an empty market.
+
+Each configured endpoint is fetched once per source instance and filtered
+locally for the seeker's terms and location. Tests inject a fetcher and never
+make network requests.

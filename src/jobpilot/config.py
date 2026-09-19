@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 
 from .paths import jobpilot_home
@@ -32,6 +33,17 @@ class SiteConfig:
 
 
 @dataclass(frozen=True)
+class ATSConfig:
+    name: str
+    vendor: str
+    company_name: str
+    endpoint: str
+    enabled: bool
+    canary_min_results: int = 1
+    fetch_timeout_seconds: float = 20.0
+
+
+@dataclass(frozen=True)
 class Config:
     home: Path
     data_dir: Path
@@ -39,6 +51,7 @@ class Config:
     score_batch: int
     min_request_gap_seconds: float
     sites: dict[str, SiteConfig]
+    ats_sources: dict[str, ATSConfig] = field(default_factory=dict)
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -80,6 +93,35 @@ def load_config(path: Path | None = None) -> Config:
             site=block.get("site", name),
         )
 
+    ats_sources: dict[str, ATSConfig] = {}
+    for name, block in raw.get("ats_sources", {}).items():
+        vendor = str(block.get("vendor", "")).strip().lower()
+        if vendor not in {"greenhouse", "lever", "workday", "successfactors"}:
+            raise ValueError(
+                f"ATS source '{name}' has unsupported vendor {vendor!r}"
+            )
+        endpoint = str(block.get("endpoint", "")).strip()
+        if not endpoint.startswith(("https://", "http://")):
+            raise ValueError(f"ATS source '{name}' endpoint must be an HTTP(S) URL")
+        company_name = str(block.get("company_name", name)).strip()
+        if not company_name:
+            raise ValueError(f"ATS source '{name}' company_name must not be empty")
+        minimum = int(block.get("canary_min_results", 1))
+        if minimum < 1:
+            raise ValueError(f"ATS source '{name}' canary_min_results must be >= 1")
+        timeout = float(block.get("fetch_timeout_seconds", 20.0))
+        if not isfinite(timeout) or timeout <= 0:
+            raise ValueError(f"ATS source '{name}' fetch_timeout_seconds must be > 0")
+        ats_sources[name] = ATSConfig(
+            name=name,
+            vendor=vendor,
+            company_name=company_name,
+            endpoint=endpoint,
+            enabled=bool(block.get("enabled", False)),
+            canary_min_results=minimum,
+            fetch_timeout_seconds=timeout,
+        )
+
     base = home
     return Config(
         home=base,
@@ -88,4 +130,5 @@ def load_config(path: Path | None = None) -> Config:
         score_batch=raw["limits"]["score_batch"],
         min_request_gap_seconds=float(raw["limits"]["min_request_gap_seconds"]),
         sites=sites,
+        ats_sources=ats_sources,
     )

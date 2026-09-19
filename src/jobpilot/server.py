@@ -16,6 +16,7 @@ from .paths import jobpilot_home
 from .pipeline import SeekerTarget, run_discovery
 from .profiles import load_companies, load_profile
 from .scoring import build_scoring_batch
+from .sources.ats_json import ATSJsonSource
 from .sources.jobspy_source import JobSpySource
 from .store.db import Store
 
@@ -314,6 +315,11 @@ def build_tools(
             for sc in cfg.sites.values()
             if sc.enabled and sc.name not in PROHIBITED_SOURCES
         ]
+        sources.extend(
+            ATSJsonSource(acfg)
+            for acfg in cfg.ats_sources.values()
+            if acfg.enabled
+        )
         results = run_discovery(store, sources, targets)
         return {
             "ok": True,
