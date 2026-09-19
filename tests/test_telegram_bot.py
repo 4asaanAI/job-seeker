@@ -173,3 +173,23 @@ def test_push_digests_records_only_after_delivery(home, store):
     assert push_digests(store, lambda c, t: seen.append((c, t))) == 1
     assert seen[0][0] == 70 and "CareerDesk update" in seen[0][1] and "Analyst, Acme" in seen[0][1]
     assert push_digests(store, lambda c, t: seen.append((c, t))) == 0
+
+
+def test_link_code_attaches_existing_seeker_once(home, store):
+    sid = store.add_seeker("Sam", None, "x.yaml", 20)
+    bot, sent, runs = _bot(home, store)
+    code = bot.create_link_code(sid)
+    bot.handle(_msg(800, "/link wrong"))
+    assert "not valid" in _texts(sent)[-1] and store.seeker_by_telegram_id(800) is None
+    bot.handle(_msg(800, f"/link {code}"))
+    assert store.seeker_by_telegram_id(800).id == sid and "linked" in _texts(sent)[-1]
+    bot.handle(_msg(801, f"/link {code}"))
+    assert store.seeker_by_telegram_id(801) is None and not runs
+
+
+def test_link_refuses_account_that_already_has_a_profile(home, store):
+    store.add_seeker("Existing", 900, "x.yaml", 20)
+    sid = store.add_seeker("Other", None, "y.yaml", 20)
+    bot, sent, _ = _bot(home, store)
+    bot.handle(_msg(900, f"/link {bot.create_link_code(sid)}"))
+    assert "could not be linked" in _texts(sent)[-1]

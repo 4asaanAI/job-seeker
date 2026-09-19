@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import subprocess
 import sys
 import threading
@@ -141,6 +142,38 @@ class Bot:
             self._sessions.pop(str(uid), None)
             self._sessions_file.write_text(json.dumps(self._sessions))
 
+    # --- link codes ----------------------------------------------------
+    def create_link_code(self, seeker_id: int, ttl_hours: int = 48) -> str:
+        with self._file_lock:
+            path = self.state / "link_codes.json"
+            try:
+                codes = json.loads(path.read_text())
+            except (OSError, ValueError):
+                codes = {}
+            code = secrets.token_urlsafe(6)
+            codes[code] = {"seeker_id": seeker_id, "expires": time.time() + ttl_hours * 3600}
+            path.write_text(json.dumps(codes))
+            return code
+
+    def redeem_link_code(self, code: str, uid: int) -> str:
+        with self._file_lock:
+            path = self.state / "link_codes.json"
+            try:
+                codes = json.loads(path.read_text())
+            except (OSError, ValueError):
+                codes = {}
+            entry = codes.get(code)
+            if not entry or entry["expires"] < time.time():
+                return "That link code is not valid or has expired."
+            if not self.store.link_telegram(int(entry["seeker_id"]), uid):
+                return "This Telegram account could not be linked. It may already have a profile."
+            del codes[code]
+            path.write_text(json.dumps(codes))
+        self.reset(uid)
+        seeker = self.store.get_seeker(int(entry["seeker_id"]))
+        return (f"Your Telegram account is now linked to the profile for {seeker.name}. "
+                "Send /jobs to see your matches or /profile to review your search settings.")
+
     # --- claude --------------------------------------------------------
     def _mcp_config(self, env_key: str, value: int, uid: int) -> Path:
         path = self.state / f"mcp-{uid}.json"
@@ -209,6 +242,10 @@ class Bot:
         with self._locks[uid]:
             if text.startswith("/"):
                 cmd = text[1:].split()[0].split("@")[0].lower()
+                if cmd == "link":
+                    parts = text.split()
+                    return self.send(chat_id, self.redeem_link_code(parts[1], uid)
+                                     if len(parts) == 2 else "Usage: /link followed by your code.")
                 if cmd == "reset":
                     self.reset(uid)
                     return self.send(chat_id, "A new conversation has started. Your saved profile and jobs are unchanged.")
@@ -252,7 +289,11 @@ def main() -> None:
     home = jobpilot_home()
     store = Store(Path(os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
     store.migrate()
-    Bot(_load_token(home), home, store).run()
+    bot = Bot(_load_token(home), home, store)
+    if len(sys.argv) == 3 and sys.argv[1] == "link":
+        print(bot.create_link_code(int(sys.argv[2])))
+        return
+    bot.run()
 
 
 if __name__ == "__main__":

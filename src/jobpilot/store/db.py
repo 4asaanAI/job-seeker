@@ -240,6 +240,18 @@ class Store:
             raise ValueError(f"no seeker with id {seeker_id}")
         return self._row_to_seeker(row)
 
+    def link_telegram(self, seeker_id: int, telegram_user_id: int) -> bool:
+        """Attach a Telegram account to a seeker that has none; False if refused."""
+        with self._lock, self.conn:
+            if self.conn.execute("SELECT 1 FROM seekers WHERE telegram_user_id = ?",
+                                 (int(telegram_user_id),)).fetchone():
+                return False
+            cur = self.conn.execute(
+                "UPDATE seekers SET telegram_user_id = ? WHERE id = ? "
+                "AND telegram_user_id IS NULL AND active = 1",
+                (int(telegram_user_id), seeker_id))
+            return cur.rowcount == 1
+
     def seeker_by_telegram_id(self, telegram_user_id: int) -> Seeker | None:
         with self._lock:
             row = self.conn.execute(
