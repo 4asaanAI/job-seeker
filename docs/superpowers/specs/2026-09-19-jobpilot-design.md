@@ -48,7 +48,7 @@ scoring weights account adjacency heavily.
   from the same store.
 - Export-house-to-export-house roles, D2C, and retail category roles. Explicitly
   descoped by the operator.
-- Multi-user support. Single seeker, single operator.
+- Public or self-service signup. Seekers are added by the operator by hand.
 
 ## 4. Architecture
 
@@ -248,25 +248,106 @@ reports both the count found and the count above the fit threshold. If 40 jobs
 were found and none cleared the bar, the digest says exactly that, rather than
 padding the list with poor matches to look productive.
 
+## 5A. Multi-user
+
+Added 2026-09-19. Alex is the first seeker, not the only one. Several of the
+operator's friends need the same mechanism, so the system is multi-tenant from
+the start rather than retrofitted later.
+
+### Model
+
+A **seeker** is a person being helped. Each seeker has their own profile, base
+resume, target company list, search terms, scoring weights, Telegram identity
+and notification state. There is one **operator** (Abhimanyu), who owns the
+machine, the account and the data.
+
+The critical normalisation: **a job posting is global; a seeker's relationship
+to it is not.** Two seekers targeting Gurugram merchandising roles will see the
+same listing, and it must be fetched, parsed and stored once.
+
+- `job_postings` - global, deduped by `(source, external_id)` and content hash.
+  Fetched once, shared by all seekers.
+- `seeker_jobs` - per seeker: fit score, reasoning, status, notification state,
+  tailored resume reference. This is where `scores`, `applications` and
+  `notifications` are keyed.
+
+This also saves real quota: scoring is per seeker, but scraping and parsing -
+the slow, rate-limited part - happens once for everyone.
+
+### Isolation (mandatory)
+
+Multiple seekers sharing one Claude session and one store creates a genuine
+leakage risk: Claude serving one person while holding another's data in
+context, and mentioning it. The following are hard requirements, not
+guidelines:
+
+1. Every MCP tool that touches seeker data takes an explicit `seeker_id` and
+   scopes every query by it. There is no "current seeker" global.
+2. In the Telegram channel, `seeker_id` is derived **only** from the verified
+   numeric sender ID. It is never inferred from message content, and never
+   accepted from the message itself. A request to "show me Priya's jobs" is
+   refused regardless of who asks.
+3. An unrecognised sender is dropped, per the `allowlist` policy.
+4. Scheduled runs process one seeker at a time, in separate batches, so one
+   seeker's listings cannot appear in another's digest.
+5. Generated documents are written to per-seeker directories, never a shared
+   output folder.
+
+### Consequences the operator should weigh
+
+- **Quota multiplies with seekers.** Scraping is shared, but scoring, tailoring
+  and every Telegram conversation are per person, on his subscription, against
+  the same pool as Layaa and eduflow. A per-seeker daily cap is set in config,
+  and the config caps total daily work as well.
+- **Several third parties are now using his account.** Anthropic ships
+  multi-user allowlisting in the official plugin, so this is a contemplated
+  setup, but the account, the budget and what happens on it remain his.
+- **He is now holding several people's personal data** - resumes, contact
+  details, salary expectations, job-search activity their employers would not
+  want visible. The private sync repo must stay private, and each seeker should
+  be told plainly that their data sits on his machine and that he can see it.
+
+### Onboarding a seeker
+
+Adding a person is config plus one resume, not code: a row in `seekers`, a
+profile YAML, a base resume, a target list (usually inherited from a shared
+template and adjusted), and their Telegram ID added to the allowlist.
+
 ## 6. Data model (SQLite)
 
-- `companies` — id, name, tier, ats_vendor, endpoint, careers_url, region, enabled
-- `jobs` — id, company_id, source, external_id, title, location, description,
-  url, posted_at, first_seen_at, last_seen_at, content_hash, status
-- `scores` — job_id, fit_score, reasoning, model, scored_at
-- `applications` — job_id, status, resume_version_id, applied_at, response_at, notes
-- `resume_versions` — id, job_id, path, generated_at, ats_notes
-- `source_runs` — source, run_at, canary_ok, results_count, status, notes
-- `notifications` — job_id, channel, delivered_at, kind (first|nudge|expiry),
-  message_ref. Prevents duplicate notification; makes nudge scheduling explicit
-- `events` — append-only log of every state change, for auditability and nudges
+**Global (shared by all seekers):**
 
-Status vocabulary for `jobs`: `discovered -> scored -> shortlisted ->
+- `companies` - id, name, tier, ats_vendor, endpoint, careers_url, region, enabled
+- `job_postings` - id, company_id, source, external_id, title, location,
+  description, url, posted_at, first_seen_at, last_seen_at, content_hash
+- `source_runs` - source, run_at, canary_ok, results_count, status, notes
+- `machine_runs` - machine, started_at, finished_at, status. Drives the Mac
+  fallback decision
+
+**Per seeker:**
+
+- `seekers` - id, name, telegram_user_id, profile_path, active, daily_cap
+- `seeker_targets` - seeker_id, company_id or search_term, weight
+- `seeker_jobs` - seeker_id, posting_id, status, first_seen_at
+- `scores` - seeker_id, posting_id, fit_score, reasoning, model, scored_at
+- `applications` - seeker_id, posting_id, status, resume_version_id, applied_at,
+  response_at, notes
+- `resume_versions` - id, seeker_id, posting_id, path, format, generated_at,
+  validation_report, extraction_ok
+- `notifications` - seeker_id, posting_id, channel, delivered_at,
+  kind (first|nudge|expiry), message_ref. Prevents duplicate notification and
+  makes nudge scheduling explicit
+- `events` - append-only log of every state change, scoped by seeker
+
+Status vocabulary for `seeker_jobs`: `discovered -> scored -> shortlisted ->
 presented -> applied | skipped | deferred | expired`.
 
-Dedupe key: `(company_id, normalized_title, location)` plus a content hash, so
-the same role appearing on Naukri and on the company's Workday is one row with
-multiple source references.
+Dedupe for `job_postings`: `(company_id, normalized_title, location)` plus a
+content hash, so the same role appearing on Naukri and on the company's Workday
+is one row with multiple source references - fetched once, scored per seeker.
+
+**Every per-seeker table carries `seeker_id` and every query filters on it.**
+This is enforced in the store layer, not left to callers.
 
 ## 7. Resume engine
 
@@ -416,9 +497,10 @@ Investigated 2026-09-19:
 
 Shipped incrementally; each milestone is usable on its own.
 
-**M1 (now):** JobPilot MCP skeleton + store + JobSpy MCP wired up + canary
-health + target company list + scoring + local digest. Usable as soon as JobSpy
-returns real listings.
+**M1 (now):** JobPilot MCP skeleton + multi-seeker store + JobSpy MCP wired up
++ canary health + target company list + scoring + local digest. Alex is
+seeker #1; the schema and tools are multi-seeker from the first commit, because
+retrofitting tenancy into a store is far more expensive than starting with it.
 
 **M2:** ATS JSON fetchers for tiers 1-2, structured-data parsing, resume
 tailoring with the validation gate, DOCX renderer + extraction gate.
