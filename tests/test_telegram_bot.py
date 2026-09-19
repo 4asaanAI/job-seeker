@@ -228,7 +228,9 @@ def test_workday_cxs_searches_server_side_and_builds_links():
     src = ATSJsonSource(ATSConfig(
         name="pvh", vendor="workday_cxs", company_name="PVH", enabled=True,
         endpoint="https://pvh.wd1.myworkdayjobs.com/wday/cxs/pvh/PVH_Careers/jobs"), poster=poster)
-    jobs, raw = src.search("senior merchandiser", "Gurgaon")
+    # Rows here are all "Gurgaon"; searching a different city still returns
+    # them, since an employer-specific source is not filtered by home city.
+    jobs, raw = src.search("senior merchandiser", "Mumbai")
     assert raw == 23 and len(jobs) == 23 and len(calls) == 2
     assert calls[0]["searchText"] == "senior merchandiser"
     assert jobs[0].url == "https://pvh.wd1.myworkdayjobs.com/PVH_Careers/job/Gurgaon/M_0"
@@ -255,4 +257,7 @@ def test_oracle_hcm_builds_keyword_query_and_links():
     jobs, _ = src.search("merchandiser", "Bangalore")
     assert "keyword=merchandiser" in urls[0] and "siteNumber=CX_1" in urls[0]
     assert jobs[0].url == "https://x.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/77"
-    assert src.search("merchandiser", "Mumbai")[0] == []
+    # An employer-specific source is not filtered by the seeker's home city:
+    # the seeker opted into this one employer, and location fit is the
+    # scoring rubric's job, not a blunt substring match on office names.
+    assert len(src.search("merchandiser", "Mumbai")[0]) == 1

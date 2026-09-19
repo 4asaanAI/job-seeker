@@ -251,6 +251,13 @@ class ATSJsonSource:
         place = (location or "").casefold().strip()
         if place in COUNTRYWIDE:
             place = ""
+        # A SEARCHED (employer-specific) source is one the seeker deliberately
+        # subscribed to for that one employer, not a location query. Its jobs
+        # post in whatever office-name format the employer uses, which rarely
+        # contains the seeker's home city as a substring; the scoring rubric,
+        # not this filter, is what judges location fit for these.
+        if self.cfg.vendor in SEARCHED:
+            place = ""
         found = []
         for posting in postings:
             haystack = " ".join((posting.title, posting.company_name,
