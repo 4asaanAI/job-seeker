@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from jobpilot.config import CanaryConfig, SiteConfig, load_config
@@ -78,6 +80,9 @@ def test_canary_min_results_must_be_positive(tmp_path):
         load_config(f)
 
 
+# Explicit path: load_config() with no argument follows JOBPILOT_HOME, which would test the wrong file.
+SHIPPED = Path(__file__).resolve().parents[1] / "config.toml"
+
 HEAD = """
 [paths]
 data_dir = "data"
@@ -151,7 +156,7 @@ def test_siteconfig_can_be_built_without_site():
 
 
 def test_shipped_config_loads_and_every_source_is_market_tagged():
-    sites = load_config().sites
+    sites = load_config(SHIPPED).sites
     for key, s in sites.items():
         assert key.endswith(("_in", "_us")), key
         assert s.country_indeed == ("usa" if key.endswith("_us") else "india"), key
