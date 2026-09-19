@@ -9,7 +9,7 @@ min_request_gap_seconds = 4.0
 # ---- India ----
 [sites.naukri_in]
 site = "naukri"
-enabled = true
+enabled = false
 country_indeed = "india"
 hours_old = 168
 results_wanted = 50

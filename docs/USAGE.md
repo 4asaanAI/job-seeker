@@ -90,5 +90,7 @@ From the deployed checkout on the Windows desktop:
 ```
 
 `smoke` is a live public-site check and requires the explicit `--yes` guard.
-It skips LinkedIn by policy. `capture_fixture.py` is also live-only and must
-not be run in a loop; it refuses empty, malformed, or description-free data.
+Naukri is currently disabled after a 406 recaptcha response; Indeed is the
+active India/US smoke source. The run skips LinkedIn by policy.
+`capture_fixture.py` is also live-only and must not be run in a loop; it
+refuses empty, malformed, or description-free data.

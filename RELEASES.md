@@ -114,6 +114,9 @@ gate on the Windows desktop.
   redacted fixture-capture script.
 - LinkedIn source entries disabled and excluded from the live server path;
   JobPilot does not contact LinkedIn.
+- Naukri India is currently disabled after the Windows canary returned HTTP
+  406 (`recaptcha required`); this is an explicit source-health decision, not
+  a claim that Naukri has no jobs.
 
 ### Gate evidence so far
 - Full offline suite: **283 passed**.
