@@ -651,6 +651,48 @@ flag on `seekers`, defaulting to 1 and cleared per seeker when the operator is
 satisfied - not a global mode, because seekers will be onboarded at different
 times and a later seeker still needs the early-weeks gate.
 
+### 17.8 Seekers search in different countries (decided 2026-09-19)
+
+One seeker searches India; another searches the United States. The design so far
+hard-wired India: every site carried `country_indeed = "india"`, and Naukri only
+covers India. That would have returned Indian jobs to a US seeker, or nothing,
+with the run reporting healthy.
+
+**The source becomes the unit of (site, market), not just site.** A source key
+names both, for example `naukri_in`, `indeed_in`, `indeed_us`, `linkedin_us`,
+`glassdoor_us`. Each has its own canary, its own health history and its own
+failure boundary, exactly as before. A canary that passes for Indeed India says
+nothing about Indeed US, so they must not share one.
+
+**Each seeker declares the sources they use** in their profile (`sources:`),
+and it is required, never defaulted. A default of "everything enabled" would
+quietly send a US seeker through Naukri and an India seeker through Indeed US.
+Discovery runs a source only if at least one active seeker subscribes to it,
+and runs each search with the location of the seekers who subscribed.
+
+**What this does not change:** the store, health rules, digest, notification
+ledger and tenancy are market-neutral already.
+
+**Consequences for a US seeker worth knowing now:**
+
+- **Coverage is thinner from JobSpy alone.** Naukri, the source that works well
+  for India, has no US equivalent here. In the US the boards are Indeed,
+  LinkedIn and Glassdoor; LinkedIn is the most useful and the least reliable
+  without proxies, and JobSpy's Google Jobs and ZipRecruiter scrapers were
+  reported broken (issue #302, open when checked). Expect LinkedIn to be the
+  source the canary reports on most often.
+- **Employer applicant-tracking systems matter more, not less.** Many US
+  employers post through Greenhouse, Lever, Ashby, Workday and similar systems
+  whose job boards are published as public JSON. The R4 ATS fetchers are
+  therefore the main path for US seekers, and I would treat R4 as more urgent
+  than the plan currently implies.
+- **Work authorisation is the deciding factor for a non-citizen searching in
+  the US**, and nothing in the system knows it. A seeker who needs employer
+  sponsorship should not be shown roles that say "no sponsorship". Whether a
+  seeker needs sponsorship is a fact only that seeker can supply; it is
+  recorded as an optional profile field and read by their rubric. It is never
+  inferred from a name, a nationality or where someone studied.
+
 ### 17.4 Google Sheets as the seeker-facing view (M3)
 
 Each seeker gets a Google Sheet showing every job found, its score, its status
