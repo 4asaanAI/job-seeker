@@ -85,14 +85,87 @@ def test_different_roles_are_not_merged(store):
     assert a != b
 
 
-def test_updating_a_posting_refreshes_derived_columns(store):
-    pid = store.upsert_posting(_posting(title="Senior Merchandiser"))
-    store.upsert_posting(_posting(title="Senior Merchandiser  "))
+def test_title_and_location_are_last_writer_wins_across_sources(store):
+    """Same role, different renderings: the latest non-null sighting wins."""
+    pid = store.upsert_posting(_posting(source="naukri", external_id="n1",
+                                        title="Senior Merchandiser",
+                                        location="Gurgaon, India"))
+    store.upsert_posting(_posting(source="indeed", external_id="i1",
+                                  title="SENIOR MERCHANDISER",
+                                  location="Gurugram, Haryana"))
     row = store.conn.execute(
-        "SELECT normalized_title, content_hash FROM job_postings WHERE id = ?", (pid,)
+        "SELECT title, location FROM job_postings WHERE id = ?", (pid,)
     ).fetchone()
-    assert row["normalized_title"] == "senior merchandiser"
-    assert row["content_hash"]
+    assert (row["title"], row["location"]) == ("SENIOR MERCHANDISER", "Gurugram, Haryana")
+
+    # A sighting with no location must not erase the one we have.
+    store.upsert_posting(_posting(source="linkedin", external_id="l1",
+                                  title="Senior  Merchandiser", location=None))
+    row = store.conn.execute(
+        "SELECT title, location FROM job_postings WHERE id = ?", (pid,)
+    ).fetchone()
+    assert (row["title"], row["location"]) == ("Senior  Merchandiser", "Gurugram, Haryana")
+
+
+def test_edited_title_repoints_source_and_leaves_no_orphan(store):
+    old = store.upsert_posting(_posting(title="Senior Merchandiser"))
+    new = store.upsert_posting(_posting(title="Senior Merchandiser II"))
+    assert new != old
+
+    rows = store.conn.execute(
+        "SELECT posting_id FROM posting_sources WHERE source = 'naukri' AND external_id = 'X1'"
+    ).fetchall()
+    assert [r["posting_id"] for r in rows] == [new]
+    # The pre-edit row keeps zero sources (deleting could break seeker_jobs FKs);
+    # the point is that the live listing resolves to `new`, never to the stale row.
+    sourceless = store.conn.execute(
+        "SELECT jp.id FROM job_postings jp "
+        "LEFT JOIN posting_sources ps ON ps.posting_id = jp.id "
+        "WHERE ps.posting_id IS NULL"
+    ).fetchall()
+    assert [r["id"] for r in sourceless] == [old]
+    assert store.upsert_posting(_posting(title="Senior Merchandiser II")) == new
+
+
+def test_company_renderings_merge(store):
+    a = store.upsert_posting(_posting(source="naukri", external_id="a", company="Marks & Spencer"))
+    b = store.upsert_posting(_posting(source="indeed", external_id="b", company="Marks and Spencer"))
+    c = store.upsert_posting(_posting(source="linkedin", external_id="c",
+                                      company="Marks and Spencer India Pvt. Ltd."))
+    assert a == b == c
+
+
+def test_location_renderings_merge_when_detail_arrives_later(store):
+    """A sighting with no city is adopted by a later one that has it."""
+    a = store.upsert_posting(_posting(source="naukri", external_id="a", location=None))
+    b = store.upsert_posting(_posting(source="indeed", external_id="b", location="India"))
+    c = store.upsert_posting(_posting(source="linkedin", external_id="c", location="Gurgaon, India"))
+    d = store.upsert_posting(_posting(source="glassdoor", external_id="d", location="Gurugram"))
+    assert a == b == c == d
+    loc = store.conn.execute("SELECT location FROM job_postings WHERE id = ?", (a,)).fetchone()
+    assert loc["location"] == "Gurugram"
+
+
+def test_same_role_in_different_cities_is_not_merged(store):
+    a = store.upsert_posting(_posting(source="naukri", external_id="a", location="Gurgaon, India"))
+    b = store.upsert_posting(_posting(source="indeed", external_id="b", location="Mumbai, India"))
+    assert a != b
+
+
+def test_cpp_and_csharp_titles_are_not_merged(store):
+    a = store.upsert_posting(_posting(external_id="a", title="C++ Developer"))
+    b = store.upsert_posting(_posting(external_id="b", title="C# Developer"))
+    assert a != b
+
+
+def test_failed_write_is_rolled_back_not_committed_by_the_next_call(store):
+    # source=None passes the job_postings insert, then violates NOT NULL on
+    # posting_sources: a genuine mid-write failure.
+    with pytest.raises(sqlite3.IntegrityError):
+        store.upsert_posting(_posting(source=None))
+    store.add_seeker("Unrelated", 5, "u.yaml", 20)  # commits whatever is pending
+    count = store.conn.execute("SELECT COUNT(*) c FROM job_postings").fetchone()["c"]
+    assert count == 0
 
 
 def test_seeker_jobs_are_isolated_when_both_seekers_have_data(store):
@@ -135,19 +208,27 @@ def test_store_is_usable_from_another_thread(store):
     assert any(s.name == "Threaded" for s in store.list_seekers())
 
 
-def test_concurrent_writes_do_not_corrupt(store):
-    def work(n):
-        for i in range(20):
-            store.upsert_posting(_posting(source="naukri", external_id=f"t{n}-{i}",
-                                          title=f"Role {n}-{i}"))
+def test_concurrent_upserts_of_the_same_posting_yield_one_row(store):
+    n = 8
+    barrier = threading.Barrier(n)
+    errors: list[BaseException] = []
 
-    threads = [threading.Thread(target=work, args=(n,)) for n in range(4)]
+    def work(i):
+        try:
+            barrier.wait()
+            store.upsert_posting(_posting(source=f"src{i}", external_id=f"e{i}"))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(n)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    c = store.conn.execute("SELECT COUNT(*) c FROM job_postings").fetchone()["c"]
-    assert c == 80
+    assert errors == []
+    postings = store.conn.execute("SELECT COUNT(*) c FROM job_postings").fetchone()["c"]
+    sources = store.conn.execute("SELECT COUNT(*) c FROM posting_sources").fetchone()["c"]
+    assert (postings, sources) == (1, n)
 
 
 def test_record_event_writes_a_row(store):
