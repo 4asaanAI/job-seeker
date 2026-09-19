@@ -101,8 +101,8 @@ Released locally on 2026-09-19 as annotated tag `v0.2.0` at commit `80df9d9`.
 
 ## v0.3.0 - R3 Claude-driven on the desktop
 
-Implemented locally on 2026-09-19. Release/tagging waits for the deployment
-gate on the Windows desktop.
+Released on 2026-09-19 as annotated tag `v0.3.0` after the Windows deployment
+and MCP registration gate.
 
 ### What shipped
 - FastMCP stdio server with operator and seeker tool surfaces.
@@ -120,13 +120,17 @@ gate on the Windows desktop.
 
 ### Gate evidence so far
 - Full offline suite: **283 passed**.
-- FastMCP registration is checked after installing the declared dependency in
-  the local environment; the Windows deployment and live source gate remain
-  outstanding.
+- Windows Python 3.12 suite: **283 passed**.
+- Guarded Windows smoke: Indeed India **healthy**, 34 normalized results and
+  30 links for Alex. Naukri returned HTTP 406 (`recaptcha required`) and was
+  deliberately disabled; it is not presented as a quiet market. No LinkedIn
+  requests were made.
+- Claude Code MCP registration: `jobpilot` user-scoped server **connected**
+  with the pinned Windows interpreter and project paths.
 - Repository: `https://github.com/4asaanAI/job-seeker`.
 
-### Remaining R3 gate
-- Install the project on the Windows desktop at `E:\Github\Aasaan AI\jobpilot\`.
-- Run `run.ps1 -Task test` and the guarded `run.ps1 -Task smoke`.
-- Register the MCP server with Claude Code and perform one operator `discover`
-  call through MCP.
+### Operator handoff
+- In a new Claude Code session on Windows, ask Claude to call `list_seekers`
+  and then `source_health` through the connected `jobpilot` MCP server.
+- Run `discover` only when you want a fresh live search; the operator surface
+  is intentionally separate from a pinned seeker-facing process.
