@@ -247,6 +247,7 @@ class Store:
                     """
                     UPDATE job_postings SET
                         last_seen_at     = ?,
+                        company_name     = ?,
                         title            = ?,
                         normalized_title = ?,
                         content_hash     = ?,
@@ -256,7 +257,7 @@ class Store:
                         posted_at        = COALESCE(?, posted_at)
                     WHERE id = ?
                     """,
-                    (now, p.title, title, h, eff_location, p.description,
+                    (now, p.company_name, p.title, title, h, eff_location, p.description,
                      p.url, p.posted_at, posting_id),
                 )
             else:
@@ -271,14 +272,17 @@ class Store:
                     ON CONFLICT(content_hash) DO UPDATE SET
                         last_seen_at  = excluded.last_seen_at,
                         title         = excluded.title,
-                        location      = COALESCE(excluded.location, job_postings.location),
+                        location      = CASE
+                            WHEN ? != '' OR COALESCE(job_postings.location, '') = ''
+                            THEN COALESCE(excluded.location, job_postings.location)
+                            ELSE job_postings.location END,
                         description   = COALESCE(excluded.description, job_postings.description),
                         canonical_url = COALESCE(job_postings.canonical_url, excluded.canonical_url),
                         posted_at     = COALESCE(excluded.posted_at, job_postings.posted_at)
                     RETURNING id
                     """,
                     (p.company_name, p.title, title, p.location,
-                     p.description, p.url, p.posted_at, now, now, h),
+                     p.description, p.url, p.posted_at, now, now, h, city),
                 ).fetchone()["id"])
             self.conn.execute(
                 "INSERT INTO posting_sources (posting_id, source, external_id, url, seen_at) "

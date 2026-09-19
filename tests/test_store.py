@@ -607,3 +607,55 @@ def test_record_event_writes_a_row(store):
     store.record_event("source_error", "RuntimeError: 429")
     row = store.conn.execute("SELECT kind, detail FROM events").fetchone()
     assert row["kind"] == "source_error"
+
+
+def _assert_nothing_lost(store, sid, p, c, back):
+    assert back == p
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 3
+    assert sorted(j.posting_id for j in store.seeker_jobs(sid)) == sorted([p, c])
+    scores = {r["posting_id"]: r["fit_score"] for r in store.conn.execute(
+        "SELECT posting_id, fit_score FROM scores WHERE seeker_id = ?", (sid,))}
+    assert scores == {p: 90.0, c: 40.0}
+
+
+def test_company_rename_does_not_let_a_country_only_sighting_merge_the_listing(store):
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    title = "Senior Merchandiser"
+    p = store.upsert_posting(_posting("naukri", "g1", title, "Marks & Spencer", "Gurgaon, India"))
+    assert store.upsert_posting(
+        _posting("naukri", "g1", title, "M&S", "Gurgaon, India")) == p
+    assert store.conn.execute(
+        "SELECT company_name FROM job_postings WHERE id = ?", (p,)
+    ).fetchone()["company_name"] == "M&S"
+    m = store.upsert_posting(_posting("naukri", "m1", title, "M&S", "Mumbai, India"))
+    c = store.upsert_posting(_posting("indeed", "c1", title, "M&S", "India"))
+    assert c not in (p, m)
+    store.link_posting(sid, p)
+    store.link_posting(sid, c)
+    _score(store, sid, p, 90.0, "2026-09-19T01:00:00")
+    _score(store, sid, c, 40.0, "2026-09-19T01:00:00")
+
+    back = store.upsert_posting(_posting("naukri", "g1", title, "M&S", "India"))
+
+    _assert_nothing_lost(store, sid, p, c, back)
+
+
+def test_country_only_adoption_does_not_downgrade_a_city_rows_location(store):
+    sid = store.add_seeker("Alex", 1, "a.yaml", 20)
+    title = "Senior Merchandiser"
+    co = "Marks & Spencer"
+    p = store.upsert_posting(_posting("naukri", "g1", title, co, "Gurgaon, India"))
+    assert store.upsert_posting(_posting("bright", "b1", title, co, "India")) == p
+    assert "Gurgaon" in store.conn.execute(
+        "SELECT location FROM job_postings WHERE id = ?", (p,)).fetchone()["location"]
+    m = store.upsert_posting(_posting("naukri", "m1", title, co, "Mumbai, India"))
+    c = store.upsert_posting(_posting("xing", "x1", title, co, "India"))
+    assert c not in (p, m)
+    store.link_posting(sid, p)
+    store.link_posting(sid, c)
+    _score(store, sid, p, 90.0, "2026-09-19T01:00:00")
+    _score(store, sid, c, 40.0, "2026-09-19T01:00:00")
+
+    back = store.upsert_posting(_posting("naukri", "g1", title, co, "India"))
+
+    _assert_nothing_lost(store, sid, p, c, back)
