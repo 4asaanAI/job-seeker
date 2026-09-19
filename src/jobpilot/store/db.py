@@ -107,20 +107,70 @@ class Store:
 
     def _migrate_location_columns(self) -> None:
         """Add location_city/region/country to a database that predates them,
-        and parse each existing row's free-text `location` into them -- or
-        every old row stays a city-less identity forever.
+        and repair every row whose parsed location or content hash is stale.
+
+        The column DDL may survive a process failure even when the backfill
+        does not.  Re-evaluate the data on every migration so a half-finished
+        upgrade repairs itself.  Hashes are staged through temporary unique
+        values before the new hashes are assigned: parser changes can turn
+        two old identities into one, and that collision must use the normal
+        merge path so source keys and seeker history survive.
         """
-        added = self._add_missing_columns(
+        self._add_missing_columns(
             "job_postings", {c: "TEXT NOT NULL DEFAULT ''" for c in _LOCATION_COLUMNS}
         )
-        if not added:
-            return
-        for row in self.conn.execute("SELECT id, location FROM job_postings").fetchall():
+
+        rows = self.conn.execute(
+            "SELECT id, company_name, normalized_title, location, "
+            "location_city, location_region, location_country, content_hash "
+            "FROM job_postings ORDER BY id"
+        ).fetchall()
+        repairs = []
+        for row in rows:
             city, region, country = parse_location(row["location"])
+            expected_hash = _hash(
+                normalize_company(row["company_name"]),
+                row["normalized_title"],
+                city,
+            )
+            if (
+                (row["location_city"], row["location_region"], row["location_country"])
+                != (city, region, country)
+                or row["content_hash"] != expected_hash
+            ):
+                repairs.append((row, city, region, country, expected_hash))
+
+        if not repairs:
+            return
+
+        # DDL is the only non-transactional part of this migration.  All
+        # repairs below are inside migrate()'s surrounding transaction.
+        for row, city, region, country, _expected_hash in repairs:
             self.conn.execute(
                 "UPDATE job_postings SET location_city=?, location_region=?, "
                 "location_country=? WHERE id=?",
                 (city, region, country, row["id"]),
+            )
+
+        # Free every desired hash before assigning it.  This handles parser
+        # changes that would otherwise produce a transient UNIQUE conflict.
+        for row, _city, _region, _country, _expected_hash in repairs:
+            self.conn.execute(
+                "UPDATE job_postings SET content_hash=? WHERE id=?",
+                (f"__migration__{row['id']}", row["id"]),
+            )
+
+        for row, _city, _region, _country, expected_hash in repairs:
+            other = self.conn.execute(
+                "SELECT id FROM job_postings WHERE content_hash = ?",
+                (expected_hash,),
+            ).fetchone()
+            if other is not None and other["id"] != row["id"]:
+                self._merge_postings(keep_id=int(other["id"]), drop_id=row["id"])
+                continue
+            self.conn.execute(
+                "UPDATE job_postings SET content_hash=? WHERE id=?",
+                (expected_hash, row["id"]),
             )
 
     # --- events --------------------------------------------------------
@@ -211,11 +261,14 @@ class Store:
                 "FROM job_postings WHERE normalized_title = ?", (title,)
             ) if normalize_company(r["company_name"]) == company
         ]
-        # A known region narrows the field first: a state-level sighting must
-        # not be refused as ambiguous just because a DIFFERENT state's city is
-        # also known for the same role (this is the fix for I1/the design debt
-        # -- without it, "HR, IN" and a known Pune row would leave two cities
-        # known and the sighting would stay separate for no good reason).
+        # A known region narrows the field first: a state-level sighting may
+        # adopt the sole known city in that region even when a DIFFERENT
+        # state's city is also known for the same role. This deliberately
+        # widens adoption compared with the old all-cities ambiguity rule;
+        # when two cities are known in the same region, it remains separate.
+        # That is the documented trade-off for the real "HR, IN" shape: one
+        # fewer duplicate when the region is informative, but no guess when
+        # the region itself still contains multiple known cities.
         if region:
             same_region = [r for r in rows if r["location_city"] and r["location_region"] == region]
             if len(same_region) == 1:
@@ -332,14 +385,17 @@ class Store:
             # a sighting that has one wins.
             eff_city = city if (city or not stored_city) else stored_city
             h = _hash(company, title, eff_city)
+            # Whether THIS sighting's own facts would move the row's identity
+            # away from what it currently is. content_hash is UNIQUE, so
+            # when this is False no other row can possibly own `h` either --
+            # Rule C's merge below can only ever fire when this is True.
+            identity_moving = h != stored["content_hash"]
 
-            if h != stored["content_hash"]:
-                # This sighting's own facts (city and/or title) would move
-                # the row's identity away from what it currently is. If the
-                # row is shared with another key, moving it -- in place, or
-                # by merging into an existing collision -- would rewrite
-                # that bystander's identity out from under it. Detach
-                # instead: only this key moves, whether or not a
+            if identity_moving:
+                # If the row is shared with another key, moving it -- in
+                # place, or by merging into an existing collision -- would
+                # rewrite that bystander's identity out from under it.
+                # Detach instead: only this key moves, whether or not a
                 # destination already exists.
                 other_key_exists = self.conn.execute(
                     "SELECT 1 FROM posting_sources WHERE posting_id = ? "
@@ -363,11 +419,23 @@ class Store:
                 self._merge_postings(keep_id=int(other["id"]), drop_id=posting_id)
                 posting_id = int(other["id"])
 
-            if city or not stored_city:
-                eff_location, eff_region, eff_country = p.location, region, country
+            eff_location = p.location if (city or not stored_city) else None
+            if identity_moving:
+                # The row's identity is genuinely (re)established here --
+                # this sighting's own region/country are authoritative.
+                eff_region, eff_country = region, country
             else:
-                eff_location = None
-                eff_region, eff_country = stored["location_region"], stored["location_country"]
+                # Nothing about the row's identity is changing: this
+                # sighting is only re-confirming or adding a rendering of
+                # the SAME role. Region is second-order identity that
+                # _resolve_hash reads to steer future city-less adoptions
+                # (independent-review finding), so a re-sighting must only
+                # ever ENRICH a blank value, never overwrite an
+                # already-settled one -- a mistaken or stale region on one
+                # board must not silently repaint the row and steer a
+                # later, genuinely-different sighting onto it.
+                eff_region = region if not stored["location_region"] else stored["location_region"]
+                eff_country = country if not stored["location_country"] else stored["location_country"]
 
             self.conn.execute(
                 """

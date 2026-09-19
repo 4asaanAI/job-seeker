@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from jobpilot.store.db import Store
+from jobpilot.store.db import Store, _hash, normalize_company
 from jobpilot.store.models import Posting
 
 
@@ -513,9 +513,13 @@ def test_a_location_column_that_disagrees_with_the_hash_cannot_cause_a_merge(sto
     #    overwrites C's location, which its city-less hash never saw.
     assert store.upsert_posting(
         _posting(source="bright", external_id="b1", location="Pune, India")) == c
-    polluted = store.conn.execute(
-        "SELECT location FROM job_postings WHERE id = ?", (c,)).fetchone()["location"]
-    assert polluted == "Pune, India"  # the disagreement this test is about
+    row = store.conn.execute(
+        "SELECT location, location_city FROM job_postings WHERE id = ?", (c,)).fetchone()
+    assert row["location"] == "Pune, India"  # the disagreement this test is about
+    # The identity column must NOT show the same disagreement (independent-
+    # review finding: nothing in this file selected location_city before,
+    # so a broken own_hash gate in _file_sighting would have passed here).
+    assert row["location_city"] == ""
 
     # 2. P's own board moves it to Pune, so P now owns the Pune hash.
     assert store.upsert_posting(
@@ -531,6 +535,41 @@ def test_a_location_column_that_disagrees_with_the_hash_cannot_cause_a_merge(sto
     fit = {r["posting_id"]: r["fit_score"] for r in store.conn.execute(
         "SELECT posting_id, fit_score FROM scores WHERE seeker_id = ?", (sid,))}
     assert fit == {g: 90.0, c: 40.0}
+
+
+def test_the_own_hash_gate_stops_a_fallback_adoption_from_wrong_merging_later(store):
+    """Independent-review finding: the own_hash gate in _file_sighting is
+    the single most safety-critical line in the redesign, and nothing
+    directly pinned it. Exact repro from the review: a fallback adoption
+    that pollutes location_city sets up a LATER, unrelated wrong merge two
+    steps further on. Without the gate: back == the Pune row (2 rows total,
+    the seeker's saved job silently moved onto an unrelated role). With it:
+    back == c (3 rows, nothing moved)."""
+    sid = store.add_seeker("A", 1, "a.yaml", 20)
+    g = store.upsert_posting(_posting(source="naukri", external_id="g1", location="Gurgaon, India"))
+    store.upsert_posting(_posting(source="naukri", external_id="m1", location="Mumbai, India"))
+    c = store.upsert_posting(_posting(source="indeed", external_id="c1", location="India"))
+    store.link_posting(sid, c)
+    _score(store, sid, c, 40.0, "2026-09-19T01:00:00")
+
+    # bright/b1 sights "Pune" (unknown key): no exact Pune row exists yet, so
+    # Rule D's fallback adopts C's own city-less hash (Ruling 12) and would,
+    # without the own_hash gate, wrongly stamp C's location_city as "pune".
+    store.upsert_posting(_posting(source="bright", external_id="b1", location="Pune, India"))
+    # P's own board moves it to Pune, so P now owns the Pune hash.
+    store.upsert_posting(_posting(source="naukri", external_id="g1", location="Pune, India"))
+    # bright/b1 (now known) re-sights Pune: it detaches from C and joins P.
+    store.upsert_posting(_posting(source="bright", external_id="b1", location="Pune, India"))
+
+    # C's own board re-sights it country-only: nothing says C moved.
+    back = store.upsert_posting(_posting(source="indeed", external_id="c1", location="India"))
+
+    assert back == c
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 3
+    fit = store.conn.execute(
+        "SELECT fit_score FROM scores WHERE seeker_id = ? AND posting_id = ?",
+        (sid, c)).fetchone()
+    assert fit["fit_score"] == 40.0
 
 
 def test_cpp_and_csharp_titles_are_not_merged(store):
@@ -684,9 +723,8 @@ def test_state_level_indian_location_merges_with_the_full_naukri_listing(store):
 
 
 def test_region_stops_a_state_level_sighting_folding_into_the_wrong_city(store):
-    """Two cities are known (Gurgaon/Haryana, Pune/Maharashtra); without
-    region awareness a state-level 'HR, IN' sighting would be ambiguous
-    between them and wrongly stay a separate, third row."""
+    """Two cities are known in different regions; region-aware adoption
+    chooses the sole Haryana city instead of leaving a needless third row."""
     gurgaon = store.upsert_posting(_posting(
         source="naukri", external_id="g1", location="Gurgaon, Haryana, India"))
     pune = store.upsert_posting(_posting(
@@ -698,6 +736,23 @@ def test_region_stops_a_state_level_sighting_folding_into_the_wrong_city(store):
 
     assert resolved == gurgaon
     assert _count(store, "SELECT COUNT(*) FROM job_postings") == 2
+
+
+def test_state_level_sighting_stays_separate_when_its_region_has_two_cities(store):
+    """Region narrowing is intentionally conservative within one region:
+    HR cannot tell Gurgaon from Faridabad, so the sighting stays separate
+    rather than guessing and silently assigning the wrong city."""
+    gurgaon = store.upsert_posting(_posting(
+        source="naukri", external_id="g1", location="Gurgaon, Haryana, India"))
+    faridabad = store.upsert_posting(_posting(
+        source="naukri", external_id="f1", location="Faridabad, Haryana, India"))
+    assert gurgaon != faridabad
+
+    state_only = store.upsert_posting(
+        _posting(source="indeed", external_id="i1", location="HR, IN"))
+
+    assert state_only not in {gurgaon, faridabad}
+    assert _count(store, "SELECT COUNT(*) FROM job_postings") == 3
 
 
 def test_remote_and_country_only_us_sightings_of_the_same_job_merge(store):
@@ -771,6 +826,39 @@ def test_a_detaching_key_gets_its_own_new_row_when_no_destination_exists(store):
         "SELECT fit_score FROM scores WHERE seeker_id = ? AND posting_id = ?",
         (sid, mumbai)).fetchone()
     assert fit["fit_score"] == 90.0
+
+
+def test_a_resighting_with_the_same_city_cannot_corrupt_the_stored_region(store):
+    """Independent-review finding: _resolve_hash reads location_region to
+    steer future city-less adoptions, so region is second-order identity.
+    A re-sighting that keeps the SAME city but reports a DIFFERENT (say,
+    mistaken) region must not silently overwrite the row's already-settled
+    region -- that would steer a later, genuinely-different-region sighting
+    onto the wrong row."""
+    pid = store.upsert_posting(_posting(
+        source="naukri", external_id="g1", location="Gurgaon, Haryana, India"))
+    again = store.upsert_posting(_posting(
+        source="naukri", external_id="g1", location="Gurgaon, Punjab, India"))
+
+    assert again == pid
+    row = store.conn.execute(
+        "SELECT location_region FROM job_postings WHERE id = ?", (pid,)).fetchone()
+    assert row["location_region"] == "haryana"
+
+
+def test_a_blank_region_can_still_be_enriched_by_a_same_city_resighting(store):
+    """The guard above must not become a blanket freeze: a row created
+    without region information (e.g. a bare "Gurgaon, India") may still
+    pick one up from a later, more detailed sighting of the SAME city."""
+    pid = store.upsert_posting(_posting(
+        source="naukri", external_id="g1", location="Gurgaon, India"))
+    again = store.upsert_posting(_posting(
+        source="naukri", external_id="g1", location="Gurgaon, Haryana, India"))
+
+    assert again == pid
+    row = store.conn.execute(
+        "SELECT location_region FROM job_postings WHERE id = ?", (pid,)).fetchone()
+    assert row["location_region"] == "haryana"
 
 
 def test_a_detaching_key_also_protects_bystanders_from_a_title_driven_merge(store):
@@ -848,12 +936,119 @@ def test_migrate_backfills_location_columns_on_an_existing_database(tmp_path):
     s = Store(db_path)
     s.migrate()
     row = s.conn.execute(
-        "SELECT location_city, location_region, location_country FROM job_postings"
+        "SELECT location_city, location_region, location_country, content_hash "
+        "FROM job_postings"
     ).fetchone()
     s.close()
 
     assert (row["location_city"], row["location_region"], row["location_country"]) == (
         "gurgaon", "haryana", "india")
+    assert row["content_hash"] == _hash(
+        normalize_company("Marks & Spencer"), "senior merchandiser", "gurgaon"
+    )
+
+
+def test_migrate_repairs_columns_that_survived_an_interrupted_backfill(tmp_path):
+    """A process can die after ALTER TABLE but before the data UPDATEs.
+    The next migrate() must not treat the presence of the columns as proof
+    that the backfill completed."""
+    db_path = tmp_path / "interrupted.db"
+    raw = sqlite3.connect(db_path)
+    raw.execute(
+        "CREATE TABLE job_postings (id INTEGER PRIMARY KEY, company_id INTEGER, "
+        "company_name TEXT NOT NULL, title TEXT NOT NULL, normalized_title TEXT NOT NULL, "
+        "location TEXT, location_city TEXT NOT NULL DEFAULT '', "
+        "location_region TEXT NOT NULL DEFAULT '', location_country TEXT NOT NULL DEFAULT '', "
+        "description TEXT, canonical_url TEXT, posted_at TEXT, "
+        "first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, "
+        "content_hash TEXT NOT NULL UNIQUE)"
+    )
+    raw.execute(
+        "INSERT INTO job_postings (company_name, title, normalized_title, location, "
+        "first_seen_at, last_seen_at, content_hash) VALUES (?,?,?,?,?,?,?)",
+        ("Marks & Spencer", "Senior Merchandiser", "senior merchandiser",
+         "Gurgaon, Haryana, India", "t", "t", "oldhash"),
+    )
+    raw.commit()
+    raw.close()
+
+    s = Store(db_path)
+    s.migrate()
+    row = s.conn.execute(
+        "SELECT location_city, location_region, location_country, content_hash "
+        "FROM job_postings"
+    ).fetchone()
+    s.close()
+
+    assert (row["location_city"], row["location_region"], row["location_country"]) == (
+        "gurgaon", "haryana", "india")
+    assert row["content_hash"] == _hash(
+        normalize_company("Marks & Spencer"), "senior merchandiser", "gurgaon"
+    )
+
+
+def test_migrate_rehashes_and_merges_rows_when_the_new_parser_collides(tmp_path):
+    """A parser change can make two legacy hashes represent the same
+    city-less identity. Migration must use the normal merge path rather than
+    fail on UNIQUE(content_hash) or discard source/history rows."""
+    db_path = tmp_path / "collision.db"
+    s = Store(db_path)
+    s.migrate()
+    sid = s.add_seeker("A", 1, "a.yaml", 20)
+    old_state_hash = _hash("acme", "product analyst", "hr")
+    old_country_hash = _hash("acme", "product analyst", "india")
+    s.conn.execute(
+        "INSERT INTO job_postings (company_name, title, normalized_title, location, "
+        "first_seen_at, last_seen_at, content_hash) VALUES (?,?,?,?,?,?,?)",
+        ("Acme", "Product Analyst", "product analyst", "HR, IN", "a", "a", old_state_hash),
+    )
+    state_id = s.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    s.conn.execute(
+        "INSERT INTO job_postings (company_name, title, normalized_title, location, "
+        "first_seen_at, last_seen_at, content_hash) VALUES (?,?,?,?,?,?,?)",
+        ("Acme", "Product Analyst", "product analyst", "India", "b", "b", old_country_hash),
+    )
+    country_id = s.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    s.conn.execute(
+        "INSERT INTO posting_sources (posting_id, source, external_id, seen_at) "
+        "VALUES (?,?,?,?)", (state_id, "indeed", "state", "a")
+    )
+    s.conn.execute(
+        "INSERT INTO posting_sources (posting_id, source, external_id, seen_at) "
+        "VALUES (?,?,?,?)", (country_id, "linkedin", "country", "b")
+    )
+    s.conn.execute(
+        "INSERT INTO seeker_jobs (seeker_id, posting_id, first_seen_at) VALUES (?,?,?)",
+        (sid, country_id, "b"),
+    )
+    s.conn.execute(
+        "INSERT INTO scores (seeker_id, posting_id, fit_score, reasoning, scored_at) "
+        "VALUES (?,?,?,?,?)", (sid, country_id, 80.0, "kept", "b")
+    )
+    s.conn.commit()
+
+    s.migrate()
+    rows = s.conn.execute(
+        "SELECT id, location_city, location_region, location_country, content_hash "
+        "FROM job_postings"
+    ).fetchall()
+    sources = s.conn.execute(
+        "SELECT source, posting_id FROM posting_sources ORDER BY source"
+    ).fetchall()
+    score = s.conn.execute(
+        "SELECT posting_id, fit_score FROM scores WHERE seeker_id = ?", (sid,)
+    ).fetchone()
+    s.close()
+
+    assert len(rows) == 1
+    assert rows[0]["location_city"] == ""
+    assert rows[0]["location_region"] == "haryana"
+    assert rows[0]["location_country"] == "india"
+    assert rows[0]["content_hash"] == _hash("acme", "product analyst", "")
+    assert [(r["source"], r["posting_id"]) for r in sources] == [
+        ("indeed", state_id), ("linkedin", state_id)
+    ]
+    assert (score["posting_id"], score["fit_score"]) == (state_id, 80.0)
 
 
 def test_migrate_adds_review_required_to_an_existing_database(tmp_path):

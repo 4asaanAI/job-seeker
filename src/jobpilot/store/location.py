@@ -70,7 +70,10 @@ _US_STATES = {
     "new hampshire": "new hampshire", "nh": "new hampshire",
     "new jersey": "new jersey", "nj": "new jersey",
     "new mexico": "new mexico", "nm": "new mexico",
-    "new york": "new york", "ny": "new york",
+    # "new york" (the full name) is deliberately NOT a region -- New York
+    # City is the overwhelmingly common bare use of the words. Only the
+    # abbreviation is safe; nobody writes a bare city called "NY".
+    "ny": "new york",
     "north carolina": "north carolina", "nc": "north carolina",
     "north dakota": "north dakota", "nd": "north dakota",
     "ohio": "ohio", "oh": "ohio",
@@ -85,7 +88,9 @@ _US_STATES = {
     "utah": "utah", "ut": "utah",
     "vermont": "vermont", "vt": "vermont",
     "virginia": "virginia", "va": "virginia",
-    "washington": "washington", "wa": "washington",
+    # Same reasoning as New York: "Washington" bare overwhelmingly means the
+    # city (DC), not the state; only the abbreviation is a safe region match.
+    "wa": "washington",
     "west virginia": "west virginia", "wv": "west virginia",
     "wisconsin": "wisconsin", "wi": "wisconsin",
     "wyoming": "wyoming", "wy": "wyoming",
@@ -103,7 +108,11 @@ _INDIAN_STATES = {
     "assam": "assam", "as": "assam",
     "bihar": "bihar", "br": "bihar",
     "chhattisgarh": "chhattisgarh", "cg": "chhattisgarh", "ct": "chhattisgarh",
-    "goa": "goa", "ga": "goa",
+    # "goa" (the full word) is deliberately NOT a region: like Delhi, it is
+    # also the name of the place itself and is overwhelmingly used as a bare
+    # city-shaped reference ("Goa, India"). Only its abbreviation is safe --
+    # nobody writes a bare city called "GA".
+    "ga": "goa",
     "gujarat": "gujarat", "gj": "gujarat",
     "haryana": "haryana", "hr": "haryana",
     "himachal pradesh": "himachal pradesh", "hp": "himachal pradesh",
@@ -126,14 +135,16 @@ _INDIAN_STATES = {
     "uttar pradesh": "uttar pradesh", "up": "uttar pradesh",
     "uttarakhand": "uttarakhand", "uk": "uttarakhand",
     "west bengal": "west bengal", "wb": "west bengal",
-    # union territories (Delhi is deliberately excluded — it is treated as a
-    # city alias above, since for job search "Delhi" and "NCT of Delhi" are
-    # the same place and splitting them into city vs. region adds nothing).
-    "andaman and nicobar islands": "andaman and nicobar islands", "an": "andaman and nicobar islands",
-    "chandigarh": "chandigarh", "ch": "chandigarh",
+    # Union territories. Delhi, Chandigarh and Puducherry are deliberately
+    # NOT full-name regions -- each one IS the place people mean when they
+    # write it bare ("Chandigarh, India" almost always names the city, not
+    # "somewhere in the Chandigarh UT"). Only the short codes are kept: a
+    # bare two-letter code is not itself a plausible city name.
+    "an": "andaman and nicobar islands",
+    "ch": "chandigarh",
     "jammu and kashmir": "jammu and kashmir", "jk": "jammu and kashmir",
     "ladakh": "ladakh", "la": "ladakh",
-    "puducherry": "puducherry", "py": "puducherry",
+    "py": "puducherry",
 }
 
 _REGIONS_BY_COUNTRY = {
@@ -165,6 +176,16 @@ def parse_location(location: str | None) -> tuple[str, str, str]:
         country = _COUNTRY_ALIASES[parts[-1]]
         parts = parts[:-1]
 
+    # Region is looked up in the table for a country we recognised, or --
+    # when no country was given at all, e.g. Naukri's own "Gurugram, Haryana"
+    # with no "India" suffix -- BOTH tables, since the two markets this
+    # project actually reads from (Naukri India, Indeed India/US) never
+    # supply anything else. ACCEPTED, BOUNDED RISK: a genuinely foreign
+    # location string (a real country this project has no table for, e.g.
+    # "London, UK") could coincidentally cross-match one of these tables --
+    # "uk" collides with Uttarakhand's own abbreviation. This is out of
+    # scope today because nothing in this project ever scrapes a source
+    # outside India/US; revisit the moment one does.
     region = ""
     if parts:
         candidates = [_REGIONS_BY_COUNTRY[country]] if country in _REGIONS_BY_COUNTRY \
@@ -176,9 +197,13 @@ def parse_location(location: str | None) -> tuple[str, str, str]:
                 break
 
     city = ""
+    # Only the LAST remaining part is the city, not every part joined: a
+    # street or locality prefix ("Udyog Vihar, Gurgaon, Haryana, India")
+    # would otherwise produce a pseudo-city that never matches the same
+    # real job listed without the prefix (independent-review finding).
     kept = [p for p in parts if p not in _DROP_WORDS]
     if kept:
-        cleaned = re.sub(r"[^a-z0-9]+", " ", " ".join(kept)).strip()
+        cleaned = re.sub(r"[^a-z0-9]+", " ", kept[-1]).strip()
         city = _CITY_ALIASES.get(cleaned, cleaned)
 
     return city, region, country
