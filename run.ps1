@@ -1,6 +1,6 @@
 # JobPilot entry point for the Windows desktop. Keep this file ASCII-only.
 param(
-    [ValidateSet("test", "smoke", "capture", "serve")]
+    [ValidateSet("test", "smoke", "capture", "serve", "scheduled", "telegram")]
     [string]$Task = "smoke"
 )
 
@@ -20,5 +20,9 @@ switch ($Task) {
     "smoke"   { & $Py (Join-Path $Root "scripts\smoke.py") --yes }
     "capture" { & $Py (Join-Path $Root "scripts\capture_fixture.py") }
     "serve"   { & $Py -m jobpilot.server }
+    "scheduled" {
+        & $Py -m jobpilot.scheduled --mcp-config (Join-Path $Root ".mcp.scheduled.json")
+    }
+    "telegram" { & (Join-Path $Root "scripts\telegram.ps1") }
 }
 exit $LASTEXITCODE

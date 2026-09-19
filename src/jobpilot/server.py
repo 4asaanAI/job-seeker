@@ -19,6 +19,7 @@ from .pipeline import SeekerTarget, run_discovery
 from .profiles import load_companies, load_profile
 from .resume import ResumeValidationError, load_base_resume, render_docx
 from .scoring import build_scoring_batch
+from .sheets import GoogleSheetsExporter, load_google_services
 from .sources.ats_json import ATSJsonSource
 from .sources.jsonld_source import JsonLdSource
 from .sources.jobspy_source import JobSpySource
@@ -465,11 +466,39 @@ def build_tools(
         """Return the latest status per source; blocked is never quiet."""
         return store.source_health_summary()
 
+    def sync_google_sheet(
+        seeker_id: int,
+        share_email: str,
+        spreadsheet_id: str | None = None,
+        sheet_title: str | None = None,
+    ) -> dict:
+        """Render this seeker's store view to a directly shared Google Sheet."""
+        try:
+            sid = _check(seeker_id)
+            service_account = os.environ.get("JOBPILOT_GOOGLE_SERVICE_ACCOUNT")
+            if not service_account:
+                raise ValueError("JOBPILOT_GOOGLE_SERVICE_ACCOUNT is not configured")
+            path = Path(service_account).expanduser().resolve()
+            if not path.is_file():
+                raise ValueError("configured Google service-account file does not exist")
+            sheets, drive = load_google_services(path)
+            seeker = store.get_seeker(sid)
+            rows = store.seeker_sheet_rows(sid)
+            result = GoogleSheetsExporter(sheets, drive).export(
+                title=f"JobPilot - {seeker.name}", rows=rows,
+                share_email=share_email, spreadsheet_id=spreadsheet_id,
+                sheet_title=sheet_title,
+            )
+        except (OSError, PermissionError, RuntimeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, **result.as_dict()}
+
     tools.update({
         "list_seekers": list_seekers,
         "add_seeker": add_seeker,
         "discover": discover,
         "source_health": source_health,
+        "sync_google_sheet": sync_google_sheet,
     })
     return tools
 

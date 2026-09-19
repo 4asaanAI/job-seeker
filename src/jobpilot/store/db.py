@@ -961,3 +961,54 @@ class Store:
             item["extraction_ok"] = bool(item["extraction_ok"])
             result.append(item)
         return result
+
+    def seeker_sheet_rows(self, seeker_id: int) -> list[dict]:
+        """Return a one-way, seeker-scoped view suitable for Sheets export."""
+        with self._lock:
+            self.get_seeker(seeker_id)
+            rows = self.conn.execute(
+                "SELECT sj.posting_id, jp.title, jp.company_name, jp.location, "
+                "       jp.canonical_url AS url, sj.status, sj.first_seen_at, "
+                "       s.fit_score, s.reasoning, a.status AS application_status "
+                "FROM seeker_jobs sj JOIN job_postings jp ON jp.id = sj.posting_id "
+                "LEFT JOIN scores s ON s.seeker_id = sj.seeker_id "
+                "   AND s.posting_id = sj.posting_id "
+                "LEFT JOIN applications a ON a.seeker_id = sj.seeker_id "
+                "   AND a.posting_id = sj.posting_id "
+                "WHERE sj.seeker_id = ? ORDER BY sj.first_seen_at DESC, sj.posting_id DESC",
+                (seeker_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    # --- machine run ledger -------------------------------------------
+    def start_machine_run(self, machine: str) -> int:
+        """Start one scheduler run and return its durable ledger ID."""
+        machine = " ".join(str(machine or "").split())
+        if not machine:
+            raise ValueError("machine must not be empty")
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO machine_runs (machine, started_at, status) VALUES (?,?,?)",
+                (machine, _now(), "running"),
+            )
+            return int(cur.lastrowid)
+
+    def finish_machine_run(self, run_id: int, status: str) -> None:
+        if status not in ("completed", "error"):
+            raise ValueError(f"unknown machine run status: {status}")
+        with self._lock, self.conn:
+            updated = self.conn.execute(
+                "UPDATE machine_runs SET finished_at = ?, status = ? WHERE id = ?",
+                (_now(), status, int(run_id)),
+            ).rowcount
+            if updated != 1:
+                raise ValueError(f"no machine run with id {run_id}")
+
+    def latest_machine_run(self, machine: str) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT id, machine, started_at, finished_at, status "
+                "FROM machine_runs WHERE machine = ? ORDER BY id DESC LIMIT 1",
+                (machine,),
+            ).fetchone()
+        return dict(row) if row else None

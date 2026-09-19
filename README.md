@@ -69,3 +69,8 @@ reported as blocked/error rather than as a quiet job market.
 Do not commit `data/seekers/`, databases, generated output, Telegram tokens,
 or other personal data. The repository is private on GitHub, but privacy still
 depends on keeping those paths untracked.
+
+The optional Google Sheets exporter is one-way: SQLite remains authoritative,
+and the exporter grants only a direct reader permission to the seeker's email.
+Install it with `pip install -e ".[dev,sheets]"` only when an operator-owned
+service-account file is ready.

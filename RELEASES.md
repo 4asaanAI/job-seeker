@@ -165,3 +165,13 @@ Telegram sender was configured automatically.
 
 Gate evidence: **314 offline tests passed**. No live structured-page endpoint,
 resume from a real seeker, or Telegram message was used by the test suite.
+
+The M3 channel/scheduling increment adds a plain-text Telegram digest path,
+machine-run ledger, bounded non-persistent Claude scheduler, an explicit
+JobPilot-only MCP scheduled config, and a credential-free one-way Google Sheets
+exporter with direct sharing semantics. The official Telegram plugin was
+installed and enabled on Windows, but its bot token remains intentionally
+unconfigured.
+
+Gate evidence: **319 offline tests passed**. No Google service-account or
+Telegram credential was committed or exercised.

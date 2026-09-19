@@ -19,6 +19,7 @@ __pycache__/
 *.pdf
 .env
 .mcp.telegram.json
+.mcp.scheduled.json
 telegram-state/
 tests/fixtures/live/
 

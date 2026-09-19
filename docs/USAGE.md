@@ -157,3 +157,19 @@ The Windows checkout contains `.mcp.telegram.json.example` and
 For a digest, call `build_plain_digest(record=false)`, send its returned
 `text`, and call `record_notification` only after the Telegram reply succeeds.
 The HTML digest is never sent through Telegram.
+
+## 8. Scheduled routine and Sheets view
+
+Copy `.mcp.scheduled.json.example` to `.mcp.scheduled.json` on the desktop,
+then run `.un.ps1 -Task scheduled`. The runner starts a fresh Claude session
+with no built-in tools, only the JobPilot MCP, no session persistence, and a
+default `$2` API budget. Each attempt is recorded in `machine_runs`; a failed
+Claude process is recorded as `error` rather than disappearing.
+
+For the optional Sheets view, install `.[sheets]`, set
+`JOBPILOT_GOOGLE_SERVICE_ACCOUNT` to an operator-owned service-account JSON
+file outside Git, and call the operator-only `sync_google_sheet` tool with the
+seeker's email. The exporter creates or updates a single tab, writes the full
+seeker-scoped view in one pass, and shares it directly as a reader. It never
+uses an anyone-with-the-link permission. A spreadsheet with multiple visible
+tabs requires an explicit `sheet_title`.
