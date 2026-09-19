@@ -510,6 +510,108 @@ routine, Mac watchdog.
 
 **M4:** Separate specs - LinkedIn post generation; interview prep.
 
+## 17. Scope addendum (2026-09-19)
+
+Four capabilities requested after the M1 plan was finalised. None change M1.
+
+### 17.1 Claude's built-in browser as an investigation tool (M2)
+
+Claude Code ships a real browser pane. It is the right tool for **targeted
+investigation** and the wrong tool for bulk discovery:
+
+- Every page visit returns page text or a screenshot into the context window.
+  Scanning hundreds of listings that way costs orders of magnitude more quota
+  than an HTTP fetch, per run, per seeker, forever.
+- It is seconds per page against milliseconds for a JSON call.
+
+Legitimate uses, added as MCP tools in M2:
+
+- `investigate_posting(posting_id)` - open one listing and read it in full when
+  the scraped description is thin or a score looks wrong.
+- `check_company_careers(company_id)` - open one employer's careers page,
+  useful precisely where they have no usable ATS JSON endpoint.
+- `verify_still_open(posting_id)` - confirm a role has not closed before a
+  seeker spends effort on it.
+
+Rule: the browser answers questions about **one** thing. Discovery stays on
+ATS JSON and JobSpy.
+
+### 17.2 Asking the system about itself (M2)
+
+Seekers should be able to ask what is happening. This is nearly free given
+Claude plus MCP, but the tools must be seeker-scoped and read-only:
+
+- `my_status(seeker_id)` - jobs found, scored, shown, applied this week.
+- `my_sources(seeker_id)` - which sources ran and whether any were blocked,
+  in plain language.
+- `my_history(seeker_id, query)` - what she was shown and when.
+
+These obey section 5A isolation: no roster, no other seeker's data, no
+operator internals. A seeker asking about another person is refused.
+
+**Watchlist requests** are supported: "watch H&M careers" adds a company to
+that seeker's targets. `add_target_company(seeker_id, name)` writes to
+`seeker_targets`, and discovery picks it up on the next run.
+
+**Watching named HR or recruiter profiles is out of scope, permanently.**
+Building a file on individual people scrapes third parties who never consented,
+is specifically prohibited by LinkedIn, and creates a dossier of named
+individuals on the operator's machine. The supported alternative is the
+recruiter contact an employer chooses to publish on its own job advert, which
+is already in the posting.
+
+### 17.3 Third-party scraping APIs (evaluated, not adopted)
+
+Apify hosts LinkedIn actors. Verified 2026-09-19: the free plan gives **$5 of
+monthly credits**, and across LinkedIn actors 1,000 job records cost roughly
+**$0.28 to $5.00** depending on actor and plan. At this project's volume the
+free credit would plausibly cover it.
+
+Not adopted, for three reasons:
+
+1. **It does not change the terms position.** Apify is a host; scraping
+   LinkedIn through it still breaches LinkedIn's terms. It moves the IP
+   address, not the legality.
+2. **It is not where her jobs are.** Brand-side employers post to their own
+   Workday and SuccessFactors tenants, which M2 reads directly - free,
+   permitted, and more complete than any LinkedIn scrape.
+3. **It adds a paid external dependency** for the weakest source.
+
+Recorded as a fallback with real numbers if ATS coverage proves insufficient.
+Revisit only with evidence, not in advance.
+
+### 17.4 Google Sheets as the seeker-facing view (M3)
+
+Each seeker gets a Google Sheet showing every job found, its score, its status
+and what has been applied to. Telegram hands her the link. She reads and
+annotates it in a tool she already knows, with no app to learn.
+
+**Architecture: one-way, database to sheet.** The SQLite store stays the single
+source of truth; the sheet is a rendered view, rebuilt on each run. Status
+changes happen through Telegram buttons, which write to the store. Two-way sync
+would create a second source of truth and a merge problem for no real gain.
+One exception: a `Notes` column she owns, read back and stored against the job.
+
+**Access, and why not per-seeker OAuth.** Asking every seeker to complete a
+Google OAuth flow is friction that defeats the point, and credential entry is
+something Claude will not do. Instead: a **Google service account owned by the
+operator** creates one sheet per seeker and shares it **directly to that
+seeker's email address** - not "anyone with the link", which would make a
+person's job search readable by anyone who saw the URL.
+
+**Cost:** the Sheets API is free for standard use. Two caveats verified
+2026-09-19: quotas are 300 read requests/minute per project and 60/minute per
+user, and a **service account counts as a single user**, so all traffic shares
+that 60/minute ceiling. Google has stated that exceeding quota is planned to
+incur Cloud billing charges later in 2026. This project writes a few times per
+day per seeker, which is far below the ceiling, but batch writes rather than
+per-row calls so this stays true as seekers are added.
+
+**Data note:** the sheet duplicates job-search history into the operator's
+Google account. That is a second copy outside the machine, subject to that
+account's security. Worth stating to each seeker alongside the disclosure
+section 5A already requires.
+
 ## 16. Open questions
 
 1. Salary expectation and notice period — needed for scoring and for
