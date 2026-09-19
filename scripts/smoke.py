@@ -6,6 +6,7 @@ should be run only from an interactive terminal after reviewing the plan.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import sys
 from pathlib import Path
 
@@ -26,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--yes", action="store_true",
                         help="required acknowledgement; no prompt is bypassed")
+    parser.add_argument("--seeker-id", type=int,
+                        help="one seeker to smoke-test; defaults to the first active seeker")
     args = parser.parse_args(argv)
     if not args.yes:
         print("Refusing live requests without --yes. Review the command first.")
@@ -38,16 +41,26 @@ def main(argv: list[str] | None = None) -> int:
         store.migrate()
         store.sync_companies(load_companies(home / "data" / "companies.csv"))
         seekers = store.list_seekers()
+        if args.seeker_id is not None:
+            seekers = [s for s in seekers if s.id == args.seeker_id]
         if not seekers:
             print("No active seekers are configured.")
             return 2
+        # A smoke run is a connectivity check, not a full discovery run. One
+        # seeker, one primary term, and one primary location keeps the request
+        # budget bounded at two calls per approved source (canary + search).
+        seekers = seekers[:1]
 
         targets = []
         for seeker in seekers:
             path = Path(seeker.profile_path)
             if not path.is_absolute():
                 path = home / path
-            targets.append(SeekerTarget(seeker.id, load_profile(path)))
+            profile = load_profile(path)
+            targets.append(SeekerTarget(
+                seeker.id,
+                replace(profile, search_terms=profile.search_terms[:1], also_search=[]),
+            ))
 
         sources = [
             JobSpySource(site, min_request_gap_seconds=cfg.min_request_gap_seconds)
@@ -60,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if skipped:
             print("Skipped sources (not approved for live smoke): " + ", ".join(skipped))
+        print("Smoke scope: one seeker, one term, primary location only; "
+              f"maximum scraper calls={2 * len(sources)}")
 
         results = run_discovery(store, sources, targets)
         worst = 0
