@@ -23,7 +23,8 @@ import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
+from urllib.request import urlopen
 
 from ..config import ATSConfig
 from .ats_json import ATSJsonSource, _default_fetcher, _default_poster
@@ -91,6 +92,27 @@ def wigolo_search(query: str, domain: str) -> list[dict]:
         return []
 
 
+def searxng_search(query: str, domain: str) -> list[dict]:
+    """Query the local SearXNG directly; [] when it is not running.
+
+    Wigolo's one-shot CLI search never consults SearXNG (only its MCP server
+    and shell do), so JobPilot asks SearXNG itself. It aggregates several
+    engines, which is what survives one engine throttling.
+    """
+    base = os.environ.get("JOBPILOT_SEARXNG_URL", "http://127.0.0.1:8888").rstrip("/")
+    url = f"{base}/search?" + urlencode({"q": f"{query} site:{domain}", "format": "json"})
+    try:
+        with urlopen(url, timeout=30) as response:  # noqa: S310 - local operator service
+            rows = json.load(response).get("results", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [r for r in rows if domain in str(r.get("url") or "")]
+
+
+def web_search(query: str, domain: str) -> list[dict]:
+    return searxng_search(query, domain) or wigolo_search(query, domain)
+
+
 def candidates_from_url(url: str) -> list[dict]:
     """Turn a public ATS page URL into the feed that lists its jobs."""
     parsed = urlparse(url)
@@ -131,7 +153,7 @@ def find_feed(
     company: str,
     fetch: Callable[[str, float], object] = _default_fetcher,
     post: Callable[[str, dict, float], object] = _default_poster,
-    search: Search = wigolo_search,
+    search: Search = web_search,
     timeout: float = 15.0,
 ) -> dict | None:
     """Return {vendor, slug, endpoint, company_name, jobs} or None."""

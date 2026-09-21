@@ -218,3 +218,26 @@ def test_wigolo_runs_without_any_llm_provider_key(monkeypatch):
     env = finder.wigolo_env()
     assert "OPENAI_API_KEY" not in env and "ANTHROPIC_API_KEY" not in env
     assert env["PATH_MARKER"] == "kept"
+
+
+def test_searxng_is_tried_first_and_wigolo_only_when_it_is_down(monkeypatch):
+    from jobpilot.sources import finder
+    calls = []
+    monkeypatch.setattr(finder, "searxng_search", lambda q, d: calls.append("sx") or [])
+    monkeypatch.setattr(finder, "wigolo_search", lambda q, d: calls.append("wg") or [{"url": "u"}])
+    assert finder.web_search("Nike careers jobs", "myworkdayjobs.com") == [{"url": "u"}]
+    assert calls == ["sx", "wg"]
+    monkeypatch.setattr(finder, "searxng_search", lambda q, d: [{"url": "s"}])
+    calls.clear()
+    assert finder.web_search("x", "y") == [{"url": "s"}] and calls == []
+
+
+def test_searxng_keeps_only_results_on_the_requested_domain(monkeypatch):
+    import io
+    import json as _json
+    from jobpilot.sources import finder
+    body = {"results": [{"url": "https://nike.wd1.myworkdayjobs.com/nke"},
+                        {"url": "https://example.com/nike"}]}
+    monkeypatch.setattr(finder, "urlopen", lambda url, timeout: io.BytesIO(_json.dumps(body).encode()))
+    assert finder.searxng_search("Nike", "myworkdayjobs.com") == [
+        {"url": "https://nike.wd1.myworkdayjobs.com/nke"}]
