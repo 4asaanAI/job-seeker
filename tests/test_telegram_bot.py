@@ -343,13 +343,18 @@ def test_run_resets_failure_count_after_success(home, store, monkeypatch):
     assert any("poll recovered after 1 failure" in m for m in logged)
 
 
-def test_single_instance_lock_blocks_a_live_duplicate(home):
-    from jobpilot.telegram_bot import _acquire_single_instance_lock
+def test_single_instance_lock_blocks_a_live_duplicate(home, monkeypatch):
+    from jobpilot import telegram_bot as tb
     state = home / "telegram-state"
     state.mkdir(exist_ok=True)
-    assert _acquire_single_instance_lock(state)
+    # _pid_alive now verifies the PID is actually running telegram_bot, not
+    # merely alive (a recycled PID could belong to any unrelated process,
+    # including this test runner) -- so the "duplicate is live" case is
+    # exercised by stubbing that check, not by relying on our own PID.
+    monkeypatch.setattr(tb, "_pid_alive", lambda pid: True)
+    assert tb._acquire_single_instance_lock(state)
     assert (state / "bot.pid").read_text() == str(os.getpid())
-    assert not _acquire_single_instance_lock(state)
+    assert not tb._acquire_single_instance_lock(state)
 
 
 def test_single_instance_lock_ignores_a_dead_pid(home, monkeypatch):
