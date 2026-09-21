@@ -414,12 +414,23 @@ def test_set_menu_survives_individual_call_failures(home, store):
     assert calls == ["setMyCommands", "setMyName", "setMyDescription", "setMyShortDescription"]
 
 
-def test_single_instance_lock_is_race_safe_under_concurrent_start(home):
+def test_single_instance_lock_is_race_safe_under_concurrent_start(home, monkeypatch):
     """The actual bug this guards against: two processes starting within
     milliseconds of each other must not both win. A plain read-then-write
-    has a gap both can slip through; only one thread may hold the win here."""
+    has a gap both can slip through; only one thread may hold the win here.
+
+    All 20 threads here share one real PID (os.getpid()), so the platform's
+    real _pid_alive (which on Windows verifies the PID is actually running
+    telegram_bot, not just alive -- this test process is pytest, not that)
+    would call every thread's own claim "not really us" and let them all
+    reclaim the lock. Stubbed to plain liveness so this test isolates what
+    it's actually checking: the acquire path's atomicity, not _pid_alive's
+    own verification, which has its own dedicated tests above.
+    """
     import threading
+    from jobpilot import telegram_bot as tb
     from jobpilot.telegram_bot import _acquire_single_instance_lock
+    monkeypatch.setattr(tb, "_pid_alive", lambda pid: pid == os.getpid())
     state = home / "telegram-state"
     state.mkdir(exist_ok=True)
     results = []

@@ -377,7 +377,13 @@ def _acquire_single_instance_lock(state: Path) -> bool:
             # Stale: clear it and retry the exclusive create, rather than
             # unlinking unconditionally up front, which would let a slower
             # competitor delete a winner's just-created, valid lock file.
-            lock.unlink(missing_ok=True)
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                # Windows refuses to delete a file another handle still has
+                # open; someone else is actively contending for it right
+                # now, so conceding is correct either way.
+                return False
             continue
         with os.fdopen(fd, "w") as f:
             f.write(str(os.getpid()))
