@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -18,6 +19,16 @@ import time
 from pathlib import Path
 
 CACHE_SECONDS = 1800
+
+# Wigolo uses any LLM provider key it finds in its environment (there is no
+# "off" setting). JobPilot never wants Wigolo's own synthesis -- Claude does
+# the reasoning -- so it runs with every provider key removed.
+LLM_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+            "GROQ_API_KEY", "WIGOLO_LLM_API_KEY", "WIGOLO_LLM_PROVIDER")
+
+
+def wigolo_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k.upper() not in LLM_KEYS}
 
 LINK = re.compile(r"^#{1,6}\s*\[(?P<title>[^\]]+)\]\((?P<url>https?://[^)\s]+)\)\s*$")
 
@@ -54,7 +65,7 @@ def fetch_markdown(url: str, exe: str) -> str:
         return cache.read_text(encoding="utf-8")
     done = subprocess.run(
         [exe, "fetch", url, "--render-js=always", "--json", "--include-full-markdown"],
-        capture_output=True, text=True, encoding="utf-8", timeout=120, check=False,
+        capture_output=True, text=True, encoding="utf-8", timeout=120, check=False, env=wigolo_env(),
     )
     if done.returncode != 0:
         raise RuntimeError(done.stderr.strip()[:500] or f"wigolo exited {done.returncode}")

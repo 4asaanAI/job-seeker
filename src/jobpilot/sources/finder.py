@@ -17,6 +17,7 @@ else is "not found": a wrong employer's jobs are worse than none.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -41,6 +42,16 @@ MAX_SEARCHED_CANDIDATES = 10
 LOCALE = re.compile(r"^[a-z]{2}(-[A-Za-z]{2})?$")
 
 Search = Callable[[str, str], list[dict]]
+
+# Wigolo uses any LLM provider key it finds in its environment (there is no
+# "off" setting). JobPilot never wants Wigolo's own synthesis -- Claude does
+# the reasoning -- so it runs with every provider key removed.
+LLM_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+            "GROQ_API_KEY", "WIGOLO_LLM_API_KEY", "WIGOLO_LLM_PROVIDER")
+
+
+def wigolo_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k.upper() not in LLM_KEYS}
 
 
 def _words(name: str) -> list[str]:
@@ -74,7 +85,7 @@ def wigolo_search(query: str, domain: str) -> list[dict]:
         done = subprocess.run(
             [exe, "search", query, f"--include-domains={domain}", "--no-content",
              "--max-results=8", "--json"],
-            capture_output=True, text=True, encoding="utf-8", timeout=90, check=False)
+            capture_output=True, text=True, encoding="utf-8", timeout=90, check=False, env=wigolo_env())
         return [r for r in json.loads(done.stdout).get("results", []) if r.get("url")]
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         return []

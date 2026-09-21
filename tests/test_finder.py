@@ -208,3 +208,13 @@ def test_daily_discovery_retries_companies_that_were_missed(home, monkeypatch):
     profile = yaml.safe_load((path / seeker.profile_path).read_text())
     assert profile["sources"] == ["indeed_us", "ashby_northwind"]
     assert operator["discover"]([seeker.id])["feeds_added"] == {}  # nothing left to retry
+
+
+def test_wigolo_runs_without_any_llm_provider_key(monkeypatch):
+    from jobpilot.sources import finder
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("PATH_MARKER", "kept")
+    env = finder.wigolo_env()
+    assert "OPENAI_API_KEY" not in env and "ANTHROPIC_API_KEY" not in env
+    assert env["PATH_MARKER"] == "kept"
