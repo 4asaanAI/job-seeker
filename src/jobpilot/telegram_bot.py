@@ -308,6 +308,38 @@ def _load_token(home: Path) -> str:
     raise SystemExit("TELEGRAM_BOT_TOKEN missing")
 
 
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFO
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_single_instance_lock(state: Path) -> bool:
+    """Refuse a second poller against the same bot token.
+
+    Telegram allows only one ``getUpdates`` long-poll consumer per token; a
+    second one makes both see intermittent conflicts. The watchdog and a
+    manual restart can otherwise race into running two at once.
+    """
+    lock = state / "bot.pid"
+    try:
+        if _pid_alive(int(lock.read_text().strip())):
+            return False
+    except (OSError, ValueError):
+        pass
+    lock.write_text(str(os.getpid()))
+    return True
+
+
 def main() -> None:
     home = jobpilot_home()
     store = Store(Path(os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
@@ -315,6 +347,9 @@ def main() -> None:
     bot = Bot(_load_token(home), home, store)
     if len(sys.argv) == 3 and sys.argv[1] == "link":
         print(bot.create_link_code(int(sys.argv[2])))
+        return
+    if not _acquire_single_instance_lock(bot.state):
+        _log("another instance is already running; exiting")
         return
     bot.run()
 

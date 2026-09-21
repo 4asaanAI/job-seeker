@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -339,3 +340,30 @@ def test_run_resets_failure_count_after_success(home, store, monkeypatch):
     with pytest.raises(SystemExit):
         bot.run()
     assert any("poll recovered after 1 failure" in m for m in logged)
+
+
+def test_single_instance_lock_blocks_a_live_duplicate(home):
+    from jobpilot.telegram_bot import _acquire_single_instance_lock
+    state = home / "telegram-state"
+    state.mkdir(exist_ok=True)
+    assert _acquire_single_instance_lock(state)
+    assert (state / "bot.pid").read_text() == str(os.getpid())
+    assert not _acquire_single_instance_lock(state)
+
+
+def test_single_instance_lock_ignores_a_dead_pid(home, monkeypatch):
+    from jobpilot import telegram_bot as tb
+    state = home / "telegram-state"
+    state.mkdir(exist_ok=True)
+    (state / "bot.pid").write_text("999999999")
+    monkeypatch.setattr(tb, "_pid_alive", lambda pid: False)
+    assert tb._acquire_single_instance_lock(state)
+    assert (state / "bot.pid").read_text() == str(os.getpid())
+
+
+def test_single_instance_lock_ignores_garbage_pid_file(home):
+    from jobpilot.telegram_bot import _acquire_single_instance_lock
+    state = home / "telegram-state"
+    state.mkdir(exist_ok=True)
+    (state / "bot.pid").write_text("not-a-pid")
+    assert _acquire_single_instance_lock(state)
