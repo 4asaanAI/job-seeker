@@ -92,12 +92,13 @@ def wigolo_search(query: str, domain: str) -> list[dict]:
         return []
 
 
-def searxng_search(query: str, domain: str) -> list[dict]:
+def searxng_search(query: str, domain: str) -> list[dict] | None:
     """Query the local SearXNG directly; [] when it is not running.
 
     Wigolo's one-shot CLI search never consults SearXNG (only its MCP server
     and shell do), so JobPilot asks SearXNG itself. It aggregates several
-    engines, which is what survives one engine throttling.
+    engines, which is what survives one engine throttling. Returns None when
+    SearXNG is unreachable, so only that (not an honest empty) falls back.
     """
     base = os.environ.get("JOBPILOT_SEARXNG_URL", "http://127.0.0.1:8888").rstrip("/")
     url = f"{base}/search?" + urlencode({"q": f"{query} site:{domain}", "format": "json"})
@@ -105,12 +106,13 @@ def searxng_search(query: str, domain: str) -> list[dict]:
         with urlopen(url, timeout=30) as response:  # noqa: S310 - local operator service
             rows = json.load(response).get("results", [])
     except (OSError, ValueError, AttributeError):
-        return []
+        return None
     return [r for r in rows if domain in str(r.get("url") or "")]
 
 
 def web_search(query: str, domain: str) -> list[dict]:
-    return searxng_search(query, domain) or wigolo_search(query, domain)
+    rows = searxng_search(query, domain)
+    return wigolo_search(query, domain) if rows is None else rows
 
 
 def candidates_from_url(url: str) -> list[dict]:
@@ -147,6 +149,19 @@ def _smartrecruiters_ids(company: str) -> list[str]:
     words = [w for w in re.findall(r"[A-Za-z0-9]+", company) if w.casefold() not in SUFFIXES]
     title = "".join(w[:1].upper() + w[1:] for w in words)
     return list(dict.fromkeys([title, title + "Group"])) if title else []
+
+
+NARROW_SITE = re.compile(r"early|intern|campus|universit|graduate|student|alumni|"
+                         r"internal|contingent|agency|veteran", re.I)
+
+
+def _rank(cand: dict, wanted: str) -> tuple[int, int, int]:
+    """Main public careers site of the employer's own tenant first: a
+    country tenant (deloitteie) or an early-careers site is a small slice."""
+    site = cand["slug"][len(cand["key"]) + 1:] if cand["vendor"] == "workday_cxs" else ""
+    return (0 if normalise(cand["key"]) == wanted else 1,
+            1 if NARROW_SITE.search(site) else 0,
+            0 if re.search(r"extern|career|job", site, re.I) or normalise(site) == wanted else 1)
 
 
 def find_feed(
@@ -224,7 +239,5 @@ def find_feed(
                 context = f"{row.get('title', '')} {row.get('snippet', '')}"
                 for cand in candidates_from_url(str(row["url"])):
                     found.setdefault(cand["endpoint"], {**cand, "context": context})
-    # Prefer a public careers site over a secondary one within a tenant.
-    ordered = sorted(found.values(), key=lambda c: 0 if re.search(
-        r"extern|career", c["slug"], re.I) else 1)
+    ordered = sorted(found.values(), key=lambda c: _rank(c, wanted))
     return first_verified(ordered[:MAX_SEARCHED_CANDIDATES])

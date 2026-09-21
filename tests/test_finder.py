@@ -223,7 +223,7 @@ def test_wigolo_runs_without_any_llm_provider_key(monkeypatch):
 def test_searxng_is_tried_first_and_wigolo_only_when_it_is_down(monkeypatch):
     from jobpilot.sources import finder
     calls = []
-    monkeypatch.setattr(finder, "searxng_search", lambda q, d: calls.append("sx") or [])
+    monkeypatch.setattr(finder, "searxng_search", lambda q, d: calls.append("sx") and None)
     monkeypatch.setattr(finder, "wigolo_search", lambda q, d: calls.append("wg") or [{"url": "u"}])
     assert finder.web_search("Nike careers jobs", "myworkdayjobs.com") == [{"url": "u"}]
     assert calls == ["sx", "wg"]
@@ -241,3 +241,23 @@ def test_searxng_keeps_only_results_on_the_requested_domain(monkeypatch):
     monkeypatch.setattr(finder, "urlopen", lambda url, timeout: io.BytesIO(_json.dumps(body).encode()))
     assert finder.searxng_search("Nike", "myworkdayjobs.com") == [
         {"url": "https://nike.wd1.myworkdayjobs.com/nke"}]
+
+
+def test_main_careers_site_beats_early_careers_and_country_tenants():
+    from jobpilot.sources.finder import _rank, candidates_from_url
+    urls = ["https://deloitteie.wd3.myworkdayjobs.com/Early_Careers",
+            "https://visa.wd5.myworkdayjobs.com/Visa_Early_Careers",
+            "https://visa.wd5.myworkdayjobs.com/Visa"]
+    cands = [candidates_from_url(u)[0] for u in urls]
+    assert sorted(cands, key=lambda c: _rank(c, "visa"))[0]["slug"] == "visa_Visa"
+    deloitte = [candidates_from_url(u)[0] for u in (
+        "https://deloitteie.wd3.myworkdayjobs.com/Early_Careers",
+        "https://deloitte.wd1.myworkdayjobs.com/External")]
+    assert sorted(deloitte, key=lambda c: _rank(c, "deloitte"))[0]["key"] == "deloitte"
+
+
+def test_empty_searxng_answer_does_not_trigger_the_slow_fallback(monkeypatch):
+    from jobpilot.sources import finder
+    monkeypatch.setattr(finder, "searxng_search", lambda q, d: [])
+    monkeypatch.setattr(finder, "wigolo_search", lambda q, d: pytest.fail("fallback ran"))
+    assert finder.web_search("Nobody", "myworkdayjobs.com") == []
