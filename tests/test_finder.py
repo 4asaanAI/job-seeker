@@ -87,7 +87,7 @@ def test_target_companies_get_their_feeds_found_and_shared(home):
     assert out["ok"]
     assert "7 open jobs" in out["target_companies"]["Northwind"]
     assert "already covered" in out["target_companies"]["Stripe"]  # configured feed, no lookup
-    assert "no public job feed" in out["target_companies"]["Tiny Local Shop"]
+    assert "not found yet" in out["target_companies"]["Tiny Local Shop"]
     assert calls == ["Northwind", "Tiny Local Shop"]
     seeker = store.seeker_by_telegram_id(9)
     profile = yaml.safe_load((path / seeker.profile_path).read_text())
@@ -182,3 +182,29 @@ def test_smartrecruiters_rows_become_postings_with_public_links():
     assert raw == 1 and found[0].url == "https://jobs.smartrecruiters.com/BoschGroup/74"
     assert found[0].location == "Charleston, SC, United States"
     assert "q=controls%20engineer" in seen[0]
+
+
+def test_daily_discovery_retries_companies_that_were_missed(home, monkeypatch):
+    path, store = home
+    (path / "data").mkdir(exist_ok=True)
+    shutil.copy(REPO / "data" / "companies.csv", path / "data" / "companies.csv")
+    monkeypatch.setattr("jobpilot.server.run_discovery", lambda store, sources, targets: [])
+    online = {"up": False}
+
+    def finder(company):
+        if online["up"] and company == "Northwind":
+            return {"vendor": "ashby", "slug": "northwind", "company_name": "Northwind",
+                    "endpoint": "https://api.ashbyhq.com/posting-api/job-board/northwind", "jobs": 7}
+        return None
+
+    build_tools(store, path, operator_mode=False, onboard_telegram_id=12,
+                feed_finder=finder)["register_me"](
+        "Sam", "PM", "Austin", ["pm"], ["indeed_us"], target_companies=["Northwind"])
+    seeker = store.seeker_by_telegram_id(12)
+    operator = build_tools(store, path, feed_finder=finder)
+    assert operator["discover"]([seeker.id])["feeds_added"] == {}  # search still down
+    online["up"] = True
+    assert operator["discover"]([seeker.id])["feeds_added"] == {seeker.id: ["ashby_northwind"]}
+    profile = yaml.safe_load((path / seeker.profile_path).read_text())
+    assert profile["sources"] == ["indeed_us", "ashby_northwind"]
+    assert operator["discover"]([seeker.id])["feeds_added"] == {}  # nothing left to retry

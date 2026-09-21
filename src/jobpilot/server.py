@@ -40,6 +40,7 @@ UNTRUSTED = (
 )
 PROHIBITED_SOURCES = frozenset({"linkedin_in", "linkedin_us"})
 MAX_FEED_LOOKUPS = 5
+MAX_DAILY_FEED_LOOKUPS = 10
 
 
 def build_tools(
@@ -89,7 +90,9 @@ def build_tools(
         """
         return [{"source": n, "covers": d} for n, d in _source_catalog().items()]
 
-    def _attach_company_feeds(companies: list[str]) -> tuple[list[str], dict[str, str]]:
+    def _attach_company_feeds(
+        companies: list[str], limit: int = MAX_FEED_LOOKUPS,
+    ) -> tuple[list[str], dict[str, str]]:
         """Find a public job feed for each target employer not yet covered.
 
         Returns the source names to subscribe to and a plain report per company.
@@ -106,7 +109,7 @@ def build_tools(
             if key in covered:
                 chosen[company] = covered[key]
                 report[company] = "already covered by its own careers feed"
-            elif key not in pending and len(pending) >= MAX_FEED_LOOKUPS:
+            elif key not in pending and len(pending) >= limit:
                 report[company] = "not checked this time; save it again later"
             elif key not in pending:
                 pending.append(key)
@@ -123,7 +126,8 @@ def build_tools(
                 if normalise(company) != key:
                     continue
                 if hit is None:
-                    report[company] = "no public job feed found; covered by job boards only"
+                    report[company] = ("careers feed not found yet; covered by job boards, "
+                                       "and checked again automatically each day")
                 else:
                     chosen[company] = name
                     report[company] = f"careers feed found with {hit['jobs']} open jobs; added"
@@ -660,6 +664,22 @@ def build_tools(
         sid = store.add_seeker(name, telegram_user_id, profile_path, daily_cap)
         return {"ok": True, "seeker_id": sid}
 
+    def _heal_feeds(sid: int, budget: list[int]) -> list[str]:
+        """Retry target companies still without a feed; a web search that
+        failed one day (engines throttle) must not leave them uncovered."""
+        import yaml
+        _, path, _ = _profile_for(sid)
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        feeds, report = _attach_company_feeds(
+            list(data.get("target_companies") or []), limit=min(budget[0], MAX_FEED_LOOKUPS))
+        budget[0] -= sum("not found yet" in v or "found with" in v for v in report.values())
+        new = [f for f in feeds if f not in (data.get("sources") or [])]
+        if new:
+            data["sources"] = [*(data.get("sources") or []), *new]
+            path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                            encoding="utf-8")
+        return new
+
     def discover(seeker_ids: list[int] | None = None) -> dict:
         """Run subscribed enabled sources independently for selected seekers."""
         cfg = load_config()
@@ -670,8 +690,12 @@ def build_tools(
             wanted = {int(s) for s in seeker_ids}
             seekers = [s for s in seekers if s.id in wanted]
 
-        targets = []
+        targets, feeds_added = [], {}
+        budget = [MAX_DAILY_FEED_LOOKUPS]  # shared across seekers: engines throttle
         for seeker in seekers:
+            added = _heal_feeds(seeker.id, budget)
+            if added:
+                feeds_added[seeker.id] = added
             _, _, profile = _profile_for(seeker.id)
             targets.append(SeekerTarget(seeker.id, profile))
 
@@ -698,6 +722,7 @@ def build_tools(
         results = run_discovery(store, sources, targets)
         return {
             "ok": True,
+            "feeds_added": feeds_added,
             "sites": [
                 {"source": r.source, "status": r.status.value,
                  "found": len(r.postings), "canary_ok": r.canary_ok,
