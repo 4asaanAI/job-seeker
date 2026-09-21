@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 
 from jobpilot.profiles import load_companies, load_profile
