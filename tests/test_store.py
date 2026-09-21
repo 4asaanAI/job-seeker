@@ -1099,3 +1099,11 @@ def test_merge_seekers_folds_everything_into_one_profile(tmp_path):
     assert s.seeker_by_telegram_id(777).id == keep
     assert [x.id for x in s.list_seekers()] == [keep]
     s.close()
+
+
+def test_degraded_runs_count_as_history_so_a_new_normal_clears(tmp_path):
+    s = Store(tmp_path / "h.db"); s.migrate()
+    for count, status in ((90, "healthy"), (9, "degraded"), (0, "blocked")):
+        s.record_source_run(source="x", canary_ok=True, canary_count=1, raw_count=count,
+                            results_count=count, status=status, notes="", latency_ms=1)
+    assert s.recent_counts("x", 7) == [9, 90]

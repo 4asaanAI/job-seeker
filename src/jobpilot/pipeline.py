@@ -139,7 +139,7 @@ def _persist(
                     store.link_posting(t.seeker_id, posting_ids[key])
 
 
-MAX_DESCRIBED_PER_RUN = 60
+MAX_DESCRIBED_PER_RUN = 30
 
 
 def _describe_missing(store: Store, source: DiscoverySource, postings) -> None:

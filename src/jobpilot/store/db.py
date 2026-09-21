@@ -813,7 +813,7 @@ class Store:
     def recent_counts(self, source: str, limit: int) -> list[int]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT results_count FROM source_runs WHERE source = ? AND status = 'healthy' "
+                "SELECT results_count FROM source_runs WHERE source = ? AND status IN ('healthy', 'degraded') "
                 "AND results_count > 0 "
                 "ORDER BY id DESC LIMIT ?",
                 (source, limit),
