@@ -55,10 +55,27 @@ def build_tools(
         raise ValueError("seeker mode requires JOBPILOT_SEEKER_ID")
     home = jobpilot_home()
 
-    def available_sources() -> list[str]:
-        """List the job-board source names a seeker may subscribe to."""
-        return [n for n, sc in load_config().sites.items()
-                if sc.enabled and n not in PROHIBITED_SOURCES]
+    def _source_catalog() -> dict[str, str]:
+        cfg = load_config()
+        catalog = {n: f"{sc.site} job board, {sc.country_indeed}"
+                   for n, sc in cfg.sites.items() if sc.enabled}
+        for group in (cfg.ats_sources, cfg.structured_sources, cfg.wigolo_sources):
+            for n, sc in group.items():
+                if not sc.enabled:
+                    continue
+                remote = getattr(sc, "vendor", "") in {"remoteok", "remotive"}
+                catalog[n] = ("remote jobs, worldwide" if remote
+                              else f"{sc.company_name} careers page, all locations")
+        return {n: d for n, d in catalog.items() if n not in PROHIBITED_SOURCES}
+
+    def available_sources() -> list[dict]:
+        """List the job sources a seeker may subscribe to.
+
+        Job boards cover one country; choose those matching the user's country.
+        Employer feeds cover one company; add them when the user targets that
+        employer. Remote feeds suit users who accept remote work.
+        """
+        return [{"source": n, "covers": d} for n, d in _source_catalog().items()]
 
     def _clean(items, limit, width):
         return [str(i).strip()[:width] for i in (items or []) if str(i).strip()][:limit]
@@ -85,7 +102,7 @@ def build_tools(
             return {"ok": False, "error": "already registered"}
 
         terms = _clean(search_terms, 10, 60)
-        allowed = set(available_sources())
+        allowed = set(_source_catalog())
         chosen = [x for x in _clean(sources, 10, 40) if x in allowed]
         name, headline = (str(v).strip()[:120] for v in (name, headline))
         location = _search_location(location)
@@ -104,6 +121,12 @@ def build_tools(
         }, sort_keys=False, allow_unicode=True), encoding="utf-8")
         sid = store.add_seeker(name, int(onboard_telegram_id),
                                (rel / "profile.yaml").as_posix(), 20)
+        # A resume sent before registration waits here; it now belongs to them.
+        pending = home / "telegram-state" / "pending" / str(int(onboard_telegram_id))
+        if pending.is_dir():
+            for item in pending.iterdir():
+                item.replace(home / rel / item.name)
+            pending.rmdir()
         return {"ok": True, "seeker_id": sid}
 
     if onboard_telegram_id is not None:
@@ -683,7 +706,7 @@ def build_tools(
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        allowed = set(available_sources())
+        allowed = set(_source_catalog())
         if headline is not None and str(headline).strip():
             data["headline"] = str(headline).strip()[:120]
         if location is not None and _search_location(location):

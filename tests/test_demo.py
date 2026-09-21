@@ -371,7 +371,7 @@ def test_plan_shows_every_request_including_health_checks(rig, capsys):
     rig.run()
     out = capsys.readouterr().out
     assert "health check for indeed_us: 'business analyst', no location, 10 results" in out
-    assert "health check for indeed_in: 'merchandiser', no location, 10 results" in out
+    assert "health check for indeed_in: 'manager', no location, 10 results" in out
     assert "search 't1' in 'Austin, TX'" in out
 
 

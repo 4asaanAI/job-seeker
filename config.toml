@@ -53,7 +53,7 @@ results_wanted = 50
 fetch_descriptions = true
 
 [sites.naukri_in.canary]
-search_term = "merchandiser"
+search_term = "manager"
 results_wanted = 20
 min_results = 10
 
@@ -66,7 +66,7 @@ results_wanted = 50
 fetch_descriptions = true
 
 [sites.indeed_in.canary]
-search_term = "merchandiser"
+search_term = "manager"
 results_wanted = 20
 min_results = 5
 
@@ -79,7 +79,7 @@ results_wanted = 20
 fetch_descriptions = true
 
 [sites.linkedin_in.canary]
-search_term = "merchandiser"
+search_term = "manager"
 results_wanted = 10
 min_results = 3
 
@@ -92,7 +92,7 @@ results_wanted = 20
 fetch_descriptions = false
 
 [sites.glassdoor_in.canary]
-search_term = "merchandiser"
+search_term = "manager"
 results_wanted = 10
 min_results = 3
 
@@ -289,14 +289,7 @@ company_name = "Embraer"
 endpoint = "https://embraer.breezy.hr/json"
 enabled = false
 
-# Chosen for Sam (2026-09-21): searched Breezy/BambooHR tenants against his
-# exact search terms and exclude_keywords, both US-based with real current
-# openings that clear his filters. Others found and rejected: continued.com
-# and hungerrush.com only had "Senior Product Manager" (excluded by his own
-# "senior" keyword); betterme.com and sbc-performance.com only matched in
-# Ukraine, not a fit for someone who needs US visa sponsorship;
-# startupblink.com's one match was an unanchored "Worldwide" remote role at a
-# very small company, an unlikely sponsor. No BambooHR tenant matched him.
+# Breezy employer feeds, live-tested 2026-09-21. Any seeker may subscribe.
 [ats_sources.mae_health]
 vendor = "breezy"
 company_name = "Mae"

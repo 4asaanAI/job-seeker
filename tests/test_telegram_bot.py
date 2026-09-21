@@ -516,17 +516,47 @@ def test_uploaded_resume_is_stored_and_handed_to_claude_as_data(home, store, tmp
     assert "Resume received" in _texts(sent)[0]
 
 
-def test_upload_refuses_unknown_sender_wrong_type_and_oversize(home, store, tmp_path):
+def test_upload_refuses_wrong_type_oversize_and_unreadable(home, store, tmp_path):
     bot, sent, runs, _ = _upload_bot(home, store, b"x")
-    bot.handle(_doc_msg(701))
-    assert "/start" in _texts(sent)[-1]
-    _registered(home, store, 702)
     bot.handle(_doc_msg(702, name="cv.png"))
     assert "PDF or Word" in _texts(sent)[-1]
     bot.handle(_doc_msg(702, size=tb.MAX_UPLOAD + 1))
     assert "too large" in _texts(sent)[-1]
     bot.handle(_doc_msg(702))  # unreadable bytes
+    assert "could not be read" in _texts(sent)[-1]
     assert runs == []
+
+
+def test_new_user_is_onboarded_from_resume_then_it_is_processed(home, store, tmp_path):
+    bot, sent, runs, _ = _upload_bot(home, store, _docx_bytes(tmp_path, RESUME_TEXT))
+    onboarding = build_tools(store, home, operator_mode=False, onboard_telegram_id=703)
+    prompts = []
+
+    def runner(cmd, **kw):
+        prompts.append(kw["input"])
+        if len(prompts) == 1:  # the onboarding session registers the user
+            onboarding["register_me"]("Sam Rivera", "Data Analyst", "Austin",
+                                      ["data analyst"], ["indeed_us"])
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    bot.runner = runner
+    bot.handle(_doc_msg(703))
+    assert "set up my profile" in prompts[0] and "Built weekly KPI" in prompts[0]
+    assert len(prompts) == 2 and "save_base_resume" in prompts[1]
+    folder = (home / store.seeker_by_telegram_id(703).profile_path).parent
+    assert (folder / "uploaded_resume.docx").is_file()
+    assert (folder / "resume_source.txt").is_file()
+    assert not (home / "telegram-state" / "pending" / "703").exists()
+
+
+def test_available_sources_offers_boards_and_employer_feeds(home, store):
+    tools = build_tools(store, home, operator_mode=False, onboard_telegram_id=704)
+    catalog = {row["source"]: row["covers"] for row in tools["available_sources"]()}
+    assert "job board" in catalog["indeed_us"] and "linkedin_us" not in catalog
+    assert catalog["databricks"] == "Databricks careers page, all locations"
+    assert catalog["remoteok"] == "remote jobs, worldwide"
+    assert tools["register_me"]("Sam", "Analyst", "Austin", ["analyst"],
+                                ["indeed_us", "databricks"])["ok"]
 
 
 def test_save_base_resume_accepts_only_verbatim_facts(home, store):

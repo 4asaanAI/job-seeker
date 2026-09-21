@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", choices=("naukri", "indeed"))
     parser.add_argument("--location")
     parser.add_argument("--country")
-    parser.add_argument("--term", default="merchandiser")
+    parser.add_argument("--term", default="manager")
     parser.add_argument("--results", type=int, default=10)
     parser.add_argument("--hours-old", type=int, default=168)
     parser.add_argument("--output", type=Path)

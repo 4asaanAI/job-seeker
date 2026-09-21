@@ -5,8 +5,8 @@ The rubric is data, not code, so it can be tuned without a release. It is
 per SEEKER (spec 17.6): different seekers work in different fields, and a
 shared rubric would score one of them as noise. `load_rubric` checks the
 seeker's own `data/seekers/<name>/rubric.md` first and falls back to a
-shared `data/rubrics/<profile.rubric>.md` (Alex's apparel-brand-side
-rubric is the worked example).
+shared `data/rubrics/<profile.rubric>.md` (`general` for new users;
+`apparel-brand-side` is a worked domain example).
 """
 from __future__ import annotations
 
