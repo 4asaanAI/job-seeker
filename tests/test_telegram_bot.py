@@ -610,3 +610,12 @@ def test_caption_sent_with_the_resume_is_passed_on_as_the_request(home, store, t
     prompt = runs[0][1]["input"]
     assert prompt.index("RESUME END") < prompt.index("check Ralph Lauren openings")
     assert "actual request" in prompt
+
+
+def test_signup_never_creates_a_second_profile_for_an_existing_name(home, store):
+    existing = store.add_seeker("Alex Singh", None, "data/seekers/alex/profile.yaml", 20)
+    tools = build_tools(store, home, operator_mode=False, onboard_telegram_id=901)
+    out = tools["register_me"]("alex  SINGH", "Merchandiser", "Gurgaon", ["merchandiser"], ["indeed_in"])
+    assert not out["ok"] and out["existing_profile"] and "/link" in out["error"]
+    assert store.seeker_by_telegram_id(901) is None
+    assert [s.id for s in store.list_seekers(active_only=False)] == [existing]

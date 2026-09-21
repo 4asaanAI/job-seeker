@@ -171,6 +171,16 @@ def build_tools(
             return {"ok": False, "error":
                     "name, headline, location, search_terms and at least one valid "
                     f"source ({sorted(allowed)}) are required"}
+        same_name = [s for s in store.list_seekers()
+                     if s.telegram_user_id is None and normalise(s.name) == normalise(name)]
+        if same_name:
+            # Probably the same person, set up earlier by the operator. Never
+            # create a second profile, and never hand over an existing one on
+            # a name alone (names are not unique): the operator issues a code.
+            return {"ok": False, "existing_profile": True, "error":
+                    "a profile for this name already exists; ask the user to get a link "
+                    "code from the operator and send /link followed by the code. Do not "
+                    "try to register them again."}
         targets = _clean(target_companies, 20, 80)
         feeds, feed_report = _attach_company_feeds(targets)
         chosen = list(dict.fromkeys([*chosen, *feeds]))
@@ -221,27 +231,6 @@ def build_tools(
                 )),
             )
         return seeker, path, profile
-
-    def _home_relative_path(raw_path: str, label: str) -> Path:
-        """Resolve a caller-supplied path without allowing escape from home."""
-        candidate = Path(str(raw_path))
-        windows_path = ntpath.normpath(str(raw_path))
-        if (
-            not str(raw_path).strip()
-            or candidate.is_absolute()
-            or ntpath.isabs(str(raw_path))
-            or str(raw_path).startswith(("/", "\\"))
-            or ".." in candidate.parts
-            or ".." in windows_path.replace("\\", "/").split("/")
-        ):
-            raise ValueError(f"{label} must be relative to JOBPILOT_HOME")
-        resolved_home = home.resolve()
-        resolved = (home / candidate).resolve()
-        try:
-            resolved.relative_to(resolved_home)
-        except ValueError as exc:
-            raise ValueError(f"{label} must stay inside JOBPILOT_HOME") from exc
-        return resolved
 
     def resolve_telegram_sender(telegram_user_id: int) -> dict:
         """Resolve a verified numeric Telegram sender to one active seeker.
@@ -443,20 +432,23 @@ def build_tools(
         return {"ok": True, "seeker_id": sid, "company_id": company_id,
                 "name": " ".join(name.split())}
 
-    def _base_resume_path(sid: int, raw_path: str | None) -> Path:
-        if raw_path:
-            return _home_relative_path(raw_path, "base_resume_path")
+    def _base_resume_path(sid: int) -> Path:
+        # Always the seeker's own file: a caller-chosen path could name
+        # another seeker's resume, and a guessed one fails.
         _, profile_path, _ = _profile_for(sid)
         return profile_path.parent / "base_resume.yaml"
 
-    def resume_facts(seeker_id: int, base_resume_path: str | None = None) -> dict:
-        """Expose structured resume facts so an approved caller can choose order only.
+    def resume_facts(seeker_id: int) -> dict:
+        """Show the structured facts of this seeker's own saved resume.
 
-        base_resume_path defaults to the seeker's own base_resume.yaml.
+        Call this, then render_resume. If it reports no resume, ask the user
+        to send theirs as a PDF or Word file.
         """
         try:
             sid = _check(seeker_id)
-            path = _base_resume_path(sid, base_resume_path)
+            path = _base_resume_path(sid)
+            if not path.is_file():
+                raise ValueError("no resume saved yet; ask the user to send theirs as a PDF or Word file")
             base = load_base_resume(path)
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -485,20 +477,21 @@ def build_tools(
     def render_resume(
         seeker_id: int,
         posting_id: int,
-        base_resume_path: str | None = None,
         experience_order: list[str] | None = None,
         skills: list[str] | None = None,
     ) -> dict:
-        """Render a facts-only DOCX for a linked job and run the blocking gate.
+        """Render a facts-only DOCX of this seeker's own resume for a linked job.
 
-        base_resume_path defaults to the seeker's own base_resume.yaml.
+        experience_order and skills may only reorder or select ids and skill
+        strings exactly as resume_facts returned them. The file is sent to the
+        user automatically once it passes its check.
         """
         try:
             sid = _check(seeker_id)
             posting = store.posting_view(sid, int(posting_id))
             if posting is None:
                 raise ValueError("posting is not linked to this seeker")
-            base_path = _base_resume_path(sid, base_resume_path)
+            base_path = _base_resume_path(sid)
             base = load_base_resume(base_path)
             seeker = store.get_seeker(sid)
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
@@ -539,7 +532,7 @@ def build_tools(
             sid = _check(seeker_id)
             if not isinstance(resume, dict):
                 raise ValueError("resume must be a mapping")
-            target = _base_resume_path(sid, None)
+            target = _base_resume_path(sid)
             source = target.parent / "resume_source.txt"
             if not source.is_file():
                 raise ValueError("no uploaded resume on file; ask the user to send one")

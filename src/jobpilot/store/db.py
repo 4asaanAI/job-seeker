@@ -264,6 +264,38 @@ class Store:
                 (int(telegram_user_id), seeker_id))
             return cur.rowcount == 1
 
+    def merge_seekers(self, keep: int, drop: int) -> dict[str, int]:
+        """Fold seeker `drop` into `keep` (same person, two profiles).
+
+        Every per-seeker row moves to `keep`; where both have a row for the
+        same key (a job scored twice) `keep`'s wins. `drop` loses its
+        Telegram link to `keep` and is deactivated, not deleted.
+        """
+        if keep == drop:
+            raise ValueError("cannot merge a seeker into itself")
+        moved: dict[str, int] = {}
+        with self._lock, self.conn:
+            rows = {r["id"]: r for r in self.conn.execute(
+                "SELECT id, telegram_user_id FROM seekers WHERE id IN (?, ?)", (keep, drop))}
+            if set(rows) != {keep, drop}:
+                raise ValueError("both seekers must exist")
+            tables = [r["name"] for r in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")]
+            for table in tables:  # internal names from sqlite_master, not caller input
+                columns = {c["name"] for c in self.conn.execute(f"PRAGMA table_info({table})")}
+                if "seeker_id" not in columns or table == "seekers":
+                    continue
+                cur = self.conn.execute(
+                    f"UPDATE OR IGNORE {table} SET seeker_id = ? WHERE seeker_id = ?", (keep, drop))
+                moved[table] = cur.rowcount
+                self.conn.execute(f"DELETE FROM {table} WHERE seeker_id = ?", (drop,))
+            telegram = rows[keep]["telegram_user_id"] or rows[drop]["telegram_user_id"]
+            self.conn.execute(
+                "UPDATE seekers SET telegram_user_id = NULL, active = 0 WHERE id = ?", (drop,))
+            self.conn.execute(
+                "UPDATE seekers SET telegram_user_id = ?, active = 1 WHERE id = ?", (telegram, keep))
+        return moved
+
     def seeker_by_telegram_id(self, telegram_user_id: int) -> Seeker | None:
         with self._lock:
             row = self.conn.execute(

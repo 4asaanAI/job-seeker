@@ -1076,3 +1076,26 @@ def test_migrate_adds_review_required_to_an_existing_database(tmp_path):
     s.close()
 
     assert seeker.review_required is True
+
+
+def test_merge_seekers_folds_everything_into_one_profile(tmp_path):
+    from jobpilot.store.db import Store
+    from jobpilot.store.models import Posting
+    s = Store(tmp_path / "m.db")
+    s.migrate()
+    keep = s.add_seeker("Alex Singh", None, "a.yaml", 20)
+    drop = s.add_seeker("Alex Singh", 777, "b.yaml", 20)
+    p1 = s.upsert_posting(Posting(company_name="X", source="indeed", external_id="1", title="t",
+                                  location="G", description="d", url="https://x.test/1", posted_at=None))
+    p2 = s.upsert_posting(Posting(company_name="Y", source="indeed", external_id="2", title="t",
+                                  location="G", description="d", url="https://x.test/2", posted_at=None))
+    for sid in (keep, drop):
+        s.link_posting(sid, p1)
+    s.link_posting(drop, p2)
+    s.record_event("manual_search", "", seeker_id=drop)
+    moved = s.merge_seekers(keep, drop)
+    assert {j.posting_id for j in s.seeker_jobs(keep)} == {p1, p2}
+    assert s.seeker_jobs(drop) == [] and moved["events"] == 1
+    assert s.seeker_by_telegram_id(777).id == keep
+    assert [x.id for x in s.list_seekers()] == [keep]
+    s.close()

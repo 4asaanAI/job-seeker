@@ -229,11 +229,15 @@ def test_pinned_process_scopes_new_m2_tools(tmp_path):
     store2.close()
 
 
-def test_resume_tools_render_and_record_only_structured_facts(tmp_path, monkeypatch):
-    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
-    base_path = tmp_path / "data" / "seekers" / "a" / "base_resume.yaml"
-    base_path.parent.mkdir(parents=True)
-    base_path.write_text(
+PROFILE = ("name: A\nheadline: Analyst\nlocation: Austin\nsources: [indeed_us]\n"
+           "search_terms: [analyst]\n")
+
+
+def _seeker_with_resume(tmp_path, store, name="a", tid=1, ext="n1"):
+    folder = tmp_path / "data" / "seekers" / name
+    folder.mkdir(parents=True)
+    (folder / "profile.yaml").write_text(PROFILE, encoding="utf-8")
+    (folder / "base_resume.yaml").write_text(
         "name: A\nheadline: Analyst\n"
         "required_facts: [A, Analyst, Acme]\n"
         "experience:\n"
@@ -242,15 +246,24 @@ def test_resume_tools_render_and_record_only_structured_facts(tmp_path, monkeypa
         "skills: [SQL]\n",
         encoding="utf-8",
     )
-    tools, store = _tools(tmp_path)
-    sid, pid = _seed(store)
+    sid = store.add_seeker(name, tid, f"data/seekers/{name}/profile.yaml", 20)
+    pid = store.upsert_posting(
+        Posting(company_name="M&S", source="naukri", external_id=ext,
+                title="Senior Merchandiser", location="Gurgaon", description="d",
+                url=f"https://x.test/{ext}", posted_at="2026-09-18"))
+    store.link_posting(sid, pid)
+    return sid, pid
 
-    facts = tools["resume_facts"](sid, "data/seekers/a/base_resume.yaml")
+
+def test_resume_tools_render_and_record_only_structured_facts(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    tools, store = _tools(tmp_path)
+    sid, pid = _seeker_with_resume(tmp_path, store)
+
+    facts = tools["resume_facts"](sid)
     assert facts["ok"] is True
     assert facts["experience"][0]["id"] == "current"
-    rendered = tools["render_resume"](
-        sid, pid, "data/seekers/a/base_resume.yaml", ["current"], ["SQL"]
-    )
+    rendered = tools["render_resume"](sid, pid, ["current"], ["SQL"])
 
     assert rendered["ok"] is True
     assert rendered["validation"]["ok"] is True
@@ -261,18 +274,26 @@ def test_resume_tools_render_and_record_only_structured_facts(tmp_path, monkeypa
     store.close()
 
 
-def test_resume_tools_refuse_unlinked_postings_and_path_escape(operator):
-    tools, store = operator
-    sid, pid = _seed(store)
+def test_resume_tools_only_ever_read_the_callers_own_resume(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    store = Store(tmp_path / "t.db")
+    store.migrate()
+    a, pid = _seeker_with_resume(tmp_path, store, "a", 1, "n1")
+    b, _ = _seeker_with_resume(tmp_path, store, "b", 2, "n2")
+    pinned = build_tools(store, tmp_path, pinned_seeker_id=a, operator_mode=False)
+    with pytest.raises(TypeError):  # no path parameter to point at someone else
+        pinned["resume_facts"](a, "data/seekers/b/base_resume.yaml")
+    assert not pinned["resume_facts"](b)["ok"]
     other = store.upsert_posting(
         Posting(company_name="Other", source="indeed", external_id="other-resume",
                 title="Other", location="Austin", description="d",
-                url="https://x.test/other-resume", posted_at="2026-09-18")
-    )
-    assert tools["resume_facts"](sid, "../secret.yaml")["ok"] is False
-    refused = tools["render_resume"](sid, other, "base.yaml")
-    assert refused["ok"] is False
-    assert "linked" in refused["error"]
+                url="https://x.test/other-resume", posted_at="2026-09-18"))
+    refused = pinned["render_resume"](a, other)
+    assert refused["ok"] is False and "linked" in refused["error"]
+    (tmp_path / "data" / "seekers" / "a" / "base_resume.yaml").unlink()
+    missing = pinned["resume_facts"](a)
+    assert not missing["ok"] and "PDF or Word" in missing["error"]
+    store.close()
 
 
 def test_seeker_actions_and_application_records_are_scoped(operator):
