@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import ntpath
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -99,26 +100,34 @@ def build_tools(
             for n, sc in group.items():
                 if sc.enabled and n not in PROHIBITED_SOURCES:
                     covered.setdefault(normalise(sc.company_name), n)
-        sources, report, lookups = [], {}, 0
+        chosen, report, pending = {}, {}, []
         for company in companies:
             key = normalise(company)
             if key in covered:
-                sources.append(covered[key])
+                chosen[company] = covered[key]
                 report[company] = "already covered by its own careers feed"
-                continue
-            if lookups >= MAX_FEED_LOOKUPS:
+            elif key not in pending and len(pending) >= MAX_FEED_LOOKUPS:
                 report[company] = "not checked this time; save it again later"
-                continue
-            lookups += 1
-            hit = feed_finder(company)
-            if hit is None:
-                report[company] = "no public job feed found; covered by job boards only"
-                continue
-            name = re.sub(r"[^a-z0-9]+", "_", f"{hit['vendor']}_{hit['slug']}".casefold())
-            store.add_company_feed(name, hit["vendor"], hit["company_name"], hit["endpoint"])
-            covered[key] = name
-            sources.append(name)
-            report[company] = f"careers feed found with {hit['jobs']} open jobs; added"
+            elif key not in pending:
+                pending.append(key)
+        lookup = {normalise(c): c for c in reversed(companies)}  # first spelling wins
+        # Each lookup is several web requests; two at a time keeps a profile
+        # save to well under a minute without flooding the search engines.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            hits = dict(zip(pending, pool.map(lambda k: feed_finder(lookup[k]), pending)))
+        for key, hit in hits.items():
+            if hit is not None:
+                name = re.sub(r"[^a-z0-9]+", "_", f"{hit['vendor']}_{hit['slug']}".casefold())
+                store.add_company_feed(name, hit["vendor"], hit["company_name"], hit["endpoint"])
+            for company in companies:
+                if normalise(company) != key:
+                    continue
+                if hit is None:
+                    report[company] = "no public job feed found; covered by job boards only"
+                else:
+                    chosen[company] = name
+                    report[company] = f"careers feed found with {hit['jobs']} open jobs; added"
+        sources = list(dict.fromkeys(chosen[c] for c in companies if c in chosen))
         return sources, report
 
     def _clean(items, limit, width):
