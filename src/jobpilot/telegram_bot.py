@@ -330,7 +330,7 @@ class Bot:
                 _log(f"sendDocument failed: {type(exc).__name__}: {exc}")
                 self.send(chat_id, "The resume was prepared but could not be sent. Please send /resume again.")
 
-    def receive_resume(self, uid: int, document: dict) -> str:
+    def receive_resume(self, uid: int, document: dict, caption: str = "") -> str:
         """Store an uploaded resume and return the prompt for Claude.
 
         A user without a profile yet is onboarded from it; the file waits in
@@ -363,7 +363,13 @@ class Bot:
             raise ValueError("The text of that file could not be read. If it is a scanned image, "
                              "please send a PDF or Word file with selectable text.")
         (folder / "resume_source.txt").write_text(text, encoding="utf-8")
-        return (UPLOADED if seeker else UPLOADED_NEW).format(text=text[:MAX_RESUME_CHARS])
+        prompt = (UPLOADED if seeker else UPLOADED_NEW).format(text=text[:MAX_RESUME_CHARS])
+        caption = " ".join(caption.split())[:MAX_TEXT]
+        if caption:
+            # The user's own words sent with the file: their actual request.
+            prompt += ("\nWith the file I also wrote the following, which is my actual "
+                       f"request; do it once the steps above are done: {caption}")
+        return prompt
 
     def _folder(self, seeker) -> Path:
         folder = Path(seeker.profile_path).parent
@@ -382,7 +388,7 @@ class Bot:
                 return self.send(chat_id, "Messages are arriving too quickly. Please wait a short while and try again.")
             with self._locks[uid]:
                 try:
-                    prompt = self.receive_resume(uid, document)
+                    prompt = self.receive_resume(uid, document, msg.get("caption") or "")
                 except ValueError as exc:
                     return self.send(chat_id, str(exc))
                 except Exception as exc:

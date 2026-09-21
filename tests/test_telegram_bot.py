@@ -599,3 +599,14 @@ def test_rendered_resume_is_sent_back_as_a_document(home, store, monkeypatch):
     bot.runner = render_during_run
     bot.handle(_msg(700, "/resume"))
     assert len(files) == 1 and files[0].suffix == ".docx" and files[0] != Path(old["path"])
+
+
+def test_caption_sent_with_the_resume_is_passed_on_as_the_request(home, store, tmp_path):
+    _registered(home, store)
+    bot, sent, runs, _ = _upload_bot(home, store, _docx_bytes(tmp_path, RESUME_TEXT))
+    msg = _doc_msg(700)
+    msg["message"]["caption"] = "Tailor resumes for my top 5 jobs and check Ralph Lauren openings"
+    bot.handle(msg)
+    prompt = runs[0][1]["input"]
+    assert prompt.index("RESUME END") < prompt.index("check Ralph Lauren openings")
+    assert "actual request" in prompt
