@@ -41,6 +41,7 @@ UNTRUSTED = (
 PROHIBITED_SOURCES = frozenset({"linkedin_in", "linkedin_us"})
 MAX_FEED_LOOKUPS = 5
 MAX_DAILY_FEED_LOOKUPS = 10
+MAX_DAILY_WEB_CALLS = 60
 
 
 def build_tools(
@@ -353,7 +354,7 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
         return {
             "ok": True, "posting": posting,
-            "browser_required": True,
+            "next_step": "Open posting.url with web_fetch to read the live page.",
             "note": UNTRUSTED,
         }
 
@@ -368,9 +369,10 @@ def build_tools(
             return out
         return {
             "ok": True,
-            "status": "browser_check_required",
+            "status": "check_with_web_fetch",
             "posting": out["posting"],
-            "note": "Do not mark this open or closed until the public page is checked.",
+            "note": "Open posting.url with web_fetch. Do not call it open or closed "
+                    "until the live page has been read.",
         }
 
     def check_company_careers(seeker_id: int, company_id: int) -> dict:
@@ -383,8 +385,9 @@ def build_tools(
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         return {
-            "ok": True, "company": company, "browser_required": True,
-            "note": "Inspect one employer careers page at a time; do not crawl it here.",
+            "ok": True, "company": company,
+            "next_step": "Read the careers URL with web_fetch, or web_crawl for a few pages.",
+            "note": UNTRUSTED,
         }
 
     def my_status(seeker_id: int) -> dict:
@@ -818,6 +821,50 @@ def build_tools(
             "headline", "location", "search_terms", "sources",
             "exclude_keywords", "target_companies")}, "target_companies": feed_report}
 
+    def _web(sid: int, action) -> dict:
+        from . import web
+        try:
+            sid = _check(sid)
+            if store.event_count_since(sid, "web_call", 24) >= MAX_DAILY_WEB_CALLS:
+                raise web.WebError("daily web lookup limit reached; try again tomorrow")
+            store.record_event("web_call", "", seeker_id=sid)
+            return {"ok": True, **action(web)}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def web_search(seeker_id: int, query: str, site: str | None = None) -> dict:
+        """Search the web. site limits results to one domain (e.g. "myworkdayjobs.com")."""
+        return _web(seeker_id, lambda w: w.search(query, site))
+
+    def web_fetch(seeker_id: int, url: str) -> dict:
+        """Open one public web page (JavaScript-rendered) and return its text and links.
+
+        Use it to check whether a job posting is still open, read its full
+        description, or read an employer's careers page.
+        """
+        return _web(seeker_id, lambda w: w.fetch(url))
+
+    def web_crawl(seeker_id: int, url: str, max_pages: int = 5) -> dict:
+        """Read up to 10 pages of one website, starting from url (same site only)."""
+        return _web(seeker_id, lambda w: w.crawl(url, max_pages))
+
+    def web_extract(seeker_id: int, url: str, mode: str = "structured") -> dict:
+        """Pull structured data (tables, JSON-LD job data, metadata) from a public page.
+
+        mode: structured | tables | metadata.
+        """
+        return _web(seeker_id, lambda w: w.extract(url, mode))
+
+    def web_research(seeker_id: int, question: str) -> dict:
+        """Research a question across several web sources (about 20 seconds).
+
+        Returns cited highlights; write the answer yourself from them. Use for
+        employer questions such as visa sponsorship, team, or interview process.
+        """
+        return _web(seeker_id, lambda w: w.research(question))
+
+    tools.update({"web_search": web_search, "web_fetch": web_fetch, "web_crawl": web_crawl,
+                  "web_extract": web_extract, "web_research": web_research})
     tools["available_sources"] = available_sources
     tools["update_my_profile"] = update_my_profile
     tools["run_my_search"] = run_my_search

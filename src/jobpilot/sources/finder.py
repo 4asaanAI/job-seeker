@@ -101,7 +101,8 @@ def searxng_search(query: str, domain: str) -> list[dict] | None:
     SearXNG is unreachable, so only that (not an honest empty) falls back.
     """
     base = os.environ.get("JOBPILOT_SEARXNG_URL", "http://127.0.0.1:8888").rstrip("/")
-    url = f"{base}/search?" + urlencode({"q": f"{query} site:{domain}", "format": "json"})
+    q = f"{query} site:{domain}" if domain else query
+    url = f"{base}/search?" + urlencode({"q": q, "format": "json"})
     try:
         with urlopen(url, timeout=30) as response:  # noqa: S310 - local operator service
             rows = json.load(response).get("results", [])

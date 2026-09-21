@@ -184,9 +184,9 @@ def test_m2_investigation_handoff_never_exposes_an_unlinked_posting(operator):
     sid, pid = _seed(store)
     handoff = tools["investigate_posting"](sid, pid)
     assert handoff["ok"] is True
-    assert handoff["browser_required"] is True
+    assert "web_fetch" in handoff["next_step"]
     assert handoff["posting"]["id"] == pid
-    assert tools["verify_still_open"](sid, pid)["status"] == "browser_check_required"
+    assert tools["verify_still_open"](sid, pid)["status"] == "check_with_web_fetch"
 
     other = store.upsert_posting(
         Posting(company_name="Other", source="indeed", external_id="other",
@@ -205,7 +205,7 @@ def test_watchlist_and_company_career_handoff_are_scoped(operator):
     assert store.target_company_names(sid) == ["Target Sourcing"]
     career = tools["check_company_careers"](sid, added["company_id"])
     assert career["ok"] is True
-    assert career["browser_required"] is True
+    assert "web_fetch" in career["next_step"]
 
     other = store.add_seeker("Other", 2, "other.yaml", 20)
     refused = tools["check_company_careers"](other, added["company_id"])
