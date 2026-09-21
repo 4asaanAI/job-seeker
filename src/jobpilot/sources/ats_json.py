@@ -18,7 +18,6 @@ from ..store.models import Posting
 from .base import MAX_DESCRIPTION_CHARS, safe_url
 
 
-COUNTRYWIDE = frozenset({"united states", "usa", "us", "remote", "anywhere"})
 
 
 def _default_fetcher(url: str, timeout: float) -> object:
@@ -282,16 +281,11 @@ class ATSJsonSource:
         rows, postings = (self._fetch_term(term) if self.cfg.vendor in SEARCHED
                           else self._load())
         wanted = (term or "").casefold().strip()
-        place = (location or "").casefold().strip()
-        if place in COUNTRYWIDE:
-            place = ""
-        # A SEARCHED (employer-specific) source is one the seeker deliberately
-        # subscribed to for that one employer, not a location query. Its jobs
-        # post in whatever office-name format the employer uses, which rarely
-        # contains the seeker's home city as a substring; the scoring rubric,
-        # not this filter, is what judges location fit for these.
-        if self.cfg.vendor in SEARCHED:
-            place = ""
+        # Every source here is one employer, or a remote-only board, that the
+        # seeker subscribed to on purpose. Their jobs post in whatever office
+        # format the site uses, which rarely contains the seeker's home city
+        # as a substring (and never does for "Worldwide"), so location is not
+        # filtered here: the scoring rubric judges location fit.
         found = []
         for posting in postings:
             haystack = " ".join((posting.title, posting.company_name,
@@ -299,7 +293,10 @@ class ATSJsonSource:
             if (wanted and self.cfg.vendor not in SEARCHED
                     and wanted not in haystack):
                 continue
-            if place and place not in (posting.location or "").casefold():
-                continue
             found.append(posting)
-        return found, len(rows)
+        # A whole-board download returns every job whatever the query, so its
+        # row count says nothing about this search; canary() already proved
+        # the field mapping. Reporting it here would turn "this employer has
+        # no such job" into a false "mapping broken" error.
+        raw = len(rows) if self.cfg.vendor in SEARCHED else len(found)
+        return found, raw

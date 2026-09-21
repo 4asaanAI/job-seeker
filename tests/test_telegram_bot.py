@@ -206,7 +206,7 @@ def test_remote_feed_vendors_keep_each_rows_company():
                                              {"id": "1", "position": "Product Analyst", "company": "Acme",
                                               "url": "https://remoteok.com/1", "date": "2026-09-18"}])
     jobs, raw = ok.search("analyst", "Remote")
-    assert raw == 2 and [(j.company_name, j.title, j.location) for j in jobs] == [
+    assert raw == 1 and [(j.company_name, j.title, j.location) for j in jobs] == [
         ("Acme", "Product Analyst", "Remote")]
     rv = ATSJsonSource(ATSConfig(name="remotive", vendor="remotive", company_name="Remotive",
                                  endpoint="https://x.test", enabled=True),

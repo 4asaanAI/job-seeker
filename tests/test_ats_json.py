@@ -88,7 +88,21 @@ def test_workday_nested_data_shape_and_local_filtering():
     )
     assert source.canary() == (True, 1, 1)
     assert source.search("analyst", "Austin")[0][0].external_id == "/job/505"
-    assert source.search("analyst", "Gurgaon")[0] == []
+    # Location is judged by scoring, not by a city substring on employer feeds.
+    assert len(source.search("analyst", "Gurgaon")[0]) == 1
+    assert source.search("designer", "Austin") == ([], 0)
+
+
+def test_employer_with_no_matching_job_is_empty_not_a_mapping_error():
+    from jobpilot.sources.health import SourceStatus, classify
+    source = ATSJsonSource(config("greenhouse"), fetcher=lambda _u, _t: {"jobs": [
+        {"id": str(i), "title": "Software Engineer", "location": {"name": "Pittsburgh, PA"}}
+        for i in range(80)]})
+    found, raw = source.search("product manager", "San Francisco")
+    assert (found, raw) == ([], 0)
+    status, _ = classify(results_count=0, canary_ok=True, canary_count=80,
+                         raw_count=raw, history=[])
+    assert status is not SourceStatus.ERROR
 
 
 def test_bad_rows_are_not_counted_and_unsafe_urls_are_removed():
