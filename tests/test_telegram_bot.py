@@ -412,3 +412,26 @@ def test_set_menu_survives_individual_call_failures(home, store):
     bot = tb.Bot("TOKEN", home, store, http=flaky_http)
     bot.set_menu()
     assert calls == ["setMyCommands", "setMyName", "setMyDescription", "setMyShortDescription"]
+
+
+def test_single_instance_lock_is_race_safe_under_concurrent_start(home):
+    """The actual bug this guards against: two processes starting within
+    milliseconds of each other must not both win. A plain read-then-write
+    has a gap both can slip through; only one thread may hold the win here."""
+    import threading
+    from jobpilot.telegram_bot import _acquire_single_instance_lock
+    state = home / "telegram-state"
+    state.mkdir(exist_ok=True)
+    results = []
+    barrier = threading.Barrier(20)
+
+    def attempt():
+        barrier.wait()
+        results.append(_acquire_single_instance_lock(state))
+
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count(True) == 1

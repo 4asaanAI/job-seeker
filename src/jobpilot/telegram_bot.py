@@ -343,17 +343,46 @@ def _acquire_single_instance_lock(state: Path) -> bool:
     """Refuse a second poller against the same bot token.
 
     Telegram allows only one ``getUpdates`` long-poll consumer per token; a
-    second one makes both see intermittent conflicts. The watchdog and a
-    manual restart can otherwise race into running two at once.
+    second one makes both see intermittent conflicts. The watchdog, a manual
+    restart, and this machine's own habit of starting a second interpreter
+    within milliseconds of the first can otherwise race into running two at
+    once -- a plain read-then-write has a gap two processes can both slip
+    through, so the actual claim is an atomic exclusive create: at most one
+    ``open(..., O_EXCL)`` can win when two processes call this within the
+    same instant, which read-then-write cannot guarantee.
     """
     lock = state / "bot.pid"
-    try:
-        if _pid_alive(int(lock.read_text().strip())):
-            return False
-    except (OSError, ValueError):
-        pass
-    lock.write_text(str(os.getpid()))
-    return True
+
+    def read_pid() -> int | None:
+        try:
+            return int(lock.read_text().strip())
+        except (OSError, ValueError):
+            return None
+
+    for _ in range(2):  # one clean attempt, one retry after clearing a stale lock
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            held_by = read_pid()
+            if held_by is None:
+                # Empty/unreadable: either genuine stale garbage, or a
+                # winner whose create landed but whose write has not yet
+                # (create and write are two syscalls, not one atomic op).
+                # A real write lands in microseconds; give it a moment
+                # before concluding this is actually stale.
+                time.sleep(0.05)
+                held_by = read_pid()
+            if held_by is not None and _pid_alive(held_by):
+                return False
+            # Stale: clear it and retry the exclusive create, rather than
+            # unlinking unconditionally up front, which would let a slower
+            # competitor delete a winner's just-created, valid lock file.
+            lock.unlink(missing_ok=True)
+            continue
+        with os.fdopen(fd, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    return False
 
 
 def main() -> None:
