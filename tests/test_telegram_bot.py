@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -367,3 +368,28 @@ def test_single_instance_lock_ignores_garbage_pid_file(home):
     state.mkdir(exist_ok=True)
     (state / "bot.pid").write_text("not-a-pid")
     assert _acquire_single_instance_lock(state)
+
+
+def test_pid_alive_on_windows_verifies_it_is_our_process(monkeypatch):
+    from jobpilot import telegram_bot as tb
+    monkeypatch.setattr(tb.os, "name", "nt")
+
+    def fake_run(cmd, **kw):
+        pid = re.search(r"ProcessId=(\d+)", cmd[-1]).group(1)
+        cmdlines = {"111": "...python.exe -m jobpilot.telegram_bot", "222": "notepad.exe"}
+        return SimpleNamespace(returncode=0, stdout=cmdlines.get(pid, ""), stderr="")
+
+    monkeypatch.setattr(tb.subprocess, "run", fake_run)
+    assert tb._pid_alive(111) is True
+    assert tb._pid_alive(222) is False, "a recycled PID belonging to an unrelated process must not count as alive"
+
+
+def test_pid_alive_on_windows_fails_open_on_check_error(monkeypatch):
+    from jobpilot import telegram_bot as tb
+    monkeypatch.setattr(tb.os, "name", "nt")
+
+    def raising_run(cmd, **kw):
+        raise OSError("powershell not found")
+
+    monkeypatch.setattr(tb.subprocess, "run", raising_run)
+    assert tb._pid_alive(999) is False, "an unverifiable check must not block startup"

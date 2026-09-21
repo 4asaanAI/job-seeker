@@ -309,13 +309,20 @@ def _load_token(home: Path) -> str:
 
 
 def _pid_alive(pid: int) -> bool:
+    """True only if `pid` is currently running this module, not just any
+    live process -- Windows recycles PIDs, so "alive" alone is a false
+    positive once the original bot process is long gone and something
+    unrelated has since been assigned the same number."""
     if os.name == "nt":
-        import ctypes
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFO
-        if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        return False
+        try:
+            done = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter \"ProcessId={int(pid)}\").CommandLine"],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+        except OSError:
+            return False  # fail open: an unverifiable check must not block startup
+        return "telegram_bot" in (done.stdout or "")
     try:
         os.kill(pid, 0)
     except OSError:
