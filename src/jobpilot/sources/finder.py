@@ -181,7 +181,10 @@ def find_feed(
         return hit
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        results = pool.map(lambda d: search(f"{name} careers", d), SEARCH_DOMAINS)
+        # Engines are phrasing-sensitive ("Nike careers" finds nothing on
+        # myworkdayjobs.com, "Nike careers jobs" finds the tenant).
+        results = pool.map(lambda d: search(f"{name} careers jobs", d)
+                           or search(f"{name} jobs", d), SEARCH_DOMAINS)
         found: dict[str, dict] = {}
         for rows in results:
             for row in rows:
