@@ -143,7 +143,14 @@ def search(query: str, site: str | None = None) -> dict:
 
 
 def fetch(url: str) -> dict:
-    data = run_wigolo(["fetch", public_target(url), f"--max-content-chars={MAX_PAGE_CHARS}"])
+    target = public_target(url)
+    args = ["fetch", target, f"--max-content-chars={MAX_PAGE_CHARS}"]
+    try:
+        data = run_wigolo(args)
+    except WebError:
+        # Wigolo's plain-HTTP tier gives up on some real sites (for example an
+        # incomplete TLS certificate chain) that a browser loads fine.
+        data = run_wigolo([*args, "--render-js=always"], timeout=180)
     _checked(data.get("url"))
     return {"url": data.get("url"), "title": data.get("title"),
             "text": _clip(data.get("markdown"), MAX_PAGE_CHARS),

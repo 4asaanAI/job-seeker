@@ -123,3 +123,16 @@ def test_content_that_ended_up_on_a_private_address_is_discarded(monkeypatch, fa
         stdout=json.dumps({"url": "http://10.0.0.9/secret", "markdown": "secret"}), returncode=0))
     with pytest.raises(web.WebError, match="private"):
         web.fetch("https://public.example/js-redirect")
+
+
+def test_fetch_retries_in_a_real_browser_when_plain_http_fails(monkeypatch, fake_wigolo):
+    calls = []
+
+    def run(args, timeout=120):
+        calls.append(args)
+        if "--render-js=always" not in args:
+            raise web.WebError("TLS chain verification failed")
+        return {"url": args[1], "title": "Job", "markdown": "open"}
+    monkeypatch.setattr(web, "run_wigolo", run)
+    assert web.fetch("https://careers.example.com/job/1")["text"] == "open"
+    assert len(calls) == 2
