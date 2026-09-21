@@ -264,6 +264,19 @@ class Store:
                 (int(telegram_user_id), seeker_id))
             return cur.rowcount == 1
 
+    def best_matches(self, seeker_id: int, limit: int = 10) -> list[dict]:
+        """This seeker's highest-scored linked jobs, whether or not already sent."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT jp.id AS posting_id, jp.title, jp.company_name, jp.location, "
+                "       jp.canonical_url AS url, s.fit_score, s.reasoning, sj.status "
+                "FROM scores s JOIN seeker_jobs sj "
+                "  ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
+                "JOIN job_postings jp ON jp.id = s.posting_id "
+                "WHERE s.seeker_id = ? ORDER BY s.fit_score DESC, s.scored_at DESC LIMIT ?",
+                (seeker_id, int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
     def merge_seekers(self, keep: int, drop: int) -> dict[str, int]:
         """Fold seeker `drop` into `keep` (same person, two profiles).
 

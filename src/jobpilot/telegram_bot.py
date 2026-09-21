@@ -55,7 +55,8 @@ COMMANDS = {
     "search": "Run a fresh job search for me now, then present my best new matches in the standard format.",
     "status": "Report the status of my job search and of my job sources.",
     "applications": "List my applications and any follow-ups that are due.",
-    "resume": ("Help me prepare a tailored resume. Ask which of my matched jobs I mean, then call "
+    "resume": ("Help me prepare a tailored resume. List my best matches with my_matches and ask "
+               "which job I mean, then call "
                "resume_facts and render_resume for it, choosing the order of my experience and skills "
                "that best fits the job. The file is sent to me automatically once it passes its check. "
                "If I have no base resume yet, ask me to send my resume here as a PDF or Word file."),

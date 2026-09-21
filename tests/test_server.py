@@ -330,3 +330,12 @@ def test_followups_are_one_time_nudge_then_expiry(operator):
     assert followup["items"][0]["kind"] == "expiry"
     assert tools["record_notification"](sid, pid, "test", "expiry")["ok"]
     assert tools["get_followups"](sid)["items"] == []
+
+
+def test_my_matches_lists_best_scored_jobs_including_already_sent(operator):
+    tools, store = operator
+    sid, pid = _seed(store)
+    store.record_score(sid, pid, 85.0, "strong fit", "m")
+    out = tools["my_matches"](sid)
+    assert out["ok"] and out["items"][0]["posting_id"] == pid and out["items"][0]["fit_score"] == 85.0
+    assert not tools["my_matches"](sid + 99)["ok"] or tools["my_matches"](sid + 99)["items"] == []

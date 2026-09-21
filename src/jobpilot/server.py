@@ -420,6 +420,19 @@ def build_tools(
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
+    def my_matches(seeker_id: int, limit: int = 10) -> dict:
+        """This seeker's best-scoring jobs so far, including ones already sent.
+
+        Use it to pick jobs for tailored resumes or when asked for top matches.
+        """
+        try:
+            sid = _check(seeker_id)
+            return {"ok": True, "seeker_id": sid,
+                    "items": store.best_matches(sid, max(1, min(int(limit), 25))),
+                    "note": UNTRUSTED}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
     def add_target_company(
         seeker_id: int, name: str, weight: float = 1.0
     ) -> dict:
@@ -625,6 +638,7 @@ def build_tools(
         "my_status": my_status,
         "my_sources": my_sources,
         "my_history": my_history,
+        "my_matches": my_matches,
         "add_target_company": add_target_company,
         "resume_facts": resume_facts,
         "render_resume": render_resume,
