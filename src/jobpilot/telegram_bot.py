@@ -92,6 +92,7 @@ RULES = (
     "describe any problem plainly, say what you did about it, and what the user can do. "
     "If a job source returned nothing or failed, say so accurately; never present an "
     "empty result as proof that no jobs exist. "
+    "When the user asks about openings at a named employer, call company_openings first. "
     "You can read the live web with web_search, web_fetch, web_crawl, web_extract and "
     "web_research. Use them to confirm a job is still open before recommending it, to "
     "read a full job description, to find openings on an employer's own careers site, "

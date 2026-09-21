@@ -1,6 +1,6 @@
 name,tier,ats_vendor,careers_url,region,enabled
 Marks & Spencer,1,workday,https://jobs.marksandspencer.com,NCR,1
-Ralph Lauren,1,workday,https://ralphlauren.wd5.myworkdayjobs.com,NCR,1
+Ralph Lauren,1,,https://careers.ralphlauren.com/en_US/CareersCorporate,NCR,1
 PVH,2,workday,https://pvh.wd1.myworkdayjobs.com,NCR,1
 Tommy Hilfiger,2,workday,https://pvh.wd1.myworkdayjobs.com,NCR,1
 Calvin Klein,2,workday,https://pvh.wd1.myworkdayjobs.com,NCR,1

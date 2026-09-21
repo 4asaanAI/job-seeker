@@ -274,3 +274,12 @@ def test_wigolo_never_runs_through_a_windows_batch_file(tmp_path):
     entry.unlink()
     assert wigolo_command(which, is_windows=True) is None  # refuse, never fall back to .cmd
     assert wigolo_command(lambda n: "/usr/bin/wigolo", is_windows=False) == ["/usr/bin/wigolo"]
+
+
+def test_careers_site_is_the_employers_own_host_not_a_job_board():
+    from jobpilot.sources.finder import find_careers_site
+    rows = [{"url": "https://in.linkedin.com/jobs/ralph-lauren-jobs"},
+            {"url": "https://corporate.ralphlauren.com/careers"},
+            {"url": "https://careers.ralphlauren.com/en_US/CareersCorporate"}]
+    assert find_careers_site("Ralph Lauren", search=lambda q, d: rows) == "careers.ralphlauren.com"
+    assert find_careers_site("Nobody", search=lambda q, d: rows) is None

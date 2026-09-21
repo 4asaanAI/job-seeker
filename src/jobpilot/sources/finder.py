@@ -262,3 +262,28 @@ def find_feed(
                     found.setdefault(cand["endpoint"], {**cand, "context": context})
     ordered = sorted(found.values(), key=lambda c: _rank(c, wanted))
     return first_verified(ordered[:MAX_SEARCHED_CANDIDATES])
+
+
+AGGREGATORS = ("linkedin.", "indeed.", "naukri.", "glassdoor.", "wikipedia.", "monster.",
+               "ziprecruiter.", "simplyhired.", "facebook.", "twitter.", "x.com", "instagram.",
+               "youtube.", "crunchbase.", "ambitionbox.", "shine.com", "foundit.")
+
+
+def find_careers_site(company: str, search=searxng_search) -> str | None:
+    """The employer's own careers host (e.g. careers.ralphlauren.com), found
+    by web search: a host that carries the employer's name, not a job board."""
+    words = _words(company)
+    if not words:
+        return None
+    rows = search(f"{' '.join(company.split())} careers jobs", "") or []
+    hosts = []
+    for row in rows:
+        host = (urlparse(str(row.get("url") or "")).hostname or "").casefold()
+        if not host or any(a in host for a in AGGREGATORS):
+            continue
+        if "".join(words) in host.replace("-", "").replace(".", "") or words[0] in host.split("."):
+            hosts.append(host)
+    if not hosts:
+        return None
+    # A dedicated careers/jobs host beats the corporate homepage.
+    return sorted(dict.fromkeys(hosts), key=lambda h: 0 if h.startswith(("careers.", "jobs.")) else 1)[0]

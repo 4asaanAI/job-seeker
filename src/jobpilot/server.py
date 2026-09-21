@@ -870,7 +870,38 @@ def build_tools(
         """
         return _web(seeker_id, lambda w: w.research(question))
 
-    tools.update({"web_search": web_search, "web_fetch": web_fetch, "web_crawl": web_crawl,
+    def company_openings(seeker_id: int, company: str, keywords: str = "") -> dict:
+        """Current openings at one named employer, for any employer.
+
+        Uses the employer's own job feed when one is known; otherwise finds
+        the employer's careers website and searches it. Open a result with
+        web_fetch before calling it open, and score it before recommending it.
+        """
+        from .sources.finder import find_careers_site, normalise, searxng_search
+        from . import web
+
+        def action(_web):
+            cfg = load_config()
+            wanted = normalise(company)
+            for name, acfg in _ats_configs(cfg).items():
+                if acfg.enabled and normalise(acfg.company_name) == wanted:
+                    postings, _ = ATSJsonSource(acfg).search(keywords, None)
+                    return {"company": company, "via": f"{acfg.company_name} job feed",
+                            "openings": [{"title": p.title, "location": p.location, "url": p.url}
+                                         for p in postings[:15]]}
+            site = find_careers_site(company)
+            if site is None:
+                return {"company": company, "via": "none", "openings": [],
+                        "note": "No careers website was found for this employer; this does "
+                                "not mean there are no openings."}
+            rows = searxng_search(f"{company} {keywords} job".strip(), site) or []
+            return {"company": company, "via": f"search of {site}",
+                    "openings": [{"title": r.get("title"), "url": r.get("url")} for r in rows[:10]],
+                    "note": web.UNTRUSTED + " These come from a web index and may be closed; "
+                            "confirm each with web_fetch."}
+        return _web(seeker_id, action)
+
+    tools.update({"company_openings": company_openings, "web_search": web_search, "web_fetch": web_fetch, "web_crawl": web_crawl,
                   "web_extract": web_extract, "web_research": web_research})
     tools["available_sources"] = available_sources
     tools["update_my_profile"] = update_my_profile
