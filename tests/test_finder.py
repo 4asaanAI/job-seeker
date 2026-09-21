@@ -261,3 +261,16 @@ def test_empty_searxng_answer_does_not_trigger_the_slow_fallback(monkeypatch):
     monkeypatch.setattr(finder, "searxng_search", lambda q, d: [])
     monkeypatch.setattr(finder, "wigolo_search", lambda q, d: pytest.fail("fallback ran"))
     assert finder.web_search("Nobody", "myworkdayjobs.com") == []
+
+
+def test_wigolo_never_runs_through_a_windows_batch_file(tmp_path):
+    from jobpilot.sources.finder import wigolo_command
+    npm = tmp_path / "npm"
+    entry = npm / "node_modules" / "wigolo" / "dist" / "index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("")
+    which = {"wigolo": str(npm / "wigolo.CMD"), "node": "C:/node/node.exe"}.get
+    assert wigolo_command(which, is_windows=True) == ["C:/node/node.exe", str(entry)]
+    entry.unlink()
+    assert wigolo_command(which, is_windows=True) is None  # refuse, never fall back to .cmd
+    assert wigolo_command(lambda n: "/usr/bin/wigolo", is_windows=False) == ["/usr/bin/wigolo"]

@@ -58,13 +58,24 @@ def matches(job: dict, query: str, location: str | None = None) -> bool:
     return not words or any(w in job["title"].lower() for w in words)
 
 
-def fetch_markdown(url: str, exe: str) -> str:
+def wigolo_command() -> list[str] | None:
+    """Start Wigolo without cmd.exe (see jobpilot.sources.finder.wigolo_command)."""
+    exe = shutil.which("wigolo")
+    if not exe or os.name != "nt" or not exe.lower().endswith((".cmd", ".bat")):
+        return [exe] if exe else None
+    base = Path(exe).parent
+    entry = base / "node_modules" / "wigolo" / "dist" / "index.js"
+    node = str(base / "node.exe") if (base / "node.exe").is_file() else shutil.which("node")
+    return [node, str(entry)] if node and entry.is_file() else None
+
+
+def fetch_markdown(url: str, exe: list[str]) -> str:
     """Fetch through Wigolo, reusing a 30-minute cache so repeated queries are cheap."""
     cache = Path(tempfile.gettempdir()) / ("wigolo_jobs_" + hashlib.sha256(url.encode()).hexdigest()[:16] + ".md")
     if cache.exists() and time.time() - cache.stat().st_mtime < CACHE_SECONDS:
         return cache.read_text(encoding="utf-8")
     done = subprocess.run(
-        [exe, "fetch", url, "--render-js=always", "--json", "--include-full-markdown"],
+        [*exe, "fetch", url, "--render-js=always", "--json", "--include-full-markdown"],
         capture_output=True, text=True, encoding="utf-8", timeout=120, check=False, env=wigolo_env(),
     )
     if done.returncode != 0:
@@ -85,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--location")
     ap.add_argument("--format", default="json")
     args = ap.parse_args(argv)
-    exe = shutil.which("wigolo")
+    exe = wigolo_command()
     if not exe:
         print("wigolo executable not found on PATH", file=sys.stderr)
         return 2

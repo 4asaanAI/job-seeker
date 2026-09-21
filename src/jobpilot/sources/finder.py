@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Callable
 from urllib.parse import urlencode, urlparse
 from urllib.request import urlopen
@@ -55,6 +56,25 @@ def wigolo_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k.upper() not in LLM_KEYS}
 
 
+def wigolo_command(which=shutil.which, is_windows: bool = os.name == "nt") -> list[str] | None:
+    """How to start Wigolo without a shell.
+
+    On Windows npm installs ``wigolo.cmd``; a batch file is always parsed by
+    cmd.exe, which treats & | ^ % in arguments as commands -- and arguments
+    here carry text from strangers (company names, search queries). So run
+    Wigolo's JavaScript entry point with node directly, and refuse otherwise.
+    """
+    exe = which("wigolo")
+    if not exe:
+        return None
+    if not is_windows or not exe.lower().endswith((".cmd", ".bat")):
+        return [exe]
+    base = Path(exe).parent
+    entry = base / "node_modules" / "wigolo" / "dist" / "index.js"
+    node = str(base / "node.exe") if (base / "node.exe").is_file() else which("node")
+    return [node, str(entry)] if node and entry.is_file() else None
+
+
 def _words(name: str) -> list[str]:
     words = re.findall(r"[a-z0-9]+", name.casefold().replace("&", " and "))
     return [w for w in words if w not in SUFFIXES]
@@ -79,12 +99,12 @@ def _related(key: str, wanted: str) -> bool:
 
 def wigolo_search(query: str, domain: str) -> list[dict]:
     """Web search restricted to one domain; [] when Wigolo is unavailable."""
-    exe = shutil.which("wigolo")
-    if not exe:
+    cmd = wigolo_command()
+    if not cmd:
         return []
     try:
         done = subprocess.run(
-            [exe, "search", query, f"--include-domains={domain}", "--no-content",
+            [*cmd, "search", query, f"--include-domains={domain}", "--no-content",
              "--max-results=8", "--json"],
             capture_output=True, text=True, encoding="utf-8", timeout=90, check=False, env=wigolo_env())
         return [r for r in json.loads(done.stdout).get("results", []) if r.get("url")]

@@ -45,7 +45,7 @@ def fake_wigolo(monkeypatch):
                             "citations": [{"title": "c", "url": "u"}]}}[verb]
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
 
-    monkeypatch.setattr(web.shutil, "which", lambda name: "wigolo")
+    monkeypatch.setattr(web, "wigolo_command", lambda: ["wigolo"])
     monkeypatch.setattr(web.subprocess, "run", run)
     monkeypatch.setattr(web, "_resolve", PUBLIC)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-bad")
