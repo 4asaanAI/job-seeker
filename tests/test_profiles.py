@@ -122,3 +122,9 @@ def test_attach_company_sets_company_id(tmp_path):
     row = s.conn.execute("SELECT company_id FROM job_postings WHERE id = ?", (pid,)).fetchone()
     assert row["company_id"] == cid
     s.close()
+
+
+def test_shipped_company_list_exists_because_discover_loads_it():
+    # discover() reads this file on every run; deleting it breaks every search.
+    repo = Path(__file__).parents[1]
+    assert load_companies(repo / "data" / "companies.csv")
