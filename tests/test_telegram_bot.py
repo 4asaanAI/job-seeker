@@ -398,3 +398,17 @@ def test_pid_alive_on_windows_fails_open_on_check_error(monkeypatch):
 
     monkeypatch.setattr(tb.subprocess, "run", raising_run)
     assert tb._pid_alive(999) is False, "an unverifiable check must not block startup"
+
+
+def test_set_menu_survives_individual_call_failures(home, store):
+    calls = []
+
+    def flaky_http(method, params, timeout=40):
+        calls.append(method)
+        if method == "setMyName":
+            raise RuntimeError("429 Too Many Requests")
+        return {"ok": True}
+
+    bot = tb.Bot("TOKEN", home, store, http=flaky_http)
+    bot.set_menu()
+    assert calls == ["setMyCommands", "setMyName", "setMyDescription", "setMyShortDescription"]

@@ -129,11 +129,20 @@ class Bot:
             self.api("sendMessage", chat_id=chat_id, text=text[i:i + 4000])
 
     def set_menu(self) -> None:
-        self.api("setMyCommands", commands=json.dumps(
-            [{"command": c, "description": d} for c, d in MENU.items()]))
-        self.api("setMyName", name=NAME)
-        self.api("setMyDescription", description=DESCRIPTION)
-        self.api("setMyShortDescription", short_description="Job search assistant")
+        """Best-effort: a rate limit or transient failure here must not stop
+        the bot from polling and answering messages."""
+        calls = [
+            ("setMyCommands", {"commands": json.dumps(
+                [{"command": c, "description": d} for c, d in MENU.items()])}),
+            ("setMyName", {"name": NAME}),
+            ("setMyDescription", {"description": DESCRIPTION}),
+            ("setMyShortDescription", {"short_description": "Job search assistant"}),
+        ]
+        for method, params in calls:
+            try:
+                self.api(method, **params)
+            except Exception as exc:
+                _log(f"set_menu {method} failed: {type(exc).__name__}: {exc}")
 
     # --- sessions ------------------------------------------------------
     def _load_sessions(self) -> dict:
