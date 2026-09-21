@@ -36,7 +36,7 @@ def _default_poster(url: str, body: dict, timeout: float) -> object:
         return json.load(response)
 
 
-SEARCHED = frozenset({"workday_cxs", "oracle_hcm"})
+SEARCHED = frozenset({"workday_cxs", "oracle_hcm", "smartrecruiters"})
 MAX_PAGES = 5
 
 
@@ -168,6 +168,16 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
         url = _nested(item, "hostedUrl", "applyUrl", "url")
         description = _nested(item, "descriptionPlain", "description")
         posted_at = _nested(item, "createdAt", "updatedAt")
+    elif vendor == "smartrecruiters":
+        place = item.get("location") if isinstance(item.get("location"), dict) else {}
+        external_id = _nested(item, "id")
+        title = _nested(item, "name")
+        location = place.get("fullLocation") or place.get("city")
+        identifier = urlparse(cfg.endpoint).path.strip("/").split("/")[2:3]
+        url = (f"https://jobs.smartrecruiters.com/{identifier[0]}/{_text(external_id)}"
+               if identifier and external_id else "")
+        description = ""
+        posted_at = _nested(item, "releasedDate")
     elif vendor == "ashby":
         external_id = _nested(item, "id")
         title = _nested(item, "title")
@@ -250,6 +260,13 @@ class ATSJsonSource:
                     "searchText": key}, timeout)
                 batch = data.get("jobPostings", []) if isinstance(data, dict) else []
                 size = 20
+            elif self.cfg.vendor == "smartrecruiters":
+                clean = re.sub(r"[^\w ]", " ", key).strip()
+                url = (f"{self.cfg.endpoint}?limit=100&offset={page * 100}"
+                       + (f"&q={quote(clean)}" if clean else ""))
+                data = self._fetcher(url, timeout)
+                batch = data.get("content", []) if isinstance(data, dict) else []
+                size = 100
             else:
                 clean = re.sub(r"[^\w ]", " ", key).strip()
                 base = self.cfg.endpoint

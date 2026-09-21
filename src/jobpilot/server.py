@@ -6,6 +6,7 @@ requests discovery data, scores it, and asks the server to persist the result.
 from __future__ import annotations
 
 import os
+import re
 import ntpath
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,7 +114,7 @@ def build_tools(
             if hit is None:
                 report[company] = "no public job feed found; covered by job boards only"
                 continue
-            name = f"{hit['vendor']}_{hit['slug']}".replace("-", "_")
+            name = re.sub(r"[^a-z0-9]+", "_", f"{hit['vendor']}_{hit['slug']}".casefold())
             store.add_company_feed(name, hit["vendor"], hit["company_name"], hit["endpoint"])
             covered[key] = name
             sources.append(name)

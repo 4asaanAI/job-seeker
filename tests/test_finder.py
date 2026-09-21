@@ -11,6 +11,7 @@ from jobpilot.sources.finder import find_feed, slugs
 from jobpilot.store.db import Store
 
 REPO = Path(__file__).parents[1]
+NO_SEARCH = lambda query, domain: []  # noqa: E731 - never touch the real web
 
 
 def _fetcher(pages):
@@ -29,18 +30,18 @@ def test_slugs_drop_legal_suffixes():
 def test_greenhouse_match_requires_the_board_to_name_the_company():
     board = "https://boards-api.greenhouse.io/v1/boards/acme"
     jobs = board + "/jobs?content=true"
-    fetch = _fetcher({board: {"name": "Acme"}, jobs: {"jobs": [{"id": 1}]}})
-    hit = find_feed("Acme Inc", fetch)
+    fetch = _fetcher({board: {"name": "Acme"}, jobs: {"jobs": [{"id": 1, "title": "PM"}]}})
+    hit = find_feed("Acme Inc", fetch, search=NO_SEARCH)
     assert hit["vendor"] == "greenhouse" and hit["endpoint"] == jobs and hit["jobs"] == 1
     impostor = _fetcher({board: {"name": "Acme Plumbing Supplies"}, jobs: {"jobs": [{"id": 1}]}})
-    assert find_feed("Acme", impostor) is None
+    assert find_feed("Acme", impostor, search=NO_SEARCH) is None
 
 
 def test_lever_and_ashby_need_an_exact_slug_and_live_jobs():
     ashby = "https://api.ashbyhq.com/posting-api/job-board/north-wind"
-    assert find_feed("North Wind", _fetcher({ashby: {"jobs": [{"id": "a"}]}}))["vendor"] == "ashby"
-    assert find_feed("North Wind", _fetcher({ashby: {"jobs": []}})) is None
-    assert find_feed("Nobody", _fetcher({})) is None
+    assert find_feed("North Wind", _fetcher({ashby: {"jobs": [{"id": "a", "title": "PM"}]}}), search=NO_SEARCH)["vendor"] == "ashby"
+    assert find_feed("North Wind", _fetcher({ashby: {"jobs": []}}), search=NO_SEARCH) is None
+    assert find_feed("Nobody", _fetcher({}), search=NO_SEARCH) is None
 
 
 def test_ashby_rows_become_postings_and_unlisted_are_skipped():
@@ -117,3 +118,67 @@ def test_update_profile_looks_up_new_companies_with_a_cap(home):
     assert out["ok"] and "ashby_northwind" in out["profile"]["sources"]
     assert len(calls) == 5
     assert "not checked this time" in out["target_companies"]["Company 6"]
+
+
+def test_ats_page_urls_become_feed_endpoints():
+    from jobpilot.sources.finder import candidates_from_url as c
+    assert c("https://nike.wd1.myworkdayjobs.com/en-US/nke/job/Portland/PM_R-1")[0]["endpoint"] == \
+        "https://nike.wd1.myworkdayjobs.com/wday/cxs/nike/nke/jobs"
+    assert c("https://walmart.wd504.myworkdayjobs.com/Non-WorkdayInternal") == []
+    assert c("https://careers.smartrecruiters.com/BoschGroup/it")[0]["endpoint"] == \
+        "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings"
+    oracle = c("https://fa-x.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/")[0]
+    assert oracle["vendor"] == "oracle_hcm" and oracle["endpoint"].endswith("siteNumber=CX_1")
+    assert c("https://job-boards.greenhouse.io/acme/jobs/1")[0]["key"] == "acme"
+    assert c("https://example.com/careers") == []
+
+
+def _search(results):
+    return lambda query, domain: results.get(domain, [])
+
+
+def test_workday_tenant_is_found_by_search_and_impostors_are_rejected():
+    results = {"myworkdayjobs.com": [
+        {"url": "https://genpact.wd108.myworkdayjobs.com/External_Careers", "title": "Genpact"},
+        {"url": "https://acme.wd5.myworkdayjobs.com/en-US/AcmeCareers/job/X", "title": "Acme"},
+    ]}
+    posts = []
+
+    def post(url, body, timeout):
+        posts.append(url)
+        return {"total": 3, "jobPostings": [
+            {"externalPath": "/job/1", "title": "Analyst", "locationsText": "Austin"}]}
+
+    hit = find_feed("Acme Corp", _fetcher({}), post=post, search=_search(results))
+    assert hit["vendor"] == "workday_cxs"
+    assert hit["endpoint"] == "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/AcmeCareers/jobs"
+    assert not any("genpact" in url for url in posts)  # never even queried
+
+
+def test_smartrecruiters_guess_needs_the_api_to_name_the_company():
+    url = "https://api.smartrecruiters.com/v1/companies/{}/postings?limit=1"
+    bosch = {"content": [{"id": "1", "name": "Engineer", "company": {"name": "Bosch Group"}}]}
+    pages = {url.format("BoschGroup"): bosch,
+             url.format("BoschGroup").replace("limit=1", "limit=100&offset=0"): bosch}
+    hit = find_feed("Bosch", _fetcher(pages), search=NO_SEARCH)
+    assert hit["vendor"] == "smartrecruiters" and hit["slug"] == "BoschGroup"
+    other = {url.format("Acme"): {"content": [{"id": "1", "name": "x", "company": {"name": "Beta"}}]}}
+    assert find_feed("Acme", _fetcher(other), search=NO_SEARCH) is None
+
+
+def test_smartrecruiters_rows_become_postings_with_public_links():
+    cfg = ATSConfig(name="sr", vendor="smartrecruiters", company_name="Bosch",
+                    endpoint="https://api.smartrecruiters.com/v1/companies/BoschGroup/postings",
+                    enabled=True)
+    seen = []
+
+    def fetch(url, timeout):
+        seen.append(url)
+        return {"content": [{"id": "74", "name": "Controls Engineer",
+                             "location": {"fullLocation": "Charleston, SC, United States"},
+                             "releasedDate": "2026-09-21"}]}
+
+    found, raw = ATSJsonSource(cfg, fetcher=fetch).search("controls engineer", "Austin")
+    assert raw == 1 and found[0].url == "https://jobs.smartrecruiters.com/BoschGroup/74"
+    assert found[0].location == "Charleston, SC, United States"
+    assert "q=controls%20engineer" in seen[0]
