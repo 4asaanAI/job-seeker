@@ -153,3 +153,24 @@ def test_pdf_extraction_gate_reads_text(tmp_path):
 
     report = validate_pdf(output, ("Ada Example",))
     assert report.ok is True
+
+
+def test_unverified_facts_tolerates_pdf_spacing_but_not_new_claims(base_resume):
+    from jobpilot.resume import unverified_facts
+    source = BASE.replace("Owned product development", "Owned   product\ndevelop ment")
+    assert unverified_facts(base_resume, source) == []
+    assert unverified_facts(base_resume, source.replace("Example Brands Ltd", "")) == [
+        "Example Brands Ltd"]
+
+
+def test_extract_source_text_reads_docx_tables(tmp_path):
+    from docx import Document
+    from jobpilot.resume import extract_source_text
+    doc = Document()
+    doc.add_paragraph("Ada Example")
+    doc.add_table(rows=1, cols=1).cell(0, 0).text = "Example Brands Ltd"
+    doc.save(tmp_path / "cv.docx")
+    text = extract_source_text(tmp_path / "cv.docx")
+    assert "Ada Example" in text and "Example Brands Ltd" in text
+    with pytest.raises(ValueError):
+        extract_source_text(tmp_path / "cv.png")

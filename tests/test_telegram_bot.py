@@ -446,3 +446,126 @@ def test_single_instance_lock_is_race_safe_under_concurrent_start(home, monkeypa
     for t in threads:
         t.join()
     assert results.count(True) == 1
+
+
+RESUME_TEXT = (
+    "Sam Rivera\nData Analyst\nsam@example.test\n"
+    "Acme Corp, Analyst, Jan 2023 - Present\n"
+    "Built weekly KPI dashboards in Tableau for the sales team.\n"
+    "State University, B.S. Statistics, 2018 - 2022\nSkills: SQL, Python, Tableau\n"
+)
+STRUCTURED = {
+    "name": "Sam Rivera", "headline": "Data Analyst", "contact": ["sam@example.test"],
+    "experience": [{"id": "acme", "employer": "Acme Corp", "title": "Analyst",
+                    "dates": "Jan 2023 - Present", "bullets": [
+                        {"id": "kpi", "text": "Built weekly KPI dashboards in Tableau for the sales team."}]}],
+    "education": [{"id": "su", "institution": "State University",
+                   "degree": "B.S. Statistics", "dates": "2018 - 2022"}],
+    "skills": ["SQL", "Python", "Tableau"],
+}
+
+
+def _registered(home, store, uid=700):
+    build_tools(store, home, operator_mode=False, onboard_telegram_id=uid)["register_me"](
+        "Sam", "Analyst", "Austin", ["data analyst"], ["indeed_us"])
+    return store.seeker_by_telegram_id(uid)
+
+
+def _docx_bytes(tmp_path, text):
+    from docx import Document
+    doc = Document()
+    for line in text.splitlines():
+        doc.add_paragraph(line)
+    path = tmp_path / "in.docx"
+    doc.save(path)
+    return path.read_bytes()
+
+
+def _upload_bot(home, store, data):
+    sent, runs, files = [], [], []
+
+    def http(method, params, timeout=40):
+        sent.append((method, params))
+        return {"ok": True, "result": {"file_path": "documents/file_1.docx"}}
+
+    def runner(cmd, **kw):
+        runs.append((cmd, kw))
+        return SimpleNamespace(returncode=0, stdout="done", stderr="")
+
+    bot = tb.Bot("TOKEN", home, store, http=http, runner=runner,
+                 download=lambda url: data, upload=lambda chat, path: files.append(path))
+    return bot, sent, runs, files
+
+
+def _doc_msg(uid, name="cv.docx", size=1000):
+    return {"update_id": 1, "message": {
+        "from": {"id": uid, "is_bot": False}, "chat": {"id": uid, "type": "private"},
+        "document": {"file_id": "F1", "file_name": name, "file_size": size}}}
+
+
+def test_uploaded_resume_is_stored_and_handed_to_claude_as_data(home, store, tmp_path):
+    seeker = _registered(home, store)
+    bot, sent, runs, _ = _upload_bot(home, store, _docx_bytes(tmp_path, RESUME_TEXT))
+    bot.handle(_doc_msg(700))
+    folder = (home / seeker.profile_path).parent
+    assert (folder / "uploaded_resume.docx").is_file()
+    assert "Built weekly KPI dashboards" in (folder / "resume_source.txt").read_text()
+    prompt = runs[0][1]["input"]
+    assert "save_base_resume" in prompt and "RESUME START" in prompt
+    assert "Built weekly KPI dashboards" in prompt
+    assert "Resume received" in _texts(sent)[0]
+
+
+def test_upload_refuses_unknown_sender_wrong_type_and_oversize(home, store, tmp_path):
+    bot, sent, runs, _ = _upload_bot(home, store, b"x")
+    bot.handle(_doc_msg(701))
+    assert "/start" in _texts(sent)[-1]
+    _registered(home, store, 702)
+    bot.handle(_doc_msg(702, name="cv.png"))
+    assert "PDF or Word" in _texts(sent)[-1]
+    bot.handle(_doc_msg(702, size=tb.MAX_UPLOAD + 1))
+    assert "too large" in _texts(sent)[-1]
+    bot.handle(_doc_msg(702))  # unreadable bytes
+    assert runs == []
+
+
+def test_save_base_resume_accepts_only_verbatim_facts(home, store):
+    seeker = _registered(home, store)
+    tools = build_tools(store, home, pinned_seeker_id=seeker.id, operator_mode=False)
+    assert not tools["save_base_resume"](seeker.id, STRUCTURED)["ok"]  # no upload yet
+    folder = (home / seeker.profile_path).parent
+    (folder / "resume_source.txt").write_text(RESUME_TEXT, encoding="utf-8")
+    invented = json.loads(json.dumps(STRUCTURED))
+    invented["experience"][0]["bullets"][0]["text"] = "Grew revenue 40% with dashboards."
+    refused = tools["save_base_resume"](seeker.id, invented)
+    assert not refused["ok"] and refused["unverified"] == ["Grew revenue 40% with dashboards."]
+    assert not (folder / "base_resume.yaml").exists()
+    assert tools["save_base_resume"](seeker.id, STRUCTURED)["ok"]
+    facts = tools["resume_facts"](seeker.id)
+    assert facts["ok"] and facts["experience"][0]["employer"] == "Acme Corp"
+    assert not (folder / "base_resume.draft.yaml").exists()
+
+
+def test_rendered_resume_is_sent_back_as_a_document(home, store, monkeypatch):
+    from jobpilot.store.db import Posting
+    seeker = _registered(home, store)
+    folder = (home / seeker.profile_path).parent
+    (folder / "resume_source.txt").write_text(RESUME_TEXT, encoding="utf-8")
+    tools = build_tools(store, home / "out", pinned_seeker_id=seeker.id, operator_mode=False)
+    tools["save_base_resume"](seeker.id, STRUCTURED)
+    pid = store.upsert_posting(Posting(
+        company_name="Globex", source="indeed", external_id="g1", title="Data Analyst",
+        location="Austin", description="d", url="https://x.test/g1", posted_at="2026-09-18"))
+    store.link_posting(seeker.id, pid)
+    bot, sent, runs, files = _upload_bot(home, store, b"")
+    old = tools["render_resume"](seeker.id, pid)
+    assert old["ok"] and old["validation"]["ok"]
+
+    def render_during_run(cmd, **kw):
+        runs.append(cmd)
+        tools["render_resume"](seeker.id, pid)
+        return SimpleNamespace(returncode=0, stdout="Here is your resume.", stderr="")
+
+    bot.runner = render_during_run
+    bot.handle(_msg(700, "/resume"))
+    assert len(files) == 1 and files[0].suffix == ".docx" and files[0] != Path(old["path"])

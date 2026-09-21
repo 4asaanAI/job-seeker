@@ -328,3 +328,46 @@ def render_docx(
         output.unlink(missing_ok=True)
         raise ResumeValidationError(report)
     return report
+
+
+def extract_source_text(path: Path) -> str:
+    """Plain text of a seeker's own uploaded resume (PDF, DOCX or TXT)."""
+    source = Path(path)
+    suffix = source.suffix.lower()
+    if suffix == ".pdf":
+        from pypdf import PdfReader
+        return "\n".join(page.extract_text() or "" for page in PdfReader(str(source)).pages)
+    if suffix == ".docx":
+        document = Document(source)
+        lines = [paragraph.text for paragraph in document.paragraphs]
+        for table in document.tables:
+            for row in table.rows:
+                lines.extend(cell.text for cell in row.cells)
+        return "\n".join(lines)
+    if suffix == ".txt":
+        return source.read_text(encoding="utf-8")
+    raise ValueError(f"unsupported resume format: {suffix or 'none'}")
+
+
+_DASHES = str.maketrans({"–": "-", "—": "-", "‑": "-"})
+
+
+def _squash(text: str) -> str:
+    # PDF extraction splits words ("client -facing", "GP A"), so compare with
+    # all whitespace removed; casing and dash style are not facts.
+    return "".join(text.translate(_DASHES).casefold().split())
+
+
+def unverified_facts(base: BaseResume, source_text: str) -> list[str]:
+    """Every value in ``base`` that does not appear verbatim in the source.
+
+    A structured resume built from an uploaded file must be a pure re-layout
+    of that file: anything not found in it is a model-written claim.
+    """
+    haystack = _squash(source_text)
+    values = [base.name, base.headline, *base.contact, base.summary or "", *base.skills]
+    for item in base.experience:
+        values += [item.employer, item.title, item.dates, *(text for _, text in item.bullets)]
+    for item in base.education:
+        values += [item.institution, item.degree, item.dates]
+    return [value for value in values if value and _squash(value) not in haystack]

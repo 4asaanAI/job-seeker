@@ -17,7 +17,12 @@ from .digest.plain import render_plain_digest
 from .paths import jobpilot_home
 from .pipeline import SeekerTarget, run_discovery
 from .profiles import load_companies, load_profile
-from .resume import ResumeValidationError, load_base_resume, render_docx
+from .resume import (
+    ResumeValidationError,
+    load_base_resume,
+    render_docx,
+    unverified_facts,
+)
 from .scoring import build_scoring_batch
 from .sheets import GoogleSheetsExporter, load_google_services
 from .sources.ats_json import ATSJsonSource
@@ -349,11 +354,20 @@ def build_tools(
         return {"ok": True, "seeker_id": sid, "company_id": company_id,
                 "name": " ".join(name.split())}
 
-    def resume_facts(seeker_id: int, base_resume_path: str) -> dict:
-        """Expose structured resume facts so an approved caller can choose order only."""
+    def _base_resume_path(sid: int, raw_path: str | None) -> Path:
+        if raw_path:
+            return _home_relative_path(raw_path, "base_resume_path")
+        _, profile_path, _ = _profile_for(sid)
+        return profile_path.parent / "base_resume.yaml"
+
+    def resume_facts(seeker_id: int, base_resume_path: str | None = None) -> dict:
+        """Expose structured resume facts so an approved caller can choose order only.
+
+        base_resume_path defaults to the seeker's own base_resume.yaml.
+        """
         try:
             sid = _check(seeker_id)
-            path = _home_relative_path(base_resume_path, "base_resume_path")
+            path = _base_resume_path(sid, base_resume_path)
             base = load_base_resume(path)
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -382,20 +396,23 @@ def build_tools(
     def render_resume(
         seeker_id: int,
         posting_id: int,
-        base_resume_path: str,
+        base_resume_path: str | None = None,
         experience_order: list[str] | None = None,
         skills: list[str] | None = None,
     ) -> dict:
-        """Render a facts-only DOCX for a linked job and run the blocking gate."""
+        """Render a facts-only DOCX for a linked job and run the blocking gate.
+
+        base_resume_path defaults to the seeker's own base_resume.yaml.
+        """
         try:
             sid = _check(seeker_id)
             posting = store.posting_view(sid, int(posting_id))
             if posting is None:
                 raise ValueError("posting is not linked to this seeker")
-            base_path = _home_relative_path(base_resume_path, "base_resume_path")
+            base_path = _base_resume_path(sid, base_resume_path)
             base = load_base_resume(base_path)
             seeker = store.get_seeker(sid)
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
             output_dir = Path(out_dir) / "seekers" / f"{sid}-{seeker.output_token}"
             output = output_dir / f"resume-{int(posting_id)}-{stamp}.docx"
             report = render_docx(
@@ -418,6 +435,42 @@ def build_tools(
             "validation": report.as_dict(),
             "note": "Only facts from the structured base resume were rendered; review before sending.",
         }
+
+    def save_base_resume(seeker_id: int, resume: dict) -> dict:
+        """Save the seeker's structured resume, built from their uploaded file.
+
+        resume uses the base_resume schema: name, headline, contact[], summary,
+        experience[{id, employer, title, dates, bullets[{id, text}]}],
+        education[{id, institution, degree, dates}], skills[]. Every text value
+        must be copied exactly from the uploaded resume; anything not found in
+        it is refused, so never paraphrase, merge or invent.
+        """
+        import yaml
+        try:
+            sid = _check(seeker_id)
+            if not isinstance(resume, dict):
+                raise ValueError("resume must be a mapping")
+            target = _base_resume_path(sid, None)
+            source = target.parent / "resume_source.txt"
+            if not source.is_file():
+                raise ValueError("no uploaded resume on file; ask the user to send one")
+            draft = target.with_name("base_resume.draft.yaml")
+            draft.write_text(yaml.safe_dump(resume, sort_keys=False, allow_unicode=True),
+                             encoding="utf-8")
+            try:
+                base = load_base_resume(draft)
+                missing = unverified_facts(base, source.read_text(encoding="utf-8"))
+                if missing:
+                    return {"ok": False, "error": "these values are not in the uploaded "
+                            "resume; copy them exactly or leave them out",
+                            "unverified": missing}
+                draft.replace(target)
+            finally:
+                draft.unlink(missing_ok=True)
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, "experience": len(base.experience),
+                "education": len(base.education), "skills": len(base.skills)}
 
     def my_resumes(seeker_id: int, posting_id: int | None = None) -> dict:
         """List only this seeker's generated resume versions."""
@@ -493,6 +546,7 @@ def build_tools(
         "add_target_company": add_target_company,
         "resume_facts": resume_facts,
         "render_resume": render_resume,
+        "save_base_resume": save_base_resume,
         "my_resumes": my_resumes,
         "set_job_status": set_job_status,
         "record_application": record_application,
