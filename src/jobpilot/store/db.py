@@ -181,6 +181,18 @@ class Store:
                 (expected_hash, row["id"]),
             )
 
+    # --- automatically found employer feeds ---------------------------
+    def add_company_feed(self, name: str, vendor: str, company_name: str, endpoint: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO company_feeds VALUES (?, ?, ?, ?, ?)",
+                (name, vendor, company_name, endpoint, _now()))
+
+    def company_feeds(self) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute("SELECT * FROM company_feeds ORDER BY name").fetchall()
+        return [dict(row) for row in rows]
+
     # --- events --------------------------------------------------------
     def record_event(
         self, kind: str, detail: str,

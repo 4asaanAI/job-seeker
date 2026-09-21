@@ -156,3 +156,13 @@ CREATE TABLE IF NOT EXISTS events (
     detail     TEXT,
     created_at TEXT NOT NULL
 );
+
+-- Employer feeds found automatically from a seeker's target companies.
+-- Shared: once found, any seeker may subscribe to the same feed.
+CREATE TABLE IF NOT EXISTS company_feeds (
+    name         TEXT PRIMARY KEY,
+    vendor       TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    endpoint     TEXT NOT NULL,
+    added_at     TEXT NOT NULL
+);

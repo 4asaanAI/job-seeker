@@ -73,6 +73,9 @@ def _items(payload: object, vendor: str) -> list[dict]:
         value = payload.get("jobs", []) if isinstance(payload, dict) else []
     elif vendor == "lever":
         value = payload if isinstance(payload, list) else []
+    elif vendor == "ashby":
+        value = payload.get("jobs", []) if isinstance(payload, dict) else []
+        value = [job for job in value if isinstance(job, dict) and job.get("isListed", True)]
     elif vendor == "workday":
         if isinstance(payload, dict):
             data = payload.get("data")
@@ -166,6 +169,13 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
         url = _nested(item, "hostedUrl", "applyUrl", "url")
         description = _nested(item, "descriptionPlain", "description")
         posted_at = _nested(item, "createdAt", "updatedAt")
+    elif vendor == "ashby":
+        external_id = _nested(item, "id")
+        title = _nested(item, "title")
+        location = _nested(item, "location")
+        url = _nested(item, "jobUrl", "applyUrl")
+        description = _nested(item, "descriptionPlain")
+        posted_at = _nested(item, "publishedAt")
     elif vendor == "workday":
         external_id = _nested(item, "jobPostingId", "externalPath", "id")
         title = _nested(item, "title", "jobTitle")
