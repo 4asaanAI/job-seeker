@@ -63,6 +63,11 @@ COMMANDS = {
     "profile": "Show my current search profile and ask which items I would like to change.",
     "help": "Summarise what you can help me with and which commands I can use.",
 }
+# Requests that run a search or build a resume take minutes; warn up front.
+LONG_COMMANDS = {"search", "jobs", "resume"}
+LONG_WORDS = ("resume", "résumé", "cv", "search", "find jobs", "find me", "tailor")
+WORKING = "Working on it. This can take a couple of minutes."
+TYPING_EVERY = 4.0  # Telegram shows "typing" for about 5 s per call.
 MENU = {
     "jobs": "Best new job matches", "search": "Search for jobs now",
     "status": "Search status", "applications": "My applications",
@@ -412,27 +417,50 @@ class Bot:
                 if cmd == "reset":
                     self.reset(uid)
                     return self.send(chat_id, "A new conversation has started. Your saved profile and jobs are unchanged.")
+                if cmd in LONG_COMMANDS:
+                    self.send(chat_id, WORKING)
                 text = "I have just started the service. Please introduce yourself and explain how to begin." if cmd == "start" \
                     else COMMANDS.get(cmd, text)
+            elif any(w in text.lower() for w in LONG_WORDS):
+                self.send(chat_id, WORKING)
             self._answer(uid, chat_id, text)
 
+    def _keep_typing(self, chat_id: int, stop: threading.Event) -> None:
+        """Re-send "typing" until stopped. Never raises: it is cosmetic."""
+        while True:
+            try:
+                self.api("sendChatAction", chat_id=chat_id, action="typing")
+            except Exception as exc:
+                _log(f"typing indicator failed: {type(exc).__name__}: {exc}")
+            if stop.wait(TYPING_EVERY):
+                return
+
     def _answer(self, uid: int, chat_id: int, prompt: str) -> None:
-        self.api("sendChatAction", chat_id=chat_id, action="typing")
+        stop = threading.Event()
+        typing = threading.Thread(target=self._keep_typing, args=(chat_id, stop), daemon=True)
+        typing.start()
         try:
             before = self._resume_ids(uid)
             was_new = self.store.seeker_by_telegram_id(uid) is None
-            self.send(chat_id, self.ask_claude(uid, prompt))
+            reply = self.ask_claude(uid, prompt)
             seeker = self.store.seeker_by_telegram_id(uid)
             source = self._folder(seeker) / "resume_source.txt" if seeker else None
             if was_new and source and source.is_file():
                 # Registered this turn from an uploaded resume: finish the job.
-                self.api("sendChatAction", chat_id=chat_id, action="typing")
+                self.send(chat_id, reply)
                 text = source.read_text(encoding="utf-8")[:MAX_RESUME_CHARS]
-                self.send(chat_id, self.ask_claude(uid, UPLOADED.format(text=text)))
+                reply = self.ask_claude(uid, UPLOADED.format(text=text))
+            stop.set()
+            typing.join(timeout=5)
+            self.send(chat_id, reply)
             self._deliver_new_resumes(uid, chat_id, before)
         except Exception as exc:
             _log(f"handler error: {type(exc).__name__}: {exc}")
+            stop.set()
+            typing.join(timeout=5)
             self.send(chat_id, "The request could not be completed. Please try again in a few minutes.")
+        finally:
+            stop.set()
 
     def run(self) -> None:
         self.set_menu()

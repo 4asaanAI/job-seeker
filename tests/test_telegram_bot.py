@@ -2,6 +2,9 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -619,3 +622,70 @@ def test_signup_never_creates_a_second_profile_for_an_existing_name(home, store)
     assert not out["ok"] and out["existing_profile"] and "/link" in out["error"]
     assert store.seeker_by_telegram_id(901) is None
     assert [s.id for s in store.list_seekers(active_only=False)] == [existing]
+
+
+def _slow_bot(home, store, monkeypatch, outcome):
+    """Bot whose Claude run lasts long enough for several typing refreshes."""
+    from jobpilot import telegram_bot as tb
+    monkeypatch.setattr(tb, "TYPING_EVERY", 0.02)
+    sent = []
+    lock = threading.Lock()
+
+    def http(method, params, timeout=40):
+        with lock:
+            sent.append((method, params))
+        return {"ok": True}
+
+    def runner(cmd, **kw):
+        time.sleep(0.15)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return SimpleNamespace(returncode=0, stdout=outcome, stderr="")
+
+    return tb.Bot("TOKEN", home, store, http=http, runner=runner), sent
+
+
+def _typing_count(sent):
+    return sum(1 for m, p in sent if m == "sendChatAction")
+
+
+@pytest.mark.parametrize("outcome", ["done", subprocess.TimeoutExpired("claude", 600), RuntimeError("boom")])
+def test_typing_repeats_during_long_run_and_stops_after(tmp_path, monkeypatch, outcome):
+    store = Store(tmp_path / "db.sqlite"); store.migrate()
+    bot, sent = _slow_bot(tmp_path, store, monkeypatch, outcome)
+    bot.handle(_msg(5, "hello"))
+    assert _typing_count(sent) >= 3, "typing must be refreshed while Claude runs"
+    last = max(i for i, (m, _) in enumerate(sent) if m == "sendMessage")
+    assert all(m != "sendChatAction" for m, _ in sent[last:]), "typing must stop before the reply"
+    settled = _typing_count(sent)
+    time.sleep(0.1)
+    assert _typing_count(sent) == settled, "typing thread must stop once the reply is sent"
+
+
+def test_typing_failure_never_breaks_reply(tmp_path, monkeypatch):
+    from jobpilot import telegram_bot as tb
+    store = Store(tmp_path / "db.sqlite"); store.migrate()
+    sent = []
+
+    def http(method, params, timeout=40):
+        if method == "sendChatAction":
+            raise OSError("network down")
+        sent.append((method, params))
+        return {"ok": True}
+
+    bot = tb.Bot("TOKEN", tmp_path, store, http=http,
+                 runner=lambda cmd, **kw: SimpleNamespace(returncode=0, stdout="answer", stderr=""))
+    bot.handle(_msg(5, "hello"))
+    assert [p["text"] for m, p in sent if m == "sendMessage"] == ["answer"]
+
+
+def test_working_note_only_for_long_requests(tmp_path):
+    from jobpilot import telegram_bot as tb
+    store = Store(tmp_path / "db.sqlite"); store.migrate()
+    bot, sent, _ = _bot(tmp_path, store)
+    bot.handle(_msg(5, "hi"))
+    bot.handle(_msg(5, "/status"))
+    assert tb.WORKING not in [p.get("text") for m, p in sent]
+    bot.handle(_msg(5, "/search"))
+    bot.handle(_msg(5, "please tailor my resume"))
+    assert [p.get("text") for m, p in sent].count(tb.WORKING) == 2
