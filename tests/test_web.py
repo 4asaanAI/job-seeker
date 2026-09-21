@@ -55,7 +55,8 @@ def fake_wigolo(monkeypatch):
         out = {"fetch": {"url": cmd[2], "title": "T", "markdown": "x" * 20000, "links": ["l"]},
                "crawl": {"pages": [{"url": cmd[2], "title": "P", "markdown": "m"}]},
                "extract": {"source_url": cmd[2], "data": {"jsonld": [{"@type": "JobPosting"}]}},
-               "research": {"brief": {"highlights": [{"text": "sponsors", "source_url": "u"}]},
+               "research": {"evidence": [{"excerpt": "sponsors", "url": "u", "score": 0.9},
+                                         {"excerpt": "nav", "url": "v", "score": 0.1}],
                             "citations": [{"title": "c", "url": "u"}]}}[verb]
         return SimpleNamespace(stdout=json.dumps(out), returncode=0)
 
@@ -83,7 +84,7 @@ def test_crawl_is_capped_and_stays_on_the_seed_site(fake_wigolo):
 
 def test_research_returns_evidence_for_claude_to_write_up(fake_wigolo):
     out = web.research("Does Example sponsor visas?")
-    assert out["highlights"] == [{"text": "sponsors", "source": "u"}]
+    assert out["evidence"][0] == {"excerpt": "sponsors", "source": "u", "score": 0.9}
     assert "Write the answer yourself" in out["note"]
 
 

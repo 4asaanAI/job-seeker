@@ -181,11 +181,12 @@ def research(question: str) -> dict:
     if not question:
         raise WebError("question must not be empty")
     data = run_wigolo(["research", question, "--depth=quick", "--max-sources=6"], timeout=180)
-    brief = data.get("brief") or {}
+    evidence = sorted(data.get("evidence") or [], key=lambda e: -(e.get("score") or 0))
     return {
         "question": question,
-        "highlights": [{"text": _clip(h.get("text"), 600), "source": h.get("source_url")}
-                       for h in (brief.get("highlights") or [])[:15]],
+        "evidence": [{"excerpt": _clip(e.get("excerpt"), 700), "source": e.get("url"),
+                      "score": round(float(e.get("score") or 0), 2)}
+                     for e in evidence[:12] if e.get("excerpt")],
         "sources": [{"title": c.get("title"), "url": c.get("url")}
                     for c in (data.get("citations") or [])[:10]],
         "note": UNTRUSTED + " Write the answer yourself from these highlights and cite "
