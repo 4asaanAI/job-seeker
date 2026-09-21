@@ -18,7 +18,9 @@ import os
 import re
 import socket
 import subprocess
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .sources.finder import searxng_search, wigolo_command, wigolo_env
 
@@ -56,6 +58,43 @@ def guard_url(url: str, resolve=None) -> str:
         if not ip.is_global:
             raise WebError("that address points to a private or internal network")
     return parsed.geturl()
+
+
+class _GuardedRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        guard_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open(request: Request):
+    return build_opener(_GuardedRedirects).open(request, timeout=15)
+
+
+def public_target(url: str) -> str:
+    """Follow HTTP redirects ourselves, checking every hop, and return the
+    final public URL for Wigolo. Wigolo's browser tier follows redirects
+    without its private-address check, so it must never see a redirector."""
+    target = guard_url(url)
+    for method in ("HEAD", "GET"):
+        try:
+            with _open(Request(target, method=method,
+                               headers={"User-Agent": "Mozilla/5.0 JobPilot"})) as response:
+                return guard_url(response.geturl())
+        except HTTPError as exc:
+            if exc.code in (403, 405, 501) and method == "HEAD":
+                continue  # some sites refuse HEAD; try a GET
+            return guard_url(exc.geturl() or target)
+        except (URLError, OSError, ValueError) as exc:
+            if isinstance(exc, WebError):
+                raise
+            return target  # unreachable here; Wigolo may still manage, and is re-checked
+    return target
+
+
+def _checked(url: object) -> None:
+    """Refuse content that ended up on a private address (script redirects)."""
+    if url:
+        guard_url(str(url))
 
 
 def _env() -> dict[str, str]:
@@ -104,19 +143,22 @@ def search(query: str, site: str | None = None) -> dict:
 
 
 def fetch(url: str) -> dict:
-    data = run_wigolo(["fetch", guard_url(url), f"--max-content-chars={MAX_PAGE_CHARS}"])
+    data = run_wigolo(["fetch", public_target(url), f"--max-content-chars={MAX_PAGE_CHARS}"])
+    _checked(data.get("url"))
     return {"url": data.get("url"), "title": data.get("title"),
             "text": _clip(data.get("markdown"), MAX_PAGE_CHARS),
             "links": (data.get("links") or [])[:60], "note": UNTRUSTED}
 
 
 def crawl(url: str, max_pages: int = 5) -> dict:
-    seed = guard_url(url)
+    seed = public_target(url)
     host = re.escape(urlparse(seed).hostname or "")
     pages = max(1, min(int(max_pages), MAX_CRAWL_PAGES))
     data = run_wigolo(["crawl", seed, f"--max-pages={pages}", "--max-depth=2",
                        f"--include-patterns=^https?://{host}(/|$)",
                        "--max-total-chars=40000"], timeout=240)
+    for page in data.get("pages") or []:
+        _checked(page.get("url"))
     return {"pages": [{"url": p.get("url"), "title": p.get("title"),
                        "text": _clip(p.get("markdown"), 3000)}
                       for p in (data.get("pages") or [])[:pages]],
@@ -126,7 +168,8 @@ def crawl(url: str, max_pages: int = 5) -> dict:
 def extract(url: str, mode: str = "structured") -> dict:
     if mode not in {"structured", "tables", "metadata"}:
         raise WebError("mode must be structured, tables or metadata")
-    data = run_wigolo(["extract", guard_url(url), f"--mode={mode}", "--max-tokens-out=3000"])
+    data = run_wigolo(["extract", public_target(url), f"--mode={mode}", "--max-tokens-out=3000"])
+    _checked(data.get("source_url"))
     raw = json.dumps(data.get("data"))
     return {"url": data.get("source_url"),
             "data": data.get("data") if len(raw) <= 20000 else _clip(raw, 20000),

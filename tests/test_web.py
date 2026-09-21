@@ -31,6 +31,20 @@ def test_guard_accepts_a_public_page():
     assert web.guard_url("https://jobs.example.com/a?b=1", resolve=PUBLIC) == "https://jobs.example.com/a?b=1"
 
 
+class _Response:
+    def __init__(self, url):
+        self.url = url
+
+    def geturl(self):
+        return self.url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 @pytest.fixture
 def fake_wigolo(monkeypatch):
     calls = []
@@ -48,6 +62,7 @@ def fake_wigolo(monkeypatch):
     monkeypatch.setattr(web, "wigolo_command", lambda: ["wigolo"])
     monkeypatch.setattr(web.subprocess, "run", run)
     monkeypatch.setattr(web, "_resolve", PUBLIC)
+    monkeypatch.setattr(web, "_open", lambda request: _Response(request.full_url))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-bad")
     return calls
 
@@ -85,3 +100,25 @@ def test_web_tools_are_pinned_capped_and_refuse_private_urls(tmp_path, fake_wigo
     monkeypatch.setattr(store, "event_count_since", lambda *a: 60)
     assert "limit" in tools["web_search"](sid, "jobs")["error"]
     store.close()
+
+
+def test_a_redirect_to_a_private_address_is_refused_before_wigolo_runs(monkeypatch, fake_wigolo):
+    resolve = {"public.example": ["93.184.216.34"], "127.0.0.1": ["127.0.0.1"]}
+    monkeypatch.setattr(web, "_resolve", lambda host: resolve[host])
+
+    def redirecting_open(request):
+        handler = web._GuardedRedirects()
+        handler.redirect_request(request, None, 302, "Found", {}, "http://127.0.0.1/")
+    monkeypatch.setattr(web, "_open", redirecting_open)
+    with pytest.raises(web.WebError, match="private"):
+        web.fetch("http://public.example/r")
+    assert fake_wigolo == []
+
+
+def test_content_that_ended_up_on_a_private_address_is_discarded(monkeypatch, fake_wigolo):
+    monkeypatch.setattr(web, "public_target", lambda url: url)
+    monkeypatch.setattr(web, "_resolve", lambda host: ["10.0.0.9"] if host == "10.0.0.9" else ["93.184.216.34"])
+    monkeypatch.setattr(web.subprocess, "run", lambda cmd, **kw: SimpleNamespace(
+        stdout=json.dumps({"url": "http://10.0.0.9/secret", "markdown": "secret"}), returncode=0))
+    with pytest.raises(web.WebError, match="private"):
+        web.fetch("https://public.example/js-redirect")
