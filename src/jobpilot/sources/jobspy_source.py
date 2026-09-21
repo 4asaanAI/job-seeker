@@ -1,6 +1,7 @@
 # src/jobpilot/sources/jobspy_source.py
 from __future__ import annotations
 
+import logging
 import random
 import time
 from typing import Any, Callable
@@ -17,6 +18,28 @@ def _default_scraper(**kwargs: Any) -> list[dict]:
     if df is None or len(df) == 0:
         return []
     return df.fillna("").to_dict("records")
+
+
+CANARY_RETRY_SECONDS = 45.0
+
+
+class _Capture(logging.Handler):
+    """Collects JobSpy's own warnings: they are the only record of why a site
+    returned nothing (captcha, HTTP status), and JobSpy swallows them."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage()[:300])
+
+
+def _jobspy_loggers() -> list[logging.Logger]:
+    # JobSpy names loggers "JobSpy:<Site>" with propagate off, so each needs
+    # its own handler.
+    return [logging.getLogger(n) for n in list(logging.Logger.manager.loggerDict)
+            if n.startswith("JobSpy")]
 
 
 def _default_sleeper(seconds: float) -> None:
@@ -46,6 +69,7 @@ class JobSpySource:
         self._scraper = scraper or _default_scraper
         self._sleep = sleeper or _default_sleeper
         self._gap = min_request_gap_seconds
+        self.last_problem = ""
 
     def _pause(self) -> None:
         """Jittered delay. Politeness is what keeps the source available."""
@@ -66,7 +90,17 @@ class JobSpySource:
             kwargs["location"] = location
         if hours_old is not None:
             kwargs["hours_old"] = hours_old
-        return self._scraper(**kwargs)
+        capture = _Capture()
+        loggers = _jobspy_loggers()
+        for lg in loggers:
+            lg.addHandler(capture)
+        try:
+            return self._scraper(**kwargs)
+        finally:
+            for lg in loggers:
+                lg.removeHandler(capture)
+            if capture.messages:
+                self.last_problem = "; ".join(dict.fromkeys(capture.messages))[:600]
 
     @staticmethod
     def _to_posting(row: dict, fallback_site: str) -> Posting | None:
@@ -116,7 +150,14 @@ class JobSpySource:
         with nothing" from "the call blew up".
         """
         c = self.cfg.canary
+        self.last_problem = ""
         rows = self._scrape(c.search_term, c.location, c.results_wanted, None)
         normalized = self._normalise(rows)
+        if len(normalized) < c.min_results:
+            # One slow retry: a short burst limit clears; a real block does not,
+            # and retrying harder than this is what gets an IP banned.
+            self._sleep(CANARY_RETRY_SECONDS)
+            rows = self._scrape(c.search_term, c.location, c.results_wanted, None)
+            normalized = self._normalise(rows)
         ok = len(normalized) >= c.min_results
         return ok, len(rows), len(normalized)

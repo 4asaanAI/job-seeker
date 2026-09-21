@@ -11,6 +11,7 @@ import json
 import re
 from urllib.parse import parse_qs, quote, urlparse
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ..config import ATSConfig
@@ -20,6 +21,19 @@ from .base import MAX_DESCRIPTION_CHARS, safe_url
 
 
 
+def _retry_once(call):
+    """Employer APIs (Workday especially) stall now and then; one retry clears it."""
+    def wrapped(*args):
+        try:
+            return call(*args)
+        except HTTPError:
+            raise
+        except (TimeoutError, URLError):
+            return call(*args)
+    return wrapped
+
+
+@_retry_once
 def _default_fetcher(url: str, timeout: float) -> object:
     request = Request(url, headers={"User-Agent": "JobPilot/0.3"})
     with urlopen(request, timeout=timeout) as response:  # noqa: S310 - config URL
@@ -28,6 +42,7 @@ def _default_fetcher(url: str, timeout: float) -> object:
         return json.load(response)
 
 
+@_retry_once
 def _default_poster(url: str, body: dict, timeout: float) -> object:
     request = Request(url, data=json.dumps(body).encode(), headers={
         "User-Agent": "JobPilot/0.4", "Content-Type": "application/json",
@@ -49,7 +64,8 @@ def _text(value: Any) -> str:
         value = ", ".join(_text(item) for item in value)
     value = html.unescape(str(value))
     value = re.sub(r"<[^>]+>", " ", value)
-    return " ".join(value.split())
+    # Greenhouse escapes its HTML twice: entities survive the first pass.
+    return " ".join(html.unescape(value).split())
 
 
 def _nested(item: dict, *keys: str) -> Any:
@@ -286,6 +302,32 @@ class ATSJsonSource:
         if pages == MAX_PAGES:
             self._terms[key] = (rows, postings)
         return rows, postings
+
+    def describe(self, posting: Posting) -> str | None:
+        """Full job text for vendors whose list endpoint omits it."""
+        vendor, timeout = self.cfg.vendor, self.cfg.fetch_timeout_seconds
+        if vendor == "workday_cxs":
+            # List: .../wday/cxs/<tenant>/<site>/jobs; detail: .../<site><externalPath>
+            data = self._fetcher(self.cfg.endpoint.rsplit("/jobs", 1)[0] + posting.external_id, timeout)
+            info = data.get("jobPostingInfo", {}) if isinstance(data, dict) else {}
+            text = info.get("jobDescription") if isinstance(info, dict) else ""
+        elif vendor == "oracle_hcm":
+            base = self.cfg.endpoint.split("recruitingCEJobRequisitions")[0]
+            site = (parse_qs(urlparse(self.cfg.endpoint).query).get("siteNumber") or ["CX_1"])[0]
+            data = self._fetcher(
+                f"{base}recruitingCEJobRequisitionDetails?expand=all&onlyData=true"
+                f"&finder=ById;Id=%22{quote(posting.external_id)}%22,siteNumber={site}", timeout)
+            items = data.get("items", []) if isinstance(data, dict) else []
+            text = " ".join(_text(items[0].get(k)) for k in (
+                "ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")
+                ) if items else ""
+        elif vendor == "smartrecruiters":
+            data = self._fetcher(f"{self.cfg.endpoint.rstrip('/')}/{quote(posting.external_id)}", timeout)
+            sections = ((data.get("jobAd") or {}).get("sections") or {}) if isinstance(data, dict) else {}
+            text = " ".join(_text(v.get("text")) for v in sections.values() if isinstance(v, dict))
+        else:
+            return None
+        return _text(text)[:MAX_DESCRIPTION_CHARS] or None
 
     def canary(self) -> tuple[bool, int, int]:
         """Fetch the configured endpoint and require normalized jobs."""

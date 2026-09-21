@@ -795,6 +795,21 @@ class Store:
                  results_count, latency_ms, http_status_summary, status, notes[:2000]),
             )
 
+    def needs_description(self, source: str, external_id: str) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT p.description FROM posting_sources s JOIN job_postings p ON p.id = s.posting_id "
+                "WHERE s.source = ? AND s.external_id = ?", (source, external_id)).fetchone()
+        return row is not None and not row["description"]
+
+    def set_description(self, source: str, external_id: str, text: str) -> None:
+        """Fill a missing description; never overwrites one already stored."""
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE job_postings SET description = ? WHERE description IS NULL AND id = "
+                "(SELECT posting_id FROM posting_sources WHERE source = ? AND external_id = ?)",
+                (text, source, external_id))
+
     def recent_counts(self, source: str, limit: int) -> list[int]:
         with self._lock:
             rows = self.conn.execute(

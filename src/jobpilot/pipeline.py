@@ -94,6 +94,7 @@ def _run_one_site(
             )
             if status in (SourceStatus.HEALTHY, SourceStatus.DEGRADED):
                 _persist(store, found_by_search)
+                _describe_missing(store, source, unique.values())
         except Exception as exc:  # noqa: BLE001 - contained to this site
             error = _describe(exc)
             status, notes = classify(
@@ -103,6 +104,9 @@ def _run_one_site(
             )
             store.record_event("source_error", f"{source.name}: {error}")
     finally:
+        problem = getattr(source, "last_problem", "")
+        if problem and status is not SourceStatus.HEALTHY:
+            notes = f"{notes} The site said: {problem}"
         latency_ms = int((time.monotonic() - started) * 1000)
         store.record_source_run(
             source=source.name, canary_ok=canary_ok, canary_count=canary_count,
@@ -133,6 +137,35 @@ def _persist(
             for t in subscribers:
                 if not _excluded(p, t.profile):
                     store.link_posting(t.seeker_id, posting_ids[key])
+
+
+MAX_DESCRIBED_PER_RUN = 60
+
+
+def _describe_missing(store: Store, source: DiscoverySource, postings) -> None:
+    """Fetch full text for listings whose feed carries none (Workday, Oracle).
+
+    Only postings still stored without a description are fetched, capped per
+    run, so each job costs one detail request once, and older rows fill in
+    over later runs. A failure leaves the posting as it was.
+    """
+    describe = getattr(source, "describe", None)
+    if describe is None:
+        return
+    done = 0
+    for p in postings:
+        if done >= MAX_DESCRIBED_PER_RUN:
+            return
+        if p.description or not store.needs_description(p.source, p.external_id):
+            continue
+        done += 1
+        try:
+            text = describe(p)
+        except Exception as exc:  # noqa: BLE001 - enrichment is optional
+            store.record_event("source_error", f"{source.name}: describe {_describe(exc)}")
+            continue
+        if text:
+            store.set_description(p.source, p.external_id, text)
 
 
 def run_discovery(

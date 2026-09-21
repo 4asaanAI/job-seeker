@@ -200,3 +200,27 @@ def test_real_indeed_us_capture_normalises():
     assert all(p.source == "indeed" and p.external_id.startswith("in-") for p in postings)
     assert all(p.description and p.title for p in postings)
     assert len({p.external_id for p in postings}) == 9
+
+
+def test_canary_retries_once_after_a_pause_then_passes():
+    calls, pauses = [], []
+
+    def flaky(**kwargs):
+        calls.append(1)
+        return [] if len(calls) == 1 else rows_from_fixture()
+
+    src = JobSpySource(make_cfg(), scraper=flaky, sleeper=pauses.append)
+    assert src.canary()[0] is True
+    assert len(calls) == 2 and max(pauses) >= 30, "the retry must wait, not hammer"
+
+
+def test_jobspy_warnings_are_kept_as_the_reason_for_a_block():
+    import logging
+
+    def captcha(**kwargs):
+        logging.getLogger("JobSpy:Naukri").error("Naukri API response status code 406 - recaptcha required")
+        return []
+
+    src = JobSpySource(make_cfg(), scraper=captcha, sleeper=no_sleep)
+    assert src.canary()[0] is False
+    assert "recaptcha required" in src.last_problem

@@ -142,3 +142,53 @@ def test_ats_source_plugs_into_discovery_without_network(tmp_path):
     assert results[0].status is SourceStatus.HEALTHY
     assert len(store.seeker_jobs(seeker_id)) == 1
     store.close()
+
+
+def test_greenhouse_double_escaped_content_becomes_plain_text():
+    item = {"id": 1, "title": "PM", "absolute_url": "https://x.test/1",
+            "content": "&lt;p&gt;Build &amp;amp; ship&lt;/p&gt;"}
+    source = ATSJsonSource(config("greenhouse"), fetcher=lambda u, t: {"jobs": [item]})
+    assert source.search("", None)[0][0].description == "Build & ship"
+
+
+def test_workday_description_is_fetched_once_and_fills_old_rows(tmp_path):
+    store = Store(tmp_path / "jobs.db")
+    store.migrate()
+    seeker_id = store.add_seeker("A", 11, "a.yaml", 20)
+    cfg = ATSConfig(name="gap", vendor="workday_cxs", company_name="Gap",
+                    endpoint="https://gap.wd1.myworkdayjobs.com/wday/cxs/gap/GAP/jobs", enabled=True)
+    row = {"title": "Merchandiser", "externalPath": "/job/SF/Merch_R1", "locationsText": "SF"}
+    details = []
+
+    def fetcher(url, timeout):
+        details.append(url)
+        return {"jobPostingInfo": {"jobDescription": "<p>Plan the assortment.</p>"}}
+
+    profile = Profile(name="A", headline="M", location="SF", sources=["gap"], search_terms=["merch"])
+    target = [SeekerTarget(seeker_id, profile)]
+    for _ in range(2):
+        source = ATSJsonSource(cfg, fetcher=fetcher,
+                               poster=lambda u, b, t: {"jobPostings": [row]})
+        assert run_discovery(store, [source], target)[0].status is SourceStatus.HEALTHY
+    assert details == ["https://gap.wd1.myworkdayjobs.com/wday/cxs/gap/GAP/job/SF/Merch_R1"]
+    desc = store.conn.execute("SELECT description FROM job_postings").fetchone()[0]
+    assert desc == "Plan the assortment."
+    store.close()
+
+
+def test_oracle_description_uses_the_detail_endpoint():
+    cfg = ATSConfig(name="ms", vendor="oracle_hcm", company_name="M&S", enabled=True,
+                    endpoint="https://x.oraclecloud.com/hcmRestApi/resources/latest/"
+                             "recruitingCEJobRequisitions?onlyData=true&siteNumber=CX_1")
+    seen = []
+
+    def fetcher(url, timeout):
+        seen.append(url)
+        return {"items": [{"ExternalDescriptionStr": "<p>Lead &amp; buy.</p>"}]}
+
+    from jobpilot.store.models import Posting
+    text = ATSJsonSource(cfg, fetcher=fetcher).describe(
+        Posting(company_name="M&S", source="ms", external_id="123", title="Buyer",
+                location=None, description=None, url=None, posted_at=None))
+    assert text == "Lead & buy."
+    assert "recruitingCEJobRequisitionDetails" in seen[0] and "Id=%22123%22" in seen[0]

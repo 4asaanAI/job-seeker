@@ -44,6 +44,8 @@ min_request_gap_seconds = 4.0
 # fetch_timeout_seconds = 20.0
 
 # ---- India ----
+# Off: Naukri answers every automated request with HTTP 406 "recaptcha
+# required" (verified live 2026-09-22). No official feed exists.
 [sites.naukri_in]
 site = "naukri"
 enabled = false
@@ -137,61 +139,56 @@ results_wanted = 10
 min_results = 3
 
 # --- Employers chosen from seekers' resumes (live-tested 2026-09-19) ------
-# Lever and Ashby boards are crawled by Wigolo through scripts/wigolo_jobs.py.
-# {python} and {home} are expanded by JobPilot at run time.
-[wigolo_sources.palantir]
+# Lever and Ashby boards use their official keyless JSON APIs (full descriptions).
+[ats_sources.palantir]
+vendor = "lever"
 company_name = "Palantir"
-endpoint = "https://jobs.lever.co/palantir"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "manager"
+endpoint = "https://api.lever.co/v0/postings/palantir?mode=json"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-[wigolo_sources.ramp]
+[ats_sources.ramp]
+vendor = "ashby"
 company_name = "Ramp"
-endpoint = "https://jobs.ashbyhq.com/ramp"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "manager"
+endpoint = "https://api.ashbyhq.com/posting-api/job-board/ramp"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-[wigolo_sources.notion]
+[ats_sources.notion]
+vendor = "ashby"
 company_name = "Notion"
-endpoint = "https://jobs.ashbyhq.com/notion"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "manager"
+endpoint = "https://api.ashbyhq.com/posting-api/job-board/notion"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-# Greenhouse boards use the official public JSON feed.
 [ats_sources.anthropic]
 vendor = "greenhouse"
 company_name = "Anthropic"
-endpoint = "https://boards-api.greenhouse.io/v1/boards/anthropic/jobs"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/anthropic/jobs?content=true"
 enabled = true
 
 [ats_sources.databricks]
 vendor = "greenhouse"
 company_name = "Databricks"
-endpoint = "https://boards-api.greenhouse.io/v1/boards/databricks/jobs"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/databricks/jobs?content=true"
 enabled = true
 
 [ats_sources.figma]
 vendor = "greenhouse"
 company_name = "Figma"
-endpoint = "https://boards-api.greenhouse.io/v1/boards/figma/jobs"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/figma/jobs?content=true"
 enabled = true
 
 [ats_sources.airbnb]
 vendor = "greenhouse"
 company_name = "Airbnb"
-endpoint = "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs?content=true"
 enabled = true
 
 [ats_sources.stripe]
 vendor = "greenhouse"
 company_name = "Stripe"
-endpoint = "https://boards-api.greenhouse.io/v1/boards/stripe/jobs"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true"
 enabled = true
 
 # Public remote-job feeds. Both ask for attribution: postings link back to the
@@ -215,68 +212,65 @@ vendor = "workday_cxs"
 company_name = "PVH"
 endpoint = "https://pvh.wd1.myworkdayjobs.com/wday/cxs/pvh/PVH_Careers/jobs"
 enabled = true
+fetch_timeout_seconds = 45.0
 
 [ats_sources.gap]
 vendor = "workday_cxs"
 company_name = "Gap Inc"
 endpoint = "https://gapinc.wd1.myworkdayjobs.com/wday/cxs/gapinc/GAPINC/jobs"
 enabled = true
+fetch_timeout_seconds = 45.0
 
 [ats_sources.target]
 vendor = "workday_cxs"
 company_name = "Target"
 endpoint = "https://target.wd5.myworkdayjobs.com/wday/cxs/target/targetcareers/jobs"
 enabled = true
+fetch_timeout_seconds = 45.0
 
 [ats_sources.nike]
 vendor = "workday_cxs"
 company_name = "Nike"
 endpoint = "https://nike.wd1.myworkdayjobs.com/wday/cxs/nike/nke/jobs"
 enabled = true
+fetch_timeout_seconds = 45.0
 
 [ats_sources.marks_and_spencer]
 vendor = "oracle_hcm"
 company_name = "Marks & Spencer"
 endpoint = "https://fa-eqid-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&siteNumber=CX_1"
 enabled = true
+fetch_timeout_seconds = 45.0
 
 # --- More Lever/Ashby boards, live-tested 2026-09-20 ----------------------
-[wigolo_sources.openai]
+[ats_sources.openai]
+vendor = "ashby"
 company_name = "OpenAI"
-endpoint = "https://jobs.ashbyhq.com/openai"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "engineer"
+endpoint = "https://api.ashbyhq.com/posting-api/job-board/openai"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-[wigolo_sources.linear]
+[ats_sources.linear]
+vendor = "ashby"
 company_name = "Linear"
-endpoint = "https://jobs.ashbyhq.com/linear"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "engineer"
+endpoint = "https://api.ashbyhq.com/posting-api/job-board/linear"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-[wigolo_sources.snowflake]
+[ats_sources.snowflake]
+vendor = "ashby"
 company_name = "Snowflake"
-endpoint = "https://jobs.ashbyhq.com/snowflake"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "manager"
+endpoint = "https://api.ashbyhq.com/posting-api/job-board/snowflake"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-[wigolo_sources.vanta]
+[ats_sources.vanta]
+vendor = "ashby"
 company_name = "Vanta"
-endpoint = "https://jobs.ashbyhq.com/vanta"
-command = ["{python}", "{home}/scripts/wigolo_jobs.py"]
-canary_term = "manager"
+endpoint = "https://api.ashbyhq.com/posting-api/job-board/vanta"
 enabled = true
-fetch_timeout_seconds = 180.0
+fetch_timeout_seconds = 60.0
 
-# --- Two more ATS connectors ported from career-ops (MIT-licensed reference,
-# https://github.com/career-ops-hq/career-ops), each live-tested against a
-# real tenant before being enabled 2026-09-20. Not yet subscribed by any
-# seeker; enable per-employer once a target company on one of these is named.
 [ats_sources.example_bamboohr]
 vendor = "bamboohr"
 company_name = "Proscia"

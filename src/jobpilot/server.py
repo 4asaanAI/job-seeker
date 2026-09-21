@@ -394,10 +394,16 @@ def build_tools(
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         health = {row["source"]: row for row in store.source_health_summary()}
+        live = _source_catalog()
         sources = []
         for source in profile.sources:
             row = health.get(source)
-            if row is None:
+            if source not in live:
+                sources.append({"source": source, "status": "disabled",
+                                "plain_language": "This source is switched off in the settings, "
+                                "so it is not searched; no jobs from it says nothing "
+                                "about the market."})
+            elif row is None:
                 sources.append({"source": source, "status": "not_run",
                                 "plain_language": "This source has not run yet."})
             else:
