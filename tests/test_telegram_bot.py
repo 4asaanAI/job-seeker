@@ -292,3 +292,50 @@ def test_breezy_maps_list_fields_and_keeps_own_url():
     jobs, raw = src.search("technician", None)
     assert raw == 1 and jobs[0].location == "Macon, GA"
     assert jobs[0].url == "https://embraer.breezy.hr/p/4658211f5c93-a-p-technician"
+
+
+def test_backoff_doubles_and_caps():
+    from jobpilot.telegram_bot import _backoff_seconds, MAX_BACKOFF_SECONDS
+    assert [_backoff_seconds(n) for n in (1, 2, 3, 4)] == [5, 10, 20, 40]
+    assert _backoff_seconds(10) == MAX_BACKOFF_SECONDS
+
+
+def test_run_exits_after_max_consecutive_poll_failures(home, store, monkeypatch):
+    import jobpilot.telegram_bot as tb
+    monkeypatch.setattr(tb, "MAX_CONSECUTIVE_FAILURES", 3)
+    monkeypatch.setattr(tb.time, "sleep", lambda s: None)
+    calls = []
+
+    def failing_http(method, params, timeout=40):
+        calls.append(method)
+        if method != "getUpdates":
+            return {"ok": True}
+        raise TimeoutError("boom")
+
+    bot = tb.Bot("TOKEN", home, store, http=failing_http)
+    with pytest.raises(SystemExit):
+        bot.run()
+    assert calls.count("getUpdates") == 3
+
+
+def test_run_resets_failure_count_after_success(home, store, monkeypatch):
+    import jobpilot.telegram_bot as tb
+    monkeypatch.setattr(tb.time, "sleep", lambda s: None)
+    logged = []
+    monkeypatch.setattr(tb, "_log", lambda msg: logged.append(msg))
+    polls = {"n": 0}
+
+    def flaky_http(method, params, timeout=40):
+        if method != "getUpdates":
+            return {"ok": True}
+        polls["n"] += 1
+        if polls["n"] == 1:
+            raise TimeoutError("boom")
+        if polls["n"] >= 3:
+            raise SystemExit(0)
+        return {"result": []}
+
+    bot = tb.Bot("TOKEN", home, store, http=flaky_http)
+    with pytest.raises(SystemExit):
+        bot.run()
+    assert any("poll recovered after 1 failure" in m for m in logged)

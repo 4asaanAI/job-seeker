@@ -1,11 +1,11 @@
 """Push each seeker's scored digest to their own Telegram chat."""
 from __future__ import annotations
 
-import sys
 from typing import Callable
 
 from .digest.plain import render_plain_digest
 from .store.db import Store
+from .telegram_bot import _log
 
 
 def push_digests(store: Store, send: Callable[[int, str], None],
@@ -29,5 +29,5 @@ def push_digests(store: Store, send: Callable[[int, str], None],
                 store.record_notification(seeker.id, posting_id, "telegram", "first")
             sent += 1
         except Exception as exc:
-            sys.stderr.write(f"digest for seeker {seeker.id} failed: {type(exc).__name__}\n")
+            _log(f"digest for seeker {seeker.id} failed: {type(exc).__name__}: {exc}")
     return sent

@@ -8,6 +8,7 @@ model), so one user cannot reach another's data.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import secrets
@@ -29,6 +30,20 @@ API = "https://api.telegram.org/bot{token}/{method}"
 MAX_TEXT = 2000
 PER_HOUR = 30
 MAX_SEEKERS = int(os.environ.get("JOBPILOT_MAX_SEEKERS", "100"))
+MAX_CONSECUTIVE_FAILURES = 20
+MAX_BACKOFF_SECONDS = 60
+
+
+def _log(message: str) -> None:
+    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    sys.stderr.write(f"{stamp} {message}\n")
+    sys.stderr.flush()
+
+
+def _backoff_seconds(failures: int) -> float:
+    """Doubling backoff (5s, 10s, 20s, ...) capped so retries stay frequent."""
+    return min(5 * (2 ** (failures - 1)), MAX_BACKOFF_SECONDS)
+
 
 NAME = "CareerDesk"
 COMMANDS = {
@@ -213,7 +228,7 @@ class Bot:
             self.reset(uid)
             return self.ask_claude(uid, prompt)
         if done.returncode != 0:
-            sys.stderr.write((done.stderr or "")[:500])
+            _log((done.stderr or "")[:500])
             return "The request could not be completed. Please try again in a few minutes."
         return done.stdout
 
@@ -255,20 +270,28 @@ class Bot:
             try:
                 self.send(chat_id, self.ask_claude(uid, text))
             except Exception as exc:
-                sys.stderr.write(f"handler error: {type(exc).__name__}\n")
+                _log(f"handler error: {type(exc).__name__}: {exc}")
                 self.send(chat_id, "The request could not be completed. Please try again in a few minutes.")
 
     def run(self) -> None:
         self.set_menu()
         offset = 0
+        failures = 0
         pool = ThreadPoolExecutor(max_workers=3)
         while True:
             try:
                 data = self._http("getUpdates", {"offset": offset, "timeout": 30}, 45)
             except Exception as exc:
-                sys.stderr.write(f"poll error: {type(exc).__name__}\n")
-                time.sleep(5)
+                failures += 1
+                _log(f"poll error #{failures}: {type(exc).__name__}: {exc}")
+                if failures >= MAX_CONSECUTIVE_FAILURES:
+                    _log(f"{failures} consecutive poll failures; exiting for a clean restart")
+                    raise SystemExit(1)
+                time.sleep(_backoff_seconds(failures))
                 continue
+            if failures:
+                _log(f"poll recovered after {failures} failure(s)")
+            failures = 0
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
                 pool.submit(self.handle, update)
