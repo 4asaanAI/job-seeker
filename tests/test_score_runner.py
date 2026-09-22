@@ -63,3 +63,15 @@ def test_a_broken_scorer_stops_instead_of_looping(tmp_path):
 def test_score_all_resolves_relative_profile_paths(tmp_path):
     store, sid, _ = _setup(tmp_path, jobs=3)
     assert score_all(store, tmp_path, _echo_scorer([])) == [{"seeker_id": sid, "scored": 3, "left": 0}]
+
+
+def test_usage_limit_message_is_an_error_even_with_exit_code_zero():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from jobpilot.score_runner import claude_scorer
+    ask = claude_scorer(runner=lambda cmd, **kw: SimpleNamespace(
+        returncode=0, stdout="You've hit your session limit · resets 10:40pm", stderr=""))
+    with pytest.raises(RuntimeError, match="session limit"):
+        ask("prompt")

@@ -68,9 +68,12 @@ def claude_scorer(claude_bin: str = "claude", model: str | None = None, runner=s
             command += ["--model", model]
         done = runner(command, input=prompt, capture_output=True, text=True,
                       encoding="utf-8", timeout=600, check=False)
-        if done.returncode != 0:
-            raise RuntimeError(f"claude exited {done.returncode}: {(done.stderr or '')[:300]}")
-        return done.stdout
+        out = done.stdout or ""
+        # A usage limit is printed on stdout, sometimes with exit code 0.
+        if done.returncode != 0 or re.search(r"hit your .{0,20}limit|usage limit", out[:300], re.I):
+            raise RuntimeError(f"claude exited {done.returncode}: "
+                               f"{((done.stderr or '') + out)[:300].strip()}")
+        return out
     return ask
 
 
