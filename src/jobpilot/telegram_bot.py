@@ -406,9 +406,10 @@ class Bot:
         path = self.state / "work" / str(uid) / f"jobs-{datetime.date.today():%Y-%m-%d}.xlsx"
         total, good = write_job_list(self.store, seeker.id, path, min_score)
         self._upload(chat_id, path)
+        strong = "1 is a strong match" if good == 1 else f"{good} are strong matches"
         self.send(chat_id, f"Your job list: {total} jobs from the last 30 days, best matches "
-                           f"first. {good} are strong matches (score {min_score:.0f} or more, "
-                           "shaded green). Jobs marked 'Not rated yet' haven't been scored.")
+                           f"first. {strong} (score {min_score:.0f} or more, shaded green). "
+                           "Jobs marked 'Not rated yet' haven't been scored.")
         return True
 
     def _folder(self, seeker) -> Path:
