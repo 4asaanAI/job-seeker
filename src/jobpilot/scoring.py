@@ -93,6 +93,7 @@ def build_scoring_batch(
             "posting_id": job.posting_id,
             "title": job.title,
             "company": job.company_name,
+            "location": job.location,
             "url": job.url,
             "description": store.posting_description(job.posting_id),
             "is_target_company": _is_target_company(job.company_name, profile.target_companies),

@@ -681,28 +681,30 @@ class Store:
                 (seeker_id, posting_id),
             )
 
-    def unscored_jobs(self, seeker_id: int, limit: int) -> list[SeekerJob]:
+    def unscored_jobs(self, seeker_id: int, limit: int, max_age_days: int = 30) -> list[SeekerJob]:
+        """Newest first; jobs not seen for `max_age_days` are likely closed."""
         limit = max(0, int(limit))  # SQLite treats a negative LIMIT as unlimited
+        since = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
         with self._lock:
             rows = self.conn.execute(
                 """
                 SELECT sj.seeker_id, sj.posting_id, sj.status, jp.title,
-                       jp.company_name, jp.canonical_url AS url
+                       jp.company_name, jp.canonical_url AS url, jp.location
                 FROM seeker_jobs sj
                 JOIN job_postings jp ON jp.id = sj.posting_id
                 LEFT JOIN scores s
                        ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id
-                WHERE sj.seeker_id = ? AND s.posting_id IS NULL
-                ORDER BY sj.posting_id
+                WHERE sj.seeker_id = ? AND s.posting_id IS NULL AND jp.last_seen_at >= ?
+                ORDER BY sj.posting_id DESC
                 LIMIT ?
                 """,
-                (seeker_id, limit),
+                (seeker_id, since, limit),
             ).fetchall()
         return [
             SeekerJob(
                 seeker_id=r["seeker_id"], posting_id=r["posting_id"],
                 status=r["status"], title=r["title"],
-                company_name=r["company_name"], url=r["url"],
+                company_name=r["company_name"], url=r["url"], location=r["location"],
             )
             for r in rows
         ]

@@ -38,3 +38,4 @@ class SeekerJob:
     url: str | None
     fit_score: float | None = None
     reasoning: str | None = None
+    location: str | None = None
