@@ -59,6 +59,16 @@ search_term = "manager"
 results_wanted = 20
 min_results = 10
 
+# Foundit (formerly Monster India): its public search API is allowed by
+# robots.txt and returns full descriptions. Paced: 3 pages max, 2 s apart.
+[ats_sources.foundit_in]
+vendor = "foundit"
+company_name = "Foundit"
+endpoint = "https://www.foundit.in/home/api/searchResultsPage"
+enabled = true
+canary_min_results = 5
+fetch_timeout_seconds = 30.0
+
 [sites.indeed_in]
 site = "indeed"
 enabled = true

@@ -77,8 +77,9 @@ def build_tools(
             for n, sc in group.items():
                 if not sc.enabled:
                     continue
-                remote = getattr(sc, "vendor", "") in {"remoteok", "remotive"}
-                catalog[n] = ("remote jobs, worldwide" if remote
+                vendor = getattr(sc, "vendor", "")
+                catalog[n] = ("remote jobs, worldwide" if vendor in {"remoteok", "remotive"}
+                              else "foundit job board, india" if vendor == "foundit"
                               else f"{sc.company_name} careers page, all locations")
         return {n: d for n, d in catalog.items() if n not in PROHIBITED_SOURCES}
 

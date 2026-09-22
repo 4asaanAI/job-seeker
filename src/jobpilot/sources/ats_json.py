@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 from urllib.parse import parse_qs, quote, urlparse
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -51,7 +52,11 @@ def _default_poster(url: str, body: dict, timeout: float) -> object:
         return json.load(response)
 
 
-SEARCHED = frozenset({"workday_cxs", "oracle_hcm", "smartrecruiters"})
+SEARCHED = frozenset({"workday_cxs", "oracle_hcm", "smartrecruiters", "foundit"})
+# Foundit is a whole job board: searched by term and city, paced, few pages.
+FOUNDIT_PAGES = 3
+FOUNDIT_GAP_SECONDS = 2.0
+FOUNDIT_CANARY_TERM = "manager"
 MAX_PAGES = 5
 
 
@@ -133,6 +138,18 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
         url = f"{origin}/hcmUI/CandidateExperience/en/sites/{site}/job/{external_id}"
         description = _nested(item, "ShortDescriptionStr")
         posted_at = _nested(item, "PostedDate")
+    elif vendor == "foundit":
+        external_id = _nested(item, "jobId", "id")
+        title = _nested(item, "title")
+        location = ", ".join(dict.fromkeys(
+            loc.get("city") for loc in item.get("locations") or [] if isinstance(loc, dict) and loc.get("city")))
+        path = _text(_nested(item, "jdUrl"))
+        url = f"https://www.foundit.in{path}" if path.startswith("/") else ""
+        description = _nested(item, "description")
+        posted = item.get("postedAt")
+        posted_at = (time.strftime("%Y-%m-%d", time.gmtime(posted / 1000))
+                     if isinstance(posted, (int, float)) else "")
+        row_company = "" if item.get("hideCompanyName") else _nested(item, "companyName")
     elif vendor == "bamboohr":
         # BambooHR's list endpoint carries no job URL; the public page is a
         # fixed <tenant>/careers/<id> path (verified against a live tenant).
@@ -242,11 +259,13 @@ class ATSJsonSource:
         cfg: ATSConfig,
         fetcher: Callable[[str, float], object] | None = None,
         poster: Callable[[str, dict, float], object] | None = None,
+        sleeper: Callable[[float], None] = time.sleep,
     ):
         self.cfg = cfg
         self.name = cfg.name
         self._fetcher = fetcher or _default_fetcher
         self._poster = poster or _default_poster
+        self._sleep = sleeper
         self._terms: dict[str, tuple[list[dict], list[Posting]]] = {}
         self._rows: list[dict] | None = None
         self._postings: list[Posting] | None = None
@@ -262,11 +281,15 @@ class ATSJsonSource:
             self._rows, self._postings = rows, postings
         return self._rows, self._postings
 
-    def _fetch_term(self, term: str, pages: int = MAX_PAGES):
+    def _fetch_term(self, term: str, pages: int = MAX_PAGES, location: str | None = None):
         """Server-side keyword search for boards too large to download whole."""
         key = (term or "").casefold().strip()
-        if key in self._terms and pages == MAX_PAGES:
-            return self._terms[key]
+        where = (location or "").strip() if self.cfg.vendor == "foundit" else ""
+        cache = f"{key}|{where.casefold()}"
+        if cache in self._terms and pages == MAX_PAGES:
+            return self._terms[cache]
+        if self.cfg.vendor == "foundit":
+            pages = min(pages, FOUNDIT_PAGES)
         rows: list[dict] = []
         timeout = self.cfg.fetch_timeout_seconds
         for page in range(pages):
@@ -276,6 +299,14 @@ class ATSJsonSource:
                     "searchText": key}, timeout)
                 batch = data.get("jobPostings", []) if isinstance(data, dict) else []
                 size = 20
+            elif self.cfg.vendor == "foundit":
+                if page:
+                    self._sleep(FOUNDIT_GAP_SECONDS)
+                url = (f"{self.cfg.endpoint}?start={page * 15}&limit=15&queryDerived=true"
+                       f"&query={quote(key)}" + (f"&locations={quote(where)}" if where else ""))
+                data = self._fetcher(url, timeout)
+                batch = data.get("data", []) if isinstance(data, dict) else []
+                size = 15
             elif self.cfg.vendor == "smartrecruiters":
                 clean = re.sub(r"[^\w ]", " ", key).strip()
                 url = (f"{self.cfg.endpoint}?limit=100&offset={page * 100}"
@@ -300,7 +331,7 @@ class ATSJsonSource:
                 break
         postings = [p for row in rows if (p := _to_posting(row, self.cfg)) is not None]
         if pages == MAX_PAGES:
-            self._terms[key] = (rows, postings)
+            self._terms[cache] = (rows, postings)
         return rows, postings
 
     def describe(self, posting: Posting) -> str | None:
@@ -331,14 +362,15 @@ class ATSJsonSource:
 
     def canary(self) -> tuple[bool, int, int]:
         """Fetch the configured endpoint and require normalized jobs."""
-        rows, postings = (self._fetch_term("", pages=1)
+        term = FOUNDIT_CANARY_TERM if self.cfg.vendor == "foundit" else ""
+        rows, postings = (self._fetch_term(term, pages=1)
                           if self.cfg.vendor in SEARCHED else self._load())
         return len(postings) >= self.cfg.canary_min_results, len(rows), len(postings)
 
     def search(self, term: str, location: str | None) -> tuple[list[Posting], int]:
         """Filter the cached official ATS response for one seeker query."""
-        rows, postings = (self._fetch_term(term) if self.cfg.vendor in SEARCHED
-                          else self._load())
+        rows, postings = (self._fetch_term(term, location=location)
+                          if self.cfg.vendor in SEARCHED else self._load())
         wanted = (term or "").casefold().strip()
         # Every source here is one employer, or a remote-only board, that the
         # seeker subscribed to on purpose. Their jobs post in whatever office

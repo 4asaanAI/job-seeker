@@ -192,3 +192,26 @@ def test_oracle_description_uses_the_detail_endpoint():
                 location=None, description=None, url=None, posted_at=None))
     assert text == "Lead & buy."
     assert "recruitingCEJobRequisitionDetails" in seen[0] and "Id=%22123%22" in seen[0]
+
+
+def test_foundit_searches_by_term_and_city_with_paced_pages():
+    cfg = ATSConfig(name="foundit_in", vendor="foundit", company_name="Foundit", enabled=True,
+                    endpoint="https://www.foundit.in/home/api/searchResultsPage")
+    urls, pauses = [], []
+    job = {"jobId": 7, "title": "Merchandiser", "companyName": "Shoppers Stop",
+           "locations": [{"city": "Delhi"}, {"country": "India"}],
+           "jdUrl": "/job/merchandiser-7", "description": "<p>Buy &amp; plan</p>",
+           "postedAt": 1789665971000}
+
+    def fetcher(url, timeout):
+        urls.append(url)
+        return {"data": [dict(job, jobId=len(urls) * 100 + i) for i in range(15)]}
+
+    found, raw = ATSJsonSource(cfg, fetcher=fetcher, sleeper=pauses.append).search(
+        "senior merchandiser", "Gurgaon")
+    assert len(urls) == 3 and len(found) == raw == 45, "at most three pages"
+    assert pauses == [2.0, 2.0]
+    assert "query=senior%20merchandiser" in urls[0] and "locations=Gurgaon" in urls[0]
+    p = found[0]
+    assert (p.company_name, p.location, p.url, p.description, p.posted_at) == (
+        "Shoppers Stop", "Delhi", "https://www.foundit.in/job/merchandiser-7", "Buy & plan", "2026-09-17")
