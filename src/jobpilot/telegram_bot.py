@@ -61,7 +61,6 @@ COMMANDS = {
                "that best fits the job. The file is sent to me automatically once it passes its check. "
                "If I have no base resume yet, ask me to send my resume here as a PDF or Word file."),
     "profile": "Show my current search profile and ask which items I would like to change.",
-    "help": "Summarise what you can help me with and which commands I can use.",
 }
 # Requests that run a search or build a resume take minutes; warn up front.
 LONG_COMMANDS = {"search", "jobs", "resume"}
@@ -73,12 +72,34 @@ MENU = {
     "search": "Search for jobs now",
     "status": "Search status", "applications": "My applications",
     "resume": "Tailored resume", "profile": "My search profile",
-    "reset": "Start a new conversation", "help": "Available services",
+    "reset": "Start a new conversation", "help": "All commands and what they do",
 }
+# What each command does, in full. /help sends this; the bot's public
+# description (shown before a user's first message) is built from MENU.
+GUIDE = {
+    "start": "Introduction and how to begin.",
+    "jobs": "Your best new matches, scored against your profile.",
+    "list": "A spreadsheet of every job found for you in the last 30 days, best matches first, with links.",
+    "search": "Run a fresh search now (takes a few minutes).",
+    "status": "How your search and each job source are doing.",
+    "applications": "Jobs you have applied to and follow-ups that are due.",
+    "resume": "A resume tailored to a job you choose. Send your resume as a PDF or Word file to set it up.",
+    "profile": "See and change your search settings (roles, location, companies).",
+    "reset": "Start a fresh conversation. Your profile and jobs are kept.",
+    "link": "Connect this chat to an existing profile: /link followed by your code.",
+    "help": "This list of commands.",
+}
+HELP = ("Here is what I can do. Tap a command or type it:\n\n"
+        + "\n".join(f"/{c} - {d}" for c, d in GUIDE.items())
+        + "\n\nYou can also just write to me in plain words, for example "
+          "\"find marketing jobs in Pune\" or \"is this job a good fit for me?\".")
 DESCRIPTION = (
     "CareerDesk is a job-search assistant. It finds suitable openings, ranks them "
-    "against your profile and helps you prepare applications. Send /start to begin."
+    "against your profile and helps you prepare applications.\n\nCommands:\n"
+    + "\n".join(f"/{c} - {d}" for c, d in MENU.items())
+    + "\n\nSend /start to begin, or send your resume as a PDF or Word file."
 )
+SHORT_DESCRIPTION = "Job-search assistant. Send /help to see every command and what it does."
 
 RULES = (
     f"You are {NAME}, a professional job-search assistant speaking with one person on "
@@ -205,7 +226,7 @@ class Bot:
                 [{"command": c, "description": d} for c, d in MENU.items()])}),
             ("setMyName", {"name": NAME}),
             ("setMyDescription", {"description": DESCRIPTION}),
-            ("setMyShortDescription", {"short_description": "Job search assistant"}),
+            ("setMyShortDescription", {"short_description": SHORT_DESCRIPTION}),
         ]
         for method, params in calls:
             try:
@@ -448,6 +469,8 @@ class Bot:
                     parts = text.split()
                     return self.send(chat_id, self.redeem_link_code(parts[1], uid)
                                      if len(parts) == 2 else "Usage: /link followed by your code.")
+                if cmd == "help":
+                    return self.send(chat_id, HELP)
                 if cmd == "list":
                     return self.send_job_list(uid, chat_id)
                 if cmd == "reset":
@@ -455,7 +478,7 @@ class Bot:
                     return self.send(chat_id, "A new conversation has started. Your saved profile and jobs are unchanged.")
                 if cmd in LONG_COMMANDS:
                     self.send(chat_id, WORKING)
-                text = "I have just started the service. Please introduce yourself and explain how to begin." if cmd == "start" \
+                text = "I have just started the service. Please introduce yourself and explain how to begin, and mention that /help lists every command." if cmd == "start" \
                     else COMMANDS.get(cmd, text)
             elif any(w in text.lower() for w in LONG_WORDS):
                 self.send(chat_id, WORKING)

@@ -689,3 +689,16 @@ def test_working_note_only_for_long_requests(tmp_path):
     bot.handle(_msg(5, "/search"))
     bot.handle(_msg(5, "please tailor my resume"))
     assert [p.get("text") for m, p in sent].count(tb.WORKING) == 2
+
+
+def test_help_lists_every_command_without_claude(home, store):
+    bot, sent, runs = _bot(home, store)
+    bot.handle(_msg(5, "/help"))
+    assert runs == [], "help is a fixed reply, not a Claude run"
+    text = _texts(sent)[-1]
+    assert all(f"/{c} " in text for c in tb.MENU)
+
+
+def test_public_description_lists_the_menu_within_telegram_limits():
+    assert len(tb.DESCRIPTION) <= 512 and len(tb.SHORT_DESCRIPTION) <= 120
+    assert all(f"/{c} - " in tb.DESCRIPTION for c in tb.MENU)
