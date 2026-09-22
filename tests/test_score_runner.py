@@ -77,12 +77,12 @@ def test_usage_limit_message_is_an_error_even_with_exit_code_zero():
         ask("prompt")
 
 
-def test_scoring_uses_the_configured_cheap_model():
+def test_scoring_uses_the_configured_model():
     from types import SimpleNamespace
 
     from jobpilot.config import load_config
     from jobpilot.score_runner import claude_scorer
-    assert load_config().scoring_model == "haiku"
+    assert load_config().scoring_model == "claude-sonnet-5"
     seen = []
     claude_scorer(model="haiku", runner=lambda cmd, **kw: seen.append(cmd) or SimpleNamespace(
         returncode=0, stdout="[]", stderr=""))("p")

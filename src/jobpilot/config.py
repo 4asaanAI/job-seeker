@@ -77,9 +77,9 @@ class Config:
     ats_sources: dict[str, ATSConfig] = field(default_factory=dict)
     structured_sources: dict[str, StructuredConfig] = field(default_factory=dict)
     wigolo_sources: dict[str, WigoloConfig] = field(default_factory=dict)
-    # Model for batch job scoring. Cheap on purpose: the Telegram bot shares
-    # the same Claude subscription limit and must keep answering.
-    scoring_model: str = "haiku"
+    # Model for batch job scoring. The Telegram bot shares the same Claude
+    # subscription limit; "haiku" is the cheaper option.
+    scoring_model: str = "claude-sonnet-5"
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -219,7 +219,7 @@ def load_config(path: Path | None = None) -> Config:
         out_dir=base / raw["paths"]["out_dir"],
         score_batch=raw["limits"]["score_batch"],
         min_request_gap_seconds=float(raw["limits"]["min_request_gap_seconds"]),
-        scoring_model=str(raw.get("scoring", {}).get("model") or "haiku"),
+        scoring_model=str(raw.get("scoring", {}).get("model") or "claude-sonnet-5"),
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,
