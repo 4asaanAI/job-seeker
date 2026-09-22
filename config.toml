@@ -209,6 +209,34 @@ company_name = "RemoteOK"
 endpoint = "https://remoteok.com/api"
 enabled = true
 
+# Remote boards with public, keyword-searchable APIs (live-tested 2026-09-22).
+# Both ask for attribution: postings link back to the original site.
+[ats_sources.himalayas_us]
+vendor = "himalayas"
+company_name = "Himalayas (US)"
+endpoint = "https://himalayas.app/jobs/api/search?country=US"
+enabled = true
+canary_min_results = 5
+fetch_timeout_seconds = 30.0
+
+[ats_sources.himalayas_in]
+vendor = "himalayas"
+company_name = "Himalayas (India)"
+endpoint = "https://himalayas.app/jobs/api/search?country=India"
+enabled = true
+canary_min_results = 1
+fetch_timeout_seconds = 30.0
+
+[ats_sources.jobicy_us]
+vendor = "jobicy"
+company_name = "Jobicy (US)"
+endpoint = "https://jobicy.com/api/v2/remote-jobs?count=50&geo=usa"
+enabled = true
+canary_min_results = 5
+fetch_timeout_seconds = 30.0
+
+# Remotive's free API returns one fixed sample of about 18 jobs and ignores
+# search terms (checked 2026-09-22), so it adds little.
 [ats_sources.remotive]
 vendor = "remotive"
 company_name = "Remotive"

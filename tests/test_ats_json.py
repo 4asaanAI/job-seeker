@@ -215,3 +215,37 @@ def test_foundit_searches_by_term_and_city_with_paced_pages():
     p = found[0]
     assert (p.company_name, p.location, p.url, p.description, p.posted_at) == (
         "Shoppers Stop", "Delhi", "https://www.foundit.in/job/merchandiser-7", "Buy & plan", "2026-09-17")
+
+
+def test_himalayas_remote_search_keeps_country_filter_and_pages():
+    cfg = ATSConfig(name="himalayas_us", vendor="himalayas", company_name="Himalayas (US)",
+                    enabled=True, endpoint="https://himalayas.app/jobs/api/search?country=US")
+    urls = []
+
+    def fetcher(url, timeout):
+        urls.append(url)
+        return {"jobs": [{"guid": f"https://himalayas.app/j/{len(urls)}-{i}", "title": "Product Analyst",
+                          "companyName": "Acme", "locationRestrictions": ["United States"],
+                          "applicationLink": f"https://himalayas.app/j/{len(urls)}-{i}",
+                          "description": "<p>Analyse</p>", "pubDate": 1788965060} for i in range(20)]}
+
+    found, _ = ATSJsonSource(cfg, fetcher=fetcher, sleeper=lambda s: None).search("product analyst", None)
+    assert len(urls) == 3 and len(found) == 60
+    assert urls[1] == "https://himalayas.app/jobs/api/search?country=US&q=product%20analyst&page=2"
+    assert (found[0].company_name, found[0].location) == ("Acme", "Remote (United States)")
+
+
+def test_jobicy_remote_search_is_one_call_with_tag():
+    cfg = ATSConfig(name="jobicy_us", vendor="jobicy", company_name="Jobicy (US)", enabled=True,
+                    endpoint="https://jobicy.com/api/v2/remote-jobs?count=50&geo=usa")
+    urls = []
+
+    def fetcher(url, timeout):
+        urls.append(url)
+        return {"jobs": [{"id": i, "jobTitle": "Business Analyst", "companyName": "ManTech",
+                          "jobGeo": "USA", "url": f"https://jobicy.com/jobs/{i}",
+                          "jobDescription": "d", "pubDate": "2026-09-03T12:35:03+00:00"} for i in range(50)]}
+
+    found, _ = ATSJsonSource(cfg, fetcher=fetcher).search("business analyst", None)
+    assert urls == ["https://jobicy.com/api/v2/remote-jobs?count=50&geo=usa&tag=business%20analyst"]
+    assert len(found) == 50 and found[0].location == "Remote (USA)"

@@ -79,6 +79,8 @@ def build_tools(
                     continue
                 vendor = getattr(sc, "vendor", "")
                 catalog[n] = ("remote jobs, worldwide" if vendor in {"remoteok", "remotive"}
+                              else f"remote jobs open to {sc.company_name.split('(')[-1].rstrip(')')}"
+                              if vendor in {"himalayas", "jobicy"}
                               else "foundit job board, india" if vendor == "foundit"
                               else f"{sc.company_name} careers page, all locations")
         return {n: d for n, d in catalog.items() if n not in PROHIBITED_SOURCES}

@@ -52,11 +52,12 @@ def _default_poster(url: str, body: dict, timeout: float) -> object:
         return json.load(response)
 
 
-SEARCHED = frozenset({"workday_cxs", "oracle_hcm", "smartrecruiters", "foundit"})
+SEARCHED = frozenset({"workday_cxs", "oracle_hcm", "smartrecruiters", "foundit",
+                      "himalayas", "jobicy"})
+BOARD_CANARY_TERM = {"foundit": "manager", "himalayas": "manager", "jobicy": "manager"}
 # Foundit is a whole job board: searched by term and city, paced, few pages.
 FOUNDIT_PAGES = 3
 FOUNDIT_GAP_SECONDS = 2.0
-FOUNDIT_CANARY_TERM = "manager"
 MAX_PAGES = 5
 
 
@@ -150,6 +151,26 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
         posted_at = (time.strftime("%Y-%m-%d", time.gmtime(posted / 1000))
                      if isinstance(posted, (int, float)) else "")
         row_company = "" if item.get("hideCompanyName") else _nested(item, "companyName")
+    elif vendor == "himalayas":
+        external_id = _nested(item, "guid")
+        title = _nested(item, "title")
+        places = item.get("locationRestrictions") or []
+        location = "Remote" + (f" ({', '.join(map(str, places))})" if places else "")
+        url = _nested(item, "applicationLink", "guid")
+        description = _nested(item, "description", "excerpt")
+        posted = item.get("pubDate")
+        posted_at = (time.strftime("%Y-%m-%d", time.gmtime(posted))
+                     if isinstance(posted, (int, float)) else "")
+        row_company = _nested(item, "companyName")
+    elif vendor == "jobicy":
+        external_id = _nested(item, "id")
+        title = _nested(item, "jobTitle")
+        geo = _text(_nested(item, "jobGeo"))
+        location = f"Remote ({geo})" if geo else "Remote"
+        url = _nested(item, "url")
+        description = _nested(item, "jobDescription", "jobExcerpt")
+        posted_at = _nested(item, "pubDate")
+        row_company = _nested(item, "companyName")
     elif vendor == "bamboohr":
         # BambooHR's list endpoint carries no job URL; the public page is a
         # fixed <tenant>/careers/<id> path (verified against a live tenant).
@@ -288,8 +309,10 @@ class ATSJsonSource:
         cache = f"{key}|{where.casefold()}"
         if cache in self._terms and pages == MAX_PAGES:
             return self._terms[cache]
-        if self.cfg.vendor == "foundit":
+        if self.cfg.vendor in ("foundit", "himalayas"):
             pages = min(pages, FOUNDIT_PAGES)
+        elif self.cfg.vendor == "jobicy":
+            pages = 1
         rows: list[dict] = []
         timeout = self.cfg.fetch_timeout_seconds
         for page in range(pages):
@@ -307,6 +330,18 @@ class ATSJsonSource:
                 data = self._fetcher(url, timeout)
                 batch = data.get("data", []) if isinstance(data, dict) else []
                 size = 15
+            elif self.cfg.vendor in ("himalayas", "jobicy"):
+                # Remote boards; the endpoint carries the fixed country filter.
+                if page:
+                    self._sleep(FOUNDIT_GAP_SECONDS)
+                if self.cfg.vendor == "himalayas":
+                    url = f"{self.cfg.endpoint}&q={quote(key)}&page={page + 1}"
+                    listed, size = "jobs", 20
+                else:
+                    url = f"{self.cfg.endpoint}&tag={quote(key)}"
+                    listed, size = "jobs", 50
+                data = self._fetcher(url, timeout)
+                batch = data.get(listed, []) if isinstance(data, dict) else []
             elif self.cfg.vendor == "smartrecruiters":
                 clean = re.sub(r"[^\w ]", " ", key).strip()
                 url = (f"{self.cfg.endpoint}?limit=100&offset={page * 100}"
@@ -362,7 +397,7 @@ class ATSJsonSource:
 
     def canary(self) -> tuple[bool, int, int]:
         """Fetch the configured endpoint and require normalized jobs."""
-        term = FOUNDIT_CANARY_TERM if self.cfg.vendor == "foundit" else ""
+        term = BOARD_CANARY_TERM.get(self.cfg.vendor, "")
         rows, postings = (self._fetch_term(term, pages=1)
                           if self.cfg.vendor in SEARCHED else self._load())
         return len(postings) >= self.cfg.canary_min_results, len(rows), len(postings)
