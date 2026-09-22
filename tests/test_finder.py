@@ -283,3 +283,11 @@ def test_careers_site_is_the_employers_own_host_not_a_job_board():
             {"url": "https://careers.ralphlauren.com/en_US/CareersCorporate"}]
     assert find_careers_site("Ralph Lauren", search=lambda q, d: rows) == "careers.ralphlauren.com"
     assert find_careers_site("Nobody", search=lambda q, d: rows) is None
+
+
+def test_oracle_site_must_name_the_employer_in_its_own_title():
+    from jobpilot.sources import finder
+    assert finder._owner_matches("Bloomingdale's", "Ralph Lauren") is False
+    assert finder._owner_matches("MS", "Marks & Spencer") is True
+    assert finder._owner_matches("Ralph Lauren Careers", "Ralph Lauren") is True
+    assert finder._owner_matches("", "Ralph Lauren") is False

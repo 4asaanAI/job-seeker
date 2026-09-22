@@ -97,6 +97,24 @@ def _related(key: str, wanted: str) -> bool:
     return len(key) >= 3 and (key.startswith(wanted) or wanted.startswith(key))
 
 
+def _site_title(url: str, timeout: float) -> str:
+    from urllib.request import Request
+    with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=timeout) as resp:  # noqa: S310
+        page = resp.read(300_000).decode("utf-8", "ignore")
+    m = re.search(r"<title>(.*?)</title>", page, re.S)
+    return m[1].replace("\\'", "'") if m else ""
+
+
+def _owner_matches(title: str, company: str) -> bool:
+    """A careers site's own title names its employer ("Bloomingdale's", "MS").
+    A search snippet is not enough: another retailer's listing can name the
+    wanted brand ("Brand Manager, Ralph Lauren" on Bloomingdale's site)."""
+    owner, wanted = normalise(title), normalise(company)
+    initials = "".join(w[0] for w in _words(company) if w != "and")
+    return bool(owner) and (wanted in owner or (len(owner) >= 4 and owner in wanted)
+                            or owner == initials)
+
+
 def wigolo_search(query: str, domain: str) -> list[dict]:
     """Web search restricted to one domain; [] when Wigolo is unavailable."""
     cmd = wigolo_command()
@@ -191,6 +209,7 @@ def find_feed(
     post: Callable[[str, dict, float], object] = _default_poster,
     search: Search = web_search,
     timeout: float = 15.0,
+    site_title: Callable[[str, float], str] = _site_title,
 ) -> dict | None:
     """Return {vendor, slug, endpoint, company_name, jobs} or None."""
     wanted = normalise(company)
@@ -213,6 +232,11 @@ def find_feed(
                     return None
             elif vendor == "oracle_hcm":
                 if wanted not in normalise(cand.get("context", "")):
+                    return None
+                origin = cand["endpoint"].split("/hcmRestApi/")[0]
+                site = cand["endpoint"].rsplit("siteNumber=", 1)[-1]
+                title = site_title(f"{origin}/hcmUI/CandidateExperience/en/sites/{site}", timeout)
+                if not _owner_matches(title, company):
                     return None
             elif cand.get("guessed"):
                 if key.replace("-", "") != wanted:
