@@ -132,7 +132,9 @@ def main() -> int:
     store = Store(Path(os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
     try:
         store.migrate()
-        for row in score_all(store, home, claude_scorer()):
+        from .config import load_config
+        model = load_config().scoring_model
+        for row in score_all(store, home, claude_scorer(model=model)):
             print(row)
     finally:
         store.close()

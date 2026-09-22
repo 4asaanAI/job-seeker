@@ -6,6 +6,11 @@ out_dir = "out"
 score_batch = 40
 min_request_gap_seconds = 4.0
 
+[scoring]
+# Batch job scoring runs on a cheap model: the Telegram bot shares the same
+# Claude subscription limit. Aliases: haiku | sonnet | opus.
+model = "haiku"
+
 # ---- Official employer ATS JSON (R4) ----
 # Add one block per verified public JSON endpoint, then add the same source key
 # to the seeker's profile. Keep these disabled until the endpoint has been

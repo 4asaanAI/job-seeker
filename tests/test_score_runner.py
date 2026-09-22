@@ -75,3 +75,15 @@ def test_usage_limit_message_is_an_error_even_with_exit_code_zero():
         returncode=0, stdout="You've hit your session limit · resets 10:40pm", stderr=""))
     with pytest.raises(RuntimeError, match="session limit"):
         ask("prompt")
+
+
+def test_scoring_uses_the_configured_cheap_model():
+    from types import SimpleNamespace
+
+    from jobpilot.config import load_config
+    from jobpilot.score_runner import claude_scorer
+    assert load_config().scoring_model == "haiku"
+    seen = []
+    claude_scorer(model="haiku", runner=lambda cmd, **kw: seen.append(cmd) or SimpleNamespace(
+        returncode=0, stdout="[]", stderr=""))("p")
+    assert seen[0][-2:] == ["--model", "haiku"]
