@@ -10,6 +10,8 @@ min_request_gap_seconds = 4.0
 # Model for batch job scoring. A cheaper one (haiku) saves the Claude
 # subscription limit the Telegram bot shares. Full model IDs or aliases (haiku, sonnet, opus).
 model = "claude-sonnet-5"
+# Thinking effort per scoring call: low | medium | high | xhigh | max.
+effort = "low"
 
 # ---- Official employer ATS JSON (R4) ----
 # Add one block per verified public JSON endpoint, then add the same source key

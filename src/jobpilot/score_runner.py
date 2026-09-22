@@ -60,12 +60,15 @@ def parse_scores(text: str, wanted: set[int]) -> list[tuple[int, float, str]]:
     return out
 
 
-def claude_scorer(claude_bin: str = "claude", model: str | None = None, runner=subprocess.run):
+def claude_scorer(claude_bin: str = "claude", model: str | None = None,
+                  effort: str | None = None, runner=subprocess.run):
     def ask(prompt: str) -> str:
         command = [claude_bin, "--print", "--no-session-persistence", "--strict-mcp-config",
                    "--tools", "", "--disable-slash-commands"]
         if model:
             command += ["--model", model]
+        if effort:
+            command += ["--effort", effort]
         done = runner(command, input=prompt, capture_output=True, text=True,
                       encoding="utf-8", timeout=600, check=False)
         out = done.stdout or ""
@@ -133,8 +136,9 @@ def main() -> int:
     try:
         store.migrate()
         from .config import load_config
-        model = load_config().scoring_model
-        for row in score_all(store, home, claude_scorer(model=model)):
+        cfg = load_config()
+        for row in score_all(store, home, claude_scorer(model=cfg.scoring_model,
+                                                        effort=cfg.scoring_effort)):
             print(row)
     finally:
         store.close()

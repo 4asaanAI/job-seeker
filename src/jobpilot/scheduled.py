@@ -88,8 +88,9 @@ def main() -> int:
             store.migrate()
             from .score_runner import claude_scorer, score_all
             from .config import load_config
-            model = load_config().scoring_model
-            for row in score_all(store, home, claude_scorer(args.claude, model=model)):
+            cfg = load_config()
+            for row in score_all(store, home, claude_scorer(
+                    args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort)):
                 print(f"scoring: {row}")
             bot = Bot(_load_token(home), home, store)
             print(f"digests sent: {push_digests(store, bot.send)}")

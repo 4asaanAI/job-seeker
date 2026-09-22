@@ -82,8 +82,8 @@ def test_scoring_uses_the_configured_model():
 
     from jobpilot.config import load_config
     from jobpilot.score_runner import claude_scorer
-    assert load_config().scoring_model == "claude-sonnet-5"
+    assert (load_config().scoring_model, load_config().scoring_effort) == ("claude-sonnet-5", "low")
     seen = []
-    claude_scorer(model="haiku", runner=lambda cmd, **kw: seen.append(cmd) or SimpleNamespace(
+    claude_scorer(model="haiku", effort="low", runner=lambda cmd, **kw: seen.append(cmd) or SimpleNamespace(
         returncode=0, stdout="[]", stderr=""))("p")
-    assert seen[0][-2:] == ["--model", "haiku"]
+    assert seen[0][-4:] == ["--model", "haiku", "--effort", "low"]

@@ -80,6 +80,7 @@ class Config:
     # Model for batch job scoring. The Telegram bot shares the same Claude
     # subscription limit; "haiku" is the cheaper option.
     scoring_model: str = "claude-sonnet-5"
+    scoring_effort: str = "low"
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -220,6 +221,7 @@ def load_config(path: Path | None = None) -> Config:
         score_batch=raw["limits"]["score_batch"],
         min_request_gap_seconds=float(raw["limits"]["min_request_gap_seconds"]),
         scoring_model=str(raw.get("scoring", {}).get("model") or "claude-sonnet-5"),
+        scoring_effort=str(raw.get("scoring", {}).get("effort") or "low"),
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,
