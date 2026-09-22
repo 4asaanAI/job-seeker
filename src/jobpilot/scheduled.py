@@ -82,13 +82,15 @@ def main() -> int:
     )
     print(result.output, end="")
     if result.returncode == 0:
-        from .notify import push_digests
+        from .notify import push_digests, push_job_lists
         from .telegram_bot import Bot, _load_token
         home = jobpilot_home()
         store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
         try:
             store.migrate()
-            print(f"digests sent: {push_digests(store, Bot(_load_token(home), home, store).send)}")
+            bot = Bot(_load_token(home), home, store)
+            print(f"digests sent: {push_digests(store, bot.send)}")
+            print(f"job lists sent: {push_job_lists(store, bot.send_job_list)}")
         finally:
             store.close()
     return result.returncode

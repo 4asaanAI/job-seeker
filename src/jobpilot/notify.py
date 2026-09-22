@@ -31,3 +31,17 @@ def push_digests(store: Store, send: Callable[[int, str], None],
         except Exception as exc:
             _log(f"digest for seeker {seeker.id} failed: {type(exc).__name__}: {exc}")
     return sent
+
+
+def push_job_lists(store: Store, send_list: Callable[[int, int, bool], bool]) -> int:
+    """Send each linked seeker their spreadsheet when new jobs arrived today."""
+    sent = 0
+    for seeker in store.list_seekers():
+        if not seeker.telegram_user_id:
+            continue
+        uid = int(seeker.telegram_user_id)
+        try:
+            sent += bool(send_list(uid, uid, True))
+        except Exception as exc:
+            _log(f"job list for seeker {seeker.id} failed: {type(exc).__name__}: {exc}")
+    return sent

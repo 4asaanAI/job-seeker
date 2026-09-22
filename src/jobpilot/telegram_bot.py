@@ -69,7 +69,8 @@ LONG_WORDS = ("resume", "résumé", "cv", "search", "find jobs", "find me", "tai
 WORKING = "Working on it. This can take a couple of minutes."
 TYPING_EVERY = 4.0  # Telegram shows "typing" for about 5 s per call.
 MENU = {
-    "jobs": "Best new job matches", "search": "Search for jobs now",
+    "jobs": "Best new job matches", "list": "All my jobs as a spreadsheet",
+    "search": "Search for jobs now",
     "status": "Search status", "applications": "My applications",
     "resume": "Tailored resume", "profile": "My search profile",
     "reset": "Start a new conversation", "help": "Available services",
@@ -81,7 +82,8 @@ DESCRIPTION = (
 
 RULES = (
     f"You are {NAME}, a professional job-search assistant speaking with one person on "
-    "Telegram. Write in a formal, courteous and clear tone, in plain everyday words. "
+    "Telegram. If they want to see all their jobs at once, tell them to send /list: it "
+    "sends a spreadsheet of every job found for them, best matches first. Write in a formal, courteous and clear tone, in plain everyday words. "
     "Do not use emoji, slang, exclamation marks, filler or small talk. Do not open "
     "with greetings after the first message, and do not close with pleasantries. "
     "Keep replies concise and structured: a one-line summary first, then numbered "
@@ -378,6 +380,37 @@ class Bot:
                        f"request; do it once the steps above are done: {caption}")
         return prompt
 
+    def send_job_list(self, uid: int, chat_id: int, only_if_new: bool = False) -> bool:
+        """Send the seeker's consolidated job spreadsheet. Returns True if sent."""
+        seeker = self.store.seeker_by_telegram_id(uid)
+        if seeker is None:
+            if not only_if_new:
+                self.send(chat_id, "You don't have a profile yet. Send me your resume to get started.")
+            return False
+        from .joblist import job_rows, write_job_list
+        from .profiles import load_profile
+        rows = job_rows(self.store, seeker.id)
+        if only_if_new:
+            since = (datetime.datetime.now(datetime.timezone.utc)
+                     - datetime.timedelta(days=1)).isoformat()
+            if not any((r["first_seen_at"] or "") >= since for r in rows):
+                return False
+        if not rows:
+            self.send(chat_id, "No jobs have been found for you in the last 30 days yet. "
+                               "Send /search to look now.")
+            return False
+        try:
+            min_score = load_profile(self._folder(seeker) / Path(seeker.profile_path).name).min_score
+        except Exception:
+            min_score = 70.0
+        path = self.state / "work" / str(uid) / f"jobs-{datetime.date.today():%Y-%m-%d}.xlsx"
+        total, good = write_job_list(self.store, seeker.id, path, min_score)
+        self._upload(chat_id, path)
+        self.send(chat_id, f"Your job list: {total} jobs from the last 30 days, best matches "
+                           f"first. {good} are strong matches (score {min_score:.0f} or more, "
+                           "shaded green). Jobs marked 'Not rated yet' haven't been scored.")
+        return True
+
     def _folder(self, seeker) -> Path:
         folder = Path(seeker.profile_path).parent
         return folder if folder.is_absolute() else self.home / folder
@@ -414,6 +447,8 @@ class Bot:
                     parts = text.split()
                     return self.send(chat_id, self.redeem_link_code(parts[1], uid)
                                      if len(parts) == 2 else "Usage: /link followed by your code.")
+                if cmd == "list":
+                    return self.send_job_list(uid, chat_id)
                 if cmd == "reset":
                     self.reset(uid)
                     return self.send(chat_id, "A new conversation has started. Your saved profile and jobs are unchanged.")
