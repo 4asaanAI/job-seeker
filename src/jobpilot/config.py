@@ -81,6 +81,39 @@ class Config:
     # subscription limit; "haiku" is the cheaper option.
     scoring_model: str = "claude-sonnet-5"
     scoring_effort: str = "low"
+    llm: "LLMConfig" = field(default_factory=lambda: LLMConfig())
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    """Which brain answers Telegram and scores jobs.
+
+    "claude" runs the local ``claude`` CLI (subscription login on this
+    machine). "bedrock" calls Amazon Bedrock with the machine's AWS
+    credentials, so the bot can run on a server. JOBPILOT_LLM_PROVIDER in the
+    environment overrides the file, so one checkout can serve both.
+    """
+    provider: str = "claude"
+    region: str = "ap-south-1"
+    bot_model: str = "moonshotai.kimi-k2.5"
+    fallback_model: str = "mistral.mistral-large-3-675b-instruct"
+    scoring_model: str = "qwen.qwen3-235b-a22b-2507-v1:0"
+
+
+def _llm_config(block: dict) -> LLMConfig:
+    import os
+    provider = str(os.environ.get("JOBPILOT_LLM_PROVIDER") or block.get("provider") or "claude")
+    provider = provider.strip().lower()
+    if provider not in {"claude", "bedrock"}:
+        raise ValueError(f"[llm] provider must be claude or bedrock, not {provider!r}")
+    d = LLMConfig()
+    return LLMConfig(
+        provider=provider,
+        region=str(block.get("region") or d.region),
+        bot_model=str(block.get("bot_model") or d.bot_model),
+        fallback_model=str(block.get("fallback_model") or d.fallback_model),
+        scoring_model=str(block.get("scoring_model") or d.scoring_model),
+    )
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -226,4 +259,5 @@ def load_config(path: Path | None = None) -> Config:
         ats_sources=ats_sources,
         structured_sources=structured_sources,
         wigolo_sources=wigolo_sources,
+        llm=_llm_config(raw.get("llm", {})),
     )

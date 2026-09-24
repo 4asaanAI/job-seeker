@@ -270,8 +270,9 @@ def build_tools(
         """Store one 0-100 fit score for a posting linked to this seeker."""
         try:
             sid = _check(seeker_id)
-            store.record_score(sid, int(posting_id), float(fit_score),
-                               reasoning, "claude")
+            # Which brain scored it; the Telegram bot sets this for Bedrock.
+            store.record_score(sid, int(posting_id), float(fit_score), reasoning,
+                               os.environ.get("JOBPILOT_SCORER_LABEL") or "claude")
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}

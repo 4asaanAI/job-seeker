@@ -20,7 +20,8 @@ import socket
 import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from pathlib import Path
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .sources.finder import searxng_search, wigolo_command, wigolo_env
 
@@ -105,7 +106,58 @@ def _env() -> dict[str, str]:
     return env
 
 
+FIRST_ARG = {"search": "query", "fetch": "url", "crawl": "url", "extract": "url",
+             "research": "question"}
+LIST_FLAGS = {"include_domains", "include_patterns"}
+
+
+def daemon_body(args: list[str]) -> tuple[str, dict]:
+    """Translate CLI-style args (["crawl", url, "--max-pages=3"]) into the
+    running Wigolo server's request body. Same option names, snake_case."""
+    tool, body = args[0], {}
+    for arg in args[1:]:
+        if not arg.startswith("--"):
+            body[FIRST_ARG[tool]] = arg
+            continue
+        key, _, value = arg[2:].partition("=")
+        key = key.replace("-", "_")
+        if not value:
+            continue  # --no-content: the server's search already returns snippets
+        if key in LIST_FLAGS:
+            body[key] = [value]
+        else:
+            body[key] = int(value) if value.isdigit() else value
+    return tool, body
+
+
+def run_wigolo_daemon(url: str, args: list[str], timeout: float) -> dict:
+    """Call an always-running Wigolo server (the shared AWS host). It keeps a
+    warm browser pool and cache, and its research writes a report with an AI
+    model, which the one-shot CLI cannot."""
+    tool, body = daemon_body(args)
+    token_file = os.environ.get("JOBPILOT_WIGOLO_TOKEN_FILE")
+    headers = {"Content-Type": "application/json"}
+    if token_file:
+        headers["Authorization"] = "Bearer " + Path(token_file).read_text(encoding="utf-8").strip()
+    request = Request(f"{url.rstrip('/')}/v1/{tool}", data=json.dumps(body).encode(),
+                      headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - operator-set URL
+            data = json.loads(response.read())
+    except TimeoutError as exc:
+        raise WebError("the page took too long to load") from exc
+    except (OSError, ValueError) as exc:
+        raise WebError("the web request failed") from exc
+    if not isinstance(data, dict) or data.get("error") or data.get("ok") is False:
+        raise WebError(str((data or {}).get("error_reason") or (data or {}).get("error")
+                           or "the web request failed")[:300])
+    return data
+
+
 def run_wigolo(args: list[str], timeout: float = 120) -> dict:
+    url = os.environ.get("JOBPILOT_WIGOLO_URL")
+    if url:
+        return run_wigolo_daemon(url, args, timeout)
     cmd = wigolo_command()
     if not cmd:
         raise WebError("web access is not available on this machine")
@@ -189,13 +241,16 @@ def research(question: str) -> dict:
         raise WebError("question must not be empty")
     data = run_wigolo(["research", question, "--depth=quick", "--max-sources=6"], timeout=180)
     evidence = sorted(data.get("evidence") or [], key=lambda e: -(e.get("score") or 0))
+    sources = data.get("citations") or data.get("sources") or []
     return {
         "question": question,
+        # Present only when the Wigolo server has an AI model configured.
+        **({"report": _clip(data["report"], 6000)} if data.get("report") else {}),
         "evidence": [{"excerpt": _clip(e.get("excerpt"), 700), "source": e.get("url"),
                       "score": round(float(e.get("score") or 0), 2)}
                      for e in evidence[:12] if e.get("excerpt")],
         "sources": [{"title": c.get("title"), "url": c.get("url")}
-                    for c in (data.get("citations") or [])[:10]],
+                    for c in sources[:10]],
         "note": UNTRUSTED + " Write the answer yourself from these highlights and cite "
                 "the sources; say plainly when they do not settle the question.",
     }
