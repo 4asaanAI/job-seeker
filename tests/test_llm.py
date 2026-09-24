@@ -237,3 +237,17 @@ def test_server_error_becomes_web_error(monkeypatch):
     monkeypatch.setattr(web, "urlopen", lambda req, timeout: Resp())
     with pytest.raises(web.WebError, match="ssrf_metadata"):
         web.run_wigolo(["fetch", "http://169.254.169.254/"])
+
+
+def test_scheduled_bedrock_routine_uses_config_env(tmp_path, monkeypatch):
+    from jobpilot import scheduled
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(json.dumps({"mcpServers": {"jobpilot": {"env": {"JOBPILOT_DB": "x.db"}}}}))
+    holder = {}
+    b = brain(tmp_path, {"kimi": [use("list_seekers", {}), say("discovered 3 seekers")]}, holder)
+    result = scheduled.run_once_bedrock(machine="aws", mcp_config=cfg,
+                                        db_path=tmp_path / "j.db", brain=b)
+    assert (result.returncode, result.output) == (0, "discovered 3 seekers")
+    assert holder["mcp"].env["JOBPILOT_DB"] == "x.db"
+    assert "discover" in b.client.calls[0]["messages"][0]["content"][0]["text"]
