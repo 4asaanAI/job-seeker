@@ -313,6 +313,31 @@ def validate_pdf(path: Path, required_facts: tuple[str, ...]) -> ValidationRepor
     return _report("pdf", Path(path), text, required_facts)
 
 
+def render_text(
+    base: BaseResume,
+    *,
+    experience_order: list[str] | None = None,
+    skills: list[str] | None = None,
+) -> str:
+    """Plain-text resume from base facts only, for channels that cannot carry a file."""
+    lines = [base.name, base.headline, *base.contact]
+    if base.summary:
+        lines += ["", "SUMMARY", base.summary]
+    chosen = _select_experience(base, experience_order)
+    if chosen:
+        lines += ["", "EXPERIENCE"]
+        for item in chosen:
+            lines.append(f"{item.title}, {item.employer} ({item.dates})")
+            lines += [f"- {text}" for _, text in item.bullets]
+    if base.education:
+        lines += ["", "EDUCATION"]
+        lines += [f"{e.degree}, {e.institution} ({e.dates})" for e in base.education]
+    picked = _select_skills(base, skills)
+    if picked:
+        lines += ["", "SKILLS", ", ".join(picked)]
+    return "\n".join(lines)
+
+
 def render_docx(
     base: BaseResume,
     path: Path,

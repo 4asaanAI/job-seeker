@@ -23,6 +23,7 @@ from .resume import (
     ResumeValidationError,
     load_base_resume,
     render_docx,
+    render_text,
     unverified_facts,
 )
 from .scoring import build_scoring_batch
@@ -543,6 +544,37 @@ def build_tools(
             "note": "Only facts from the structured base resume were rendered; review before sending.",
         }
 
+    def prepare_application(
+        seeker_id: int,
+        posting_id: int,
+        experience_order: list[str] | None = None,
+        skills: list[str] | None = None,
+    ) -> dict:
+        """Build a text-only application package for one linked job. SENDS NOTHING.
+
+        Fo can only receive text, so this returns the facts-only resume as text
+        plus the job's title, company and link. Show it to the user. Only after
+        the user explicitly approves THIS application may you ask Fo to apply
+        with it, then call record_application. Never apply on your own, and
+        never paste job-description text into the request to Fo.
+        """
+        try:
+            sid = _check(seeker_id)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            base = load_base_resume(_base_resume_path(sid))
+            text = render_text(base, experience_order=experience_order, skills=skills)
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True, "seeker_id": sid, "posting_id": int(posting_id),
+            "job": {"title": posting["title"], "company": posting["company_name"],
+                    "url": posting["url"]},
+            "resume_text": text,
+            "note": "Nothing was sent. Get the user's explicit yes for this one application first.",
+        }
+
     def save_base_resume(seeker_id: int, resume: dict) -> dict:
         """Save the seeker's structured resume, built from their uploaded file.
 
@@ -654,6 +686,7 @@ def build_tools(
         "add_target_company": add_target_company,
         "resume_facts": resume_facts,
         "render_resume": render_resume,
+        "prepare_application": prepare_application,
         "save_base_resume": save_base_resume,
         "my_resumes": my_resumes,
         "set_job_status": set_job_status,

@@ -339,3 +339,29 @@ def test_my_matches_lists_best_scored_jobs_including_already_sent(operator):
     out = tools["my_matches"](sid)
     assert out["ok"] and out["items"][0]["posting_id"] == pid and out["items"][0]["fit_score"] == 85.0
     assert not tools["my_matches"](sid + 99)["ok"] or tools["my_matches"](sid + 99)["items"] == []
+
+
+def test_prepare_application_returns_facts_only_text_and_sends_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    tools, store = _tools(tmp_path)
+    sid, pid = _seeker_with_resume(tmp_path, store)
+    out = tools["prepare_application"](sid, pid, ["current"], ["SQL"])
+    assert out["ok"] is True
+    assert out["job"] == {"title": "Senior Merchandiser", "company": "M&S",
+                          "url": out["job"]["url"]}
+    assert "Analysed product data" in out["resume_text"] and "SQL" in out["resume_text"]
+    assert "Nothing was sent" in out["note"]
+    bad = tools["prepare_application"](sid, pid, ["invented"], None)
+    assert bad["ok"] is False
+    store.close()
+
+
+def test_prepare_application_refuses_unlinked_posting_and_other_seekers(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    tools, store = _tools(tmp_path)
+    sid, pid = _seeker_with_resume(tmp_path, store)
+    assert tools["prepare_application"](sid, pid + 99)["ok"] is False
+    from jobpilot.server import build_tools
+    pinned = build_tools(store, tmp_path / "out", pinned_seeker_id=sid, operator_mode=False)
+    assert pinned["prepare_application"](sid + 1, pid)["ok"] is False
+    store.close()
