@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .fo import (FoClient, child_env, fo_sender, render_fo_digest,
+                 render_fo_followups)
 from .paths import jobpilot_home
 from .store.db import Store
 
@@ -54,6 +56,7 @@ def run_once(
     try:
         completed = runner(
             command, cwd=str(home), capture_output=True, text=True, check=False,
+            env=child_env(),
         )
         output = (completed.stdout or "") + (completed.stderr or "")
         status = "completed" if completed.returncode == 0 else "error"
@@ -64,6 +67,46 @@ def run_once(
         raise
     finally:
         store.close()
+
+
+def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
+    """Push digests and follow-ups. Each channel is guarded so one cannot block the other.
+
+    A seeker served through Fo is skipped on Telegram: the "already told"
+    ledger ignores the channel, so two channels would starve each other.
+    """
+    from .notify import push_digests, push_followups, push_job_lists
+    fo_id = None
+    if cfg.fo_enabled:
+        try:
+            fo_client = fo_factory()
+            if cfg.fo_seeker_id is None:
+                raise ValueError("[fo] enabled needs seeker_id: one Fo account serves one seeker")
+            if fo_client is None:
+                print("fo: skipped, FO_API_KEY is not set")
+            else:
+                if not any(s.id == cfg.fo_seeker_id for s in store.list_seekers()):
+                    raise ValueError("[fo] seeker_id is not an active seeker")
+                send = fo_sender(fo_client)
+                ids = {cfg.fo_seeker_id}
+                print(f"fo digests sent: {push_digests(store, send, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)}")
+                print(f"fo follow-ups sent: {push_followups(store, send, render_fo_followups, channel='fo', seeker_ids=ids)}")
+                fo_id = cfg.fo_seeker_id
+        except Exception as exc:  # noqa: BLE001 - reported, Telegram still runs
+            print(f"fo delivery failed: {type(exc).__name__}: {exc}")
+    try:
+        bot = bot_factory()
+        if bot is None:
+            print("telegram: skipped, no bot token on this machine")
+            return
+        def to_telegram(seeker):
+            if seeker.id == fo_id or not seeker.telegram_user_id:
+                return None
+            return int(seeker.telegram_user_id)
+        print(f"digests sent: {push_digests(store, bot.send, recipient=to_telegram)}")
+        print(f"job lists sent: {push_job_lists(store, bot.send_job_list)}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"telegram delivery failed: {type(exc).__name__}: {exc}")
 
 
 def main() -> int:
@@ -80,21 +123,23 @@ def main() -> int:
     )
     print(result.output, end="")
     if result.returncode == 0:
-        from .notify import push_digests, push_job_lists
-        from .telegram_bot import Bot, _load_token
+        from .config import load_config
+        from .score_runner import claude_scorer, score_all
+        from .telegram_bot import Bot, _find_token
         home = jobpilot_home()
+        cfg = load_config()
         store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
         try:
             store.migrate()
-            from .score_runner import claude_scorer, score_all
-            from .config import load_config
-            cfg = load_config()
             for row in score_all(store, home, claude_scorer(
                     args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort)):
                 print(f"scoring: {row}")
-            bot = Bot(_load_token(home), home, store)
-            print(f"digests sent: {push_digests(store, bot.send)}")
-            print(f"job lists sent: {push_job_lists(store, bot.send_job_list)}")
+            key = os.environ.get("FO_API_KEY")
+            deliver(
+                store, cfg, home,
+                bot_factory=lambda: (lambda t: Bot(t, home, store) if t else None)(_find_token(home)),
+                fo_factory=lambda: FoClient(key, cfg.fo_url) if key else None,
+            )
         finally:
             store.close()
     return result.returncode

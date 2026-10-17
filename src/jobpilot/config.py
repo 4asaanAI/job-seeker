@@ -81,6 +81,10 @@ class Config:
     # subscription limit; "haiku" is the cheaper option.
     scoring_model: str = "claude-sonnet-5"
     scoring_effort: str = "low"
+    # Fo delivery (Wajo's assistant). One Fo account belongs to exactly one seeker.
+    fo_enabled: bool = False
+    fo_seeker_id: int | None = None
+    fo_url: str = "https://mcp.api.wajo.ai/fo"
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -213,6 +217,12 @@ def load_config(path: Path | None = None) -> Config:
             fetch_timeout_seconds=timeout,
         )
 
+    fo = raw.get("fo", {})
+    fo_enabled = fo.get("enabled", False)
+    if not isinstance(fo_enabled, bool):
+        raise ValueError('[fo] enabled must be true or false (no quotes)')
+    fo_seeker_id = int(fo["seeker_id"]) if fo.get("seeker_id") is not None else None
+
     base = home
     return Config(
         home=base,
@@ -222,6 +232,9 @@ def load_config(path: Path | None = None) -> Config:
         min_request_gap_seconds=float(raw["limits"]["min_request_gap_seconds"]),
         scoring_model=str(raw.get("scoring", {}).get("model") or "claude-sonnet-5"),
         scoring_effort=str(raw.get("scoring", {}).get("effort") or "low"),
+        fo_enabled=fo_enabled,
+        fo_seeker_id=fo_seeker_id,
+        fo_url=str(fo.get("url") or "https://mcp.api.wajo.ai/fo"),
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,

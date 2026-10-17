@@ -1,12 +1,12 @@
 {
   "mcpServers": {
     "jobpilot": {
-      "command": "E:\\Github\\Aasaan AI\\jobpilot\\.venv\\Scripts\\python.exe",
+      "command": "C:\\path\\to\\jobpilot\\.venv\\Scripts\\python.exe",
       "args": ["-m", "jobpilot.server"],
       "env": {
-        "JOBPILOT_HOME": "E:\\Github\\Aasaan AI\\jobpilot",
-        "JOBPILOT_DB": "E:\\Github\\Aasaan AI\\jobpilot\\data\\jobpilot.db",
-        "JOBPILOT_OUT": "E:\\Github\\Aasaan AI\\jobpilot\\out"
+        "JOBPILOT_HOME": "C:\\path\\to\\jobpilot",
+        "JOBPILOT_DB": "C:\\path\\to\\jobpilot\\data\\jobpilot.db",
+        "JOBPILOT_OUT": "C:\\path\\to\\jobpilot\\out"
       }
     }
   }

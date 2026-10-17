@@ -556,6 +556,14 @@ def _load_token(home: Path) -> str:
     raise SystemExit("TELEGRAM_BOT_TOKEN missing")
 
 
+def _find_token(home: Path) -> str | None:
+    """Like _load_token, but None when Telegram is not set up on this machine."""
+    try:
+        return _load_token(home)
+    except (OSError, SystemExit):
+        return None
+
+
 def _pid_alive(pid: int) -> bool:
     """True only if `pid` is currently running this module, not just any
     live process -- Windows recycles PIDs, so "alive" alone is a false

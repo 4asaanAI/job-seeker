@@ -318,13 +318,16 @@ def build_tools(
 
     def build_plain_digest(
         seeker_id: int, min_score: float = 70.0, limit: int = 5,
-        record: bool = False,
+        record: bool = False, channel: str = "telegram",
     ) -> dict:
-        """Build a Telegram-safe plain-text digest; HTML is never sent to chat."""
+        """Build a Telegram-safe plain-text digest; HTML is never sent to chat.
+
+        Pass the channel it will really be sent on, so the ledger is truthful.
+        """
         try:
             sid = _check(seeker_id)
             digest = render_plain_digest(
-                store, sid, min_score, limit, channel="telegram", record=record
+                store, sid, min_score, limit, channel=channel, record=record
             )
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -930,6 +933,10 @@ def build_tools(
 
 def main() -> None:
     """Run the stdio MCP server for Claude or another MCP client."""
+    pin = os.environ.get("JOBPILOT_SEEKER_ID")
+    if pin is not None and not pin.strip():
+        # An unset-looking pin must never silently widen a session to every seeker.
+        raise SystemExit("JOBPILOT_SEEKER_ID is set but empty: refusing to run unpinned")
     from fastmcp import FastMCP
 
     home = jobpilot_home()

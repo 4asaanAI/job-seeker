@@ -25,3 +25,4 @@ tests/fixtures/live/
 
 # Local Claude handoff transcript; never publish conversation history.
 2026-09-19-143438-local-command-caveatcaveat-the-messages-below.txt
+.mcp.json

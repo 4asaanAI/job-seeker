@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "jobpilot": {
+      "command": "python3",
+      "args": ["-m", "jobpilot.server"],
+      "env": {
+        "JOBPILOT_HOME": "${PWD}",
+        "JOBPILOT_DB": "${JOBPILOT_DB}",
+        "JOBPILOT_OUT": "${JOBPILOT_OUT}",
+        "JOBPILOT_SEEKER_ID": "${JOBPILOT_SEEKER_ID}"
+      }
+    },
+    "fo": {
+      "type": "http",
+      "url": "https://mcp.api.wajo.ai/fo",
+      "headers": { "Authorization": "Bearer ${FO_API_KEY}" }
+    }
+  }
+}

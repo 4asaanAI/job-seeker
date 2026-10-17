@@ -13,6 +13,13 @@ model = "claude-sonnet-5"
 # Thinking effort per scoring call: low | medium | high | xhigh | max.
 effort = "low"
 
+[fo]
+# Deliver this seeker's digest and follow-ups through Fo (Wajo's assistant) instead
+# of Telegram. One Fo account belongs to ONE seeker, so seeker_id is required when
+# enabled. The key is read from the FO_API_KEY environment variable, never from here.
+enabled = false
+# seeker_id = 1
+
 # ---- Official employer ATS JSON (R4) ----
 # Add one block per verified public JSON endpoint, then add the same source key
 # to the seeker's profile. Keep these disabled until the endpoint has been
@@ -155,7 +162,7 @@ search_term = "business analyst"
 results_wanted = 10
 min_results = 3
 
-# --- Employers chosen from seekers' resumes (live-tested 2026-09-19) ------
+# --- Employer boards (live-tested 2026-09-19) ------
 # Lever and Ashby boards use their official keyless JSON APIs (full descriptions).
 [ats_sources.palantir]
 vendor = "lever"

@@ -24,6 +24,18 @@ configured on this machine. The MCP
 surface also includes per-seeker status/history views, watchlists, and
 explicit one-page browser-investigation handoffs.
 
+## Fo x JobPilot (GSD hackathon)
+
+JobPilot finds and scores jobs; [Fo](https://wajo.ai) (Wajo's assistant, reached over MCP) does the
+real-world part: it texts you the matches, nudges you to follow up, and books the follow-up on your
+calendar. Claude holds both MCP servers, so you can ask in plain English, and an unattended run can
+deliver the daily digest through Fo instead of Telegram.
+
+See [docs/FO-DEMO.md](docs/FO-DEMO.md) for the architecture, the 60-second demo, and the safety
+choices (Fo can email, call and buy, so scraped job text never reaches it unfiltered). Try it with
+fictional data: `python scripts/fo_demo.py` (dry run) or `--send` with `FO_API_KEY` set.
+Status: the interactive Claude + Fo path is verified live; the unattended digest is tested with a fake Fo but not yet run against the real one.
+
 ## macOS development
 
 ```bash
