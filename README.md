@@ -59,8 +59,9 @@ through Fo, `prepare_application`, the fictional-data demo, and the real-server 
 Try it in two minutes with fictional data: `python scripts/fo_demo.py` (dry run, sends nothing). See
 [docs/FO-DEMO.md](docs/FO-DEMO.md) for the demo script and safety choices, and
 [docs/APPLYING.md](docs/APPLYING.md) to use it for your own search.
-Status: the interactive Claude + Fo path is verified live; the unattended digest is tested with a fake Fo
-but not yet run against the real one.
+Status: the interactive Claude + Fo path is verified live (texts and calendar). The unattended digest is tested
+with a fake Fo only: Wajo confirmed (Oct 17) that a headless API key and an inbound reply webhook are not released
+yet, so JobPilot cannot yet be triggered by a text to Fo. Both are on Wajo's roadmap.
 
 ## macOS development
 

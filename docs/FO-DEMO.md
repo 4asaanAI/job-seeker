@@ -29,6 +29,8 @@ and your replies inside Fo do not come back to JobPilot. Replying and acting hap
 - Calendar: verified. Through a Claude session, Fo created a calendar entry, and then deleted it (checked by the owner).
 - Interactive path (A): verified. `ask_fo` through a logged-in Claude session sent a real iMessage, and the
   reply shape (a text block holding JSON with `status`, `response`, `conversationId`) is covered by a test.
+- Wajo's answer (Oct 17): an API key for headless use and an inbound-reply webhook (conversation.reply) are not released yet.
+  So a text to Fo cannot trigger JobPilot, and unattended runs cannot call Fo with a key.
 - Scheduled notifier (B): covered by tests with a fake Fo, NOT yet run live. It needs `FO_API_KEY`, and the
   header the key goes in (`Authorization: Bearer`) is unconfirmed. A `working` (slow) reply has not been seen live.
 
