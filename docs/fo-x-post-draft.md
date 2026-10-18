@@ -8,7 +8,7 @@ Demo + code: https://github.com/4asaanAI/job-seeker @wajo_ai #GSDhackathon
 
 ## Option 2 (shorter)
 Built JobPilot x Fo: Claude finds the jobs, Fo does the real-world part (texts, calendar, follow-ups).
-Safe by design: Fo gets an id and a score, never the job post. 490 tests, real MCP end to end.
+Safe by design: Fo gets an id and a score, never the job post. 747 tests, real MCP end to end.
 https://github.com/4asaanAI/job-seeker @wajo_ai
 
 ## Attach

@@ -12,6 +12,8 @@ grammar that is re-checked here in Python, runs JobPilot locally, and answers th
     jp sync           Fo refreshes your "JobPilot Tracker" Google Sheet
     jp deck           Fo builds a themed Google Slides progress deck
     jp doc <id>       Fo puts your resume tailored to that job into a new Google Doc
+    jp replies        Fo checks your email for replies to your applications
+    jp interview <id> record the outcome yourself (also applied, rejected, withdrawn)
 
 Only `jp yes <code>` can cause an application, and Fo still asks you in its own chat before it submits unless you
 turned review mode off. The code is random, bound to one job, single use and expires in two hours, so a guessed or
@@ -45,13 +47,13 @@ from .server import build_tools
 from .server import MAX_DAILY_APPLY_REQUESTS
 from .store.db import Store
 
-GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck))\s*$",
+GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck)|(replies)|(applied|interview|rejected|withdrawn)\s+(\d{1,9}))\s*$",
                      re.IGNORECASE)
 MAX_COMMANDS = 3
 MAX_OPEN_CODES = 3
 MAX_DAILY_GOOGLE = 10
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
-HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp deck"
+HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp deck | jp replies | jp interview|rejected|applied|withdrawn <id>"
 
 
 class ClaudeReader:
@@ -267,6 +269,33 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
     return f"JobPilot: Fo did not confirm {what} ({result.status}). Try again later."
 
 
+def _replies(store: Store, sid: int, out_dir: Path, apply_client) -> str:
+    """Fo reads your own mailbox for replies. It only reports in its own chat; you record each outcome with jp <outcome> <id>."""
+    if apply_client is None:
+        return "JobPilot: no Fo transport is available."
+    if store.event_count_since(sid, "phone_replies", 24) >= MAX_DAILY_GOOGLE:
+        return "JobPilot: today's limit of reply checks by text is reached. Try again tomorrow."
+    built = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)["build_fo_sweep_replies_message"](sid)
+    if not built.get("ok"):
+        return f"JobPilot: no reply check: {clean(built.get('error'), 110)}."
+    if not built.get("message"):
+        return "JobPilot: no submitted applications to check yet."
+    store.record_event("phone_replies", "sweep", sid)
+    result = apply_client.send(built["message"])
+    if result.status == "complete":
+        return ("JobPilot: Fo is checking your email; it reports in your Fo chat. Then text jp interview <id> or "
+                "jp rejected <id> for each (the ids are in your tracker sheet).")
+    return f"JobPilot: Fo did not confirm the reply check ({result.status}). Try again later."
+
+
+def _outcome(store: Store, sid: int, out_dir: Path, status: str, posting_id: int) -> str:
+    """Your own word on how an application went. Records only; statuses never move backwards."""
+    done = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)["record_application"](sid, posting_id, status)
+    if not done.get("ok"):
+        return f"JobPilot: could not record id {posting_id}: {clean(done.get('error'), 110)}."
+    return f"JobPilot: id {posting_id} recorded as {status}."
+
+
 def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=None, google_on: bool = False) -> str:
     m = GRAMMAR.match(text)
     if not m:
@@ -289,6 +318,10 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
         return _google(store, sid, out_dir, apply_client, google_on, doc=None)
     if m.group(8):
         return _google(store, sid, out_dir, apply_client, google_on, doc="deck")
+    if m.group(9):
+        return _replies(store, sid, out_dir, apply_client)
+    if m.group(10):
+        return _outcome(store, sid, out_dir, m.group(10).lower(), int(m.group(11)))
     if m.group(7):
         return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(7)))
     return _tailor(store, sid, out_dir, int(m.group(3)))

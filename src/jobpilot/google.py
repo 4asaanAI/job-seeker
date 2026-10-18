@@ -15,7 +15,7 @@ from .joblist import _inert
 TRACKER_NAME = "JobPilot Tracker"
 DECK_NAME = "JobPilot Progress"
 EXPORT_FOLDER = "JobPilot Exports"
-STATUSES = ("match", "started", "applied", "interview", "rejected", "withdrawn", "expired")
+STATUSES = ("match", "started", "applied", "interview", "rejected", "withdrawn", "expired", "stale")
 RESUME_FOLDER = "JobPilot Resumes"
 HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated")
 MAX_APPS, MAX_MATCHES = 30, 10
@@ -46,7 +46,7 @@ TRACKER_FORMAT = (
     "column widths that fit (Job and Company wide, ID and Fit score narrow); ID and Fit score right-aligned as numbers; "
     "dates as YYYY-MM-DD; light grey banded rows; a dropdown on the Status column limited to: " + ", ".join(STATUSES) + "; "
     "conditional colours on Status (match = blue, started = amber, applied = green, interview = bold green, "
-    "rejected = red, withdrawn and expired = grey). Add a second tab named Summary with the count of rows per status "
+    "rejected = red, withdrawn, expired and stale = grey). Add a second tab named Summary with the count of rows per status "
     "(COUNTIF formulas on the Status column are fine there and only there) and a bar chart of those counts.\n")
 
 DOC_FORMAT = (
@@ -83,7 +83,8 @@ def tracker_message(rows: list[list[str]], export: bool = False) -> str:
         "create it if it does not exist (one tab). Row 1 is the header: " + " | ".join(HEADER) + ".\n"
         "The lines between the markers are tab-separated rows in the same column order. For each, update the row "
         "whose ID matches, or add a new row at the bottom. Never delete or reorder other rows, and write cells as plain "
-        "text, never as formulas. A blank cell here means unknown: keep what the sheet already has.\n" + TRACKER_FORMAT + _RULES +
+        "text, never as formulas. A blank cell here means unknown: keep what the sheet already has. A row whose Status is match "
+        "and whose ID is not between the markers is no longer among my best open matches: set its Status to stale, do not delete it.\n" + TRACKER_FORMAT + _RULES +
         "4. Afterwards tell me in one line how many rows you added and updated, and give me the sheet link.\n"
         + (_export("sheet") if export else "") +
         f"{marker}\n{body}\n{marker}")

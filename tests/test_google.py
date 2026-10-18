@@ -171,3 +171,37 @@ def test_phone_deck(env):
         {"conversationId": "c", "at": "2026-10-18T05:00:00Z", "text": "jp deck"}]),
         lambda to, t: sent.append(t), state, apply_client=fo, google_on=True)
     assert len(fo.messages) == 1 and "JobPilot Progress" in fo.messages[0] and "progress deck" in sent[0]
+
+
+_n = iter(range(10, 60))
+
+
+def _poll(env, *texts, fo=None):
+    store, sid, ids, tools, out, state = env
+    sent = []
+    msgs = [{"conversationId": "c", "at": f"2026-10-18T05:{next(_n)}:00Z", "text": t} for t in texts]
+    inbox.poll_once(store, sid, out, SimpleNamespace(fetch=lambda: msgs), lambda to, t: sent.append(t), state,
+                    apply_client=fo, google_on=True)
+    return sent
+
+
+def test_phone_outcome_records_and_never_moves_back(env):
+    store, sid, ids, *_ = env
+    store.record_application(sid, ids[0], "applied")
+    assert "recorded as interview" in _poll(env, f"jp interview {ids[0]}")[0]
+    _poll(env, f"jp applied {ids[0]}")
+    assert store.applications(sid)[0]["status"] == "interview"
+    assert "could not record" in _poll(env, "jp rejected 99999")[0]
+
+
+def test_phone_replies_sweeps_only_submitted(env):
+    store, sid, ids, *_ = env
+    fo = Fo()
+    assert "no submitted applications" in _poll(env, "jp replies", fo=fo)[0] and fo.messages == []
+    store.record_application(sid, ids[0], "applied")
+    assert "Fo is checking" in _poll(env, "jp replies", fo=fo)[0] and len(fo.messages) == 1
+
+
+def test_tracker_marks_dropped_matches_stale_not_deleted():
+    m = google.tracker_message([["1", "A", "B", "match", "80", "", ""]])
+    assert "stale" in m and "do not delete" in m and "Never delete" in m
