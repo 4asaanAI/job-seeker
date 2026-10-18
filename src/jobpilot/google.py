@@ -34,6 +34,10 @@ _RULES = (
     "folder of that name that someone else shared with me, and create my own if I have none. Do not share it with anyone, "
     "change its sharing, make it public, or put it in a folder that is shared with anyone.\n"
     "3. Do not send any email or message, create any calendar event, call anyone or buy anything.\n")
+_RULES_TEXT_ME = _RULES.replace(
+    "3. Do not send any email or message, create any calendar event, call anyone or buy anything.\n",
+    "3. Do not send any email, create any calendar event, call anyone or buy anything, and send no message to anyone else. "
+    "The only message you may send is the single text to ME described in rule 4.\n")
 
 
 _SHEET_URL = re.compile(r"https://docs\.google\.com/spreadsheets/d/([A-Za-z0-9_-]{25,80})")
@@ -140,7 +144,8 @@ def tracker_inputs(store, seeker_id: int, home: Path | None = None, today: str |
     return tracker_rows(store.applications(seeker_id, 500), store.tracked_jobs(seeker_id, min_score, today))
 
 
-def tracker_message(rows: list[list[str]], export: bool = False, link: str | None = None) -> str:
+def tracker_message(rows: list[list[str]], export: bool = False, link: str | None = None,
+                    text_me: bool = False) -> str:
     marker, body = _fence("\n".join("\t".join(r) for r in rows))
     sheet = _SHEET_URL.search(link or "")
     where = (
@@ -160,9 +165,10 @@ def tracker_message(rows: list[list[str]], export: bool = False, link: str | Non
         "stale or deadline passed once its Status is started, applied, interview, offer, rejected or withdrawn; any other Status "
         "given for a row is the new one. A row whose Status is match and whose ID is not between the markers is no longer "
         "among my top matches: set its Status to stale, do not delete it. Write dates as real YYYY-MM-DD dates so the "
-        "date counts on the Summary tab work.\n" + TRACKER_FORMAT + _RULES +
+        "date counts on the Summary tab work.\n" + TRACKER_FORMAT + (_RULES_TEXT_ME if text_me else _RULES) +
         "4. Afterwards tell me in one line how many rows you added and updated, the final total number of data rows, and give "
-        "me the sheet link. Remember it as my job tracker: whenever I ask for it, text me its link.\n"
+        "me the sheet link. Remember it as my job tracker: whenever I ask for it, text me its link."
+        + (" Also send me that same one line, with the link, as a single text message to my phone." if text_me else "") + "\n"
         + (_export("sheet") if export else "") +
         f"{marker}\n{body}\n{marker}")
 
@@ -201,7 +207,8 @@ def cover_letter_message(posting_id: int, letter_text: str, export: bool = False
         f"{marker}\n{body}\n{marker}")
 
 
-def send_tracker(store, seeker_id: int, client, home: Path | None = None, today: str | None = None):
+def send_tracker(store, seeker_id: int, client, home: Path | None = None, today: str | None = None,
+                 text_me: bool = False):
     """Ask Fo (through an already vetted client) to refresh the tracker sheet.
 
     None when there is nothing to record; BUSY when another refresh started in the last 30 minutes has not finished
@@ -214,7 +221,7 @@ def send_tracker(store, seeker_id: int, client, home: Path | None = None, today:
         return BUSY
     saved = store.tracker_link(seeker_id)
     try:
-        result = client.send(tracker_message(rows, link=saved))
+        result = client.send(tracker_message(rows, link=saved, text_me=text_me))
     except Exception:
         store.finish_tracker(seeker_id, claim)
         raise

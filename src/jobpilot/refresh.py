@@ -82,7 +82,8 @@ def main() -> int:
                 print("deliver: needs [fo] enabled with this seeker_id")
                 return 2
             from .scheduled import deliver, make_fo_client
-            deliver(store, cfg, home, bot_factory=lambda: None, fo_factory=lambda: make_fo_client(cfg, args.claude))
+            deliver(store, cfg, home, bot_factory=lambda: None, fo_factory=lambda: make_fo_client(cfg, args.claude),
+                    tracker_text_me=True)          # you asked for this run, so Fo also texts you the update and the link
             print(f"tracker link: {store.tracker_link(sid) or 'none yet'}")
         return 0
     finally:

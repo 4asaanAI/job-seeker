@@ -79,7 +79,7 @@ def make_fo_client(cfg, claude_bin: str = "claude"):
     return None
 
 
-def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
+def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory, tracker_text_me: bool = False) -> None:
     """Push digests and follow-ups. Each channel is guarded so one cannot block the other.
 
     A seeker served through Fo is skipped on Telegram: the "already told"
@@ -107,7 +107,7 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
                     if cfg.google_enabled:         # its own guard: a failed digest must not skip the sheet
                         try:
                             from .google import send_tracker
-                            result = send_tracker(store, cfg.fo_seeker_id, fo_client, home=home)
+                            result = send_tracker(store, cfg.fo_seeker_id, fo_client, home=home, text_me=tracker_text_me)
                             print(f"google tracker: {result.status if result else 'nothing to record'}")
                         except Exception as exc:  # noqa: BLE001
                             print(f"google tracker failed: {type(exc).__name__}: {exc}")

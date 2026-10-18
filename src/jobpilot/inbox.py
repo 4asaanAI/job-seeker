@@ -259,7 +259,7 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
         result, what = apply_client.send(built["message"]), "your progress deck"
     elif doc is None:
         try:
-            result = google.send_tracker(store, sid, apply_client)
+            result = google.send_tracker(store, sid, apply_client, text_me=True)
         except BaseException:
             store.record_event("phone_google", "sync", sid)           # a failed attempt still used a Fo turn
             raise
@@ -361,7 +361,7 @@ def _refresh_tracker(store: Store, sid: int, apply_client) -> None:
     if store.event_count_since(sid, "phone_tracker", 24) >= MAX_DAILY_TRACKER:
         return
     try:
-        result = google.send_tracker(store, sid, apply_client)
+        result = google.send_tracker(store, sid, apply_client, text_me=True)
     except Exception:  # noqa: BLE001 - it was tried, so it counts
         store.record_event("phone_tracker", "refresh", sid)
         return
