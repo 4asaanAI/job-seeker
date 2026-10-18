@@ -22,6 +22,39 @@
 - Commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 - Match surrounding style: type hints, short docstrings, no new abstractions beyond what each task names.
 
+## Review amendments (supersede the task text below wherever they differ)
+
+Three independent reviews (plan-correctness, adversarial red team, five-voice roundtable) found the following. Each is accepted unless marked REJECTED.
+
+**Letter (Task 1)**
+- A1. The job title stays OUT of the letter body (a hostile-but-clean title inside an "EXACTLY" block could be read as the user's data). Opening: "I am writing to apply for the role at {company}." The headline moves to the signature block under the name.
+- A2. Two bullets, each followed by its employer in brackets; heading "Work most relevant to this role:" only when a bullet shares a term with the job, else "From my experience:". Skills line only when at least two skills match. The company name must not have been truncated by `clean` (refuse the letter if it was).
+- A3. Rank only the bullets the application actually uses: `top_bullets` honours `experience_order` and `bullet_order`.
+- A4. Letters in applications are OFF by default: config `[apply] cover_letters = false`. When on, rule 8 says: use the letter ONLY where the form REQUIRES a cover letter, leave optional fields empty, answer every other question from the resume text only. With Google off, only a text box or email body (an upload field means stop). The rule number follows the previous one (7 or 8). The Doc is named "JobPilot cover letter - job <id>" and Fo must create a new one, never reuse. `jp apply` previews say a letter will be used when the form requires one.
+- A5. The existing lines in `docs/APPLYING.md` and `docs/KNOWN-LIMITS.md` that say a cover letter makes Fo stop are updated.
+
+**Resume builder (Task 2)**
+- B1. REPLACED: no per-field prompt loop. `resume/build.py` offers `TEMPLATE` (a fill-in text file) and `parse_template(text) -> dict`, a deterministic line parser (`NAME:`, `HEADLINE:`, `CONTACT: a | b`, `SUMMARY:`, `JOB: employer | title | dates` followed by `- bullet` lines, `EDUCATION: school | degree | dates`, `SKILLS: a, b`, `#` comments). Errors name the line. Setup opens it in TextEdit (`open -e`), waits for Enter, shows the result, asks to save, and loops on errors without losing anything.
+- B2. Relaxed: a job with a bullet OR an education entry is enough (fresh graduates). Name, headline and one skill are still required.
+- B3. `verify_structured` catches any loading error (including `AttributeError`) and the saved dict is reduced to the known keys with `required_facts` dropped; every text value is screened with `apply._instruction_like`.
+
+**Setup (Task 3)**
+- C1. Never default to the first seeker: with one or more existing seekers the user picks an id or `new`. An existing seeker without `base_resume.yaml` gets the resume step again (repair).
+- C2. The folder name is checked right after the name is typed, before any long typing.
+- C3. The upload path also shows the resume and asks "Save this?". The final write goes through the server's `save_base_resume`, which re-verifies and replaces atomically. `verify_structured` stays for the pre-save check and the retry text.
+- C4. The headless call is hardened like `inbox.ClaudeReader`: `claude_scorer(..., neutral=True)` runs in an empty temp directory with `--setting-sources user`. `subprocess.SubprocessError` is caught. If structuring fails (not logged in, timeout, rejected facts), setup falls back to the template, whose values are verified against the uploaded file's text.
+- C5. `available_sources` comes from the server's real catalog (`build_tools(...)["available_sources"]`), not a copy.
+- C6. `.mcp.json` is written after the Fo question and includes the `fo` server when Fo is on (copied from `.mcp.fo-demo.json.example`).
+- C7. CUT from the wizard: the launchd install and `.mcp.scheduled.json`. Setup prints the two copy-paste commands from GETTING-STARTED instead. (This replaces the "install after a yes" default; fewer places to break, same result for the user.)
+- C8. Drag-and-drop paths go through `shlex.split` and re-ask when the file is missing. Ctrl-C and EOF print one plain line; a re-run repairs. `onboard(..., min_text=...)` lets a short built resume through (200 characters stays the default for uploaded files, where it detects scanned images).
+- C9. Tests: `JOBPILOT_HOME` set with monkeypatch, every scripted answer must be consumed, doctor stubbed so exit codes are exact, a unique marker string in the leak test, more-than-one-seeker and repair cases, parser negative cases.
+
+**Housekeeping**
+- D1. Task 0 is dropped (`data/fo_inbox_seen.json` is already untracked). Task 4 no longer stashes.
+- D2. GETTING-STARTED says plainly that Python 3.12 and Claude Code come first; "one command" means one command after installing them.
+
+**Not done, recorded as limits:** `unverified_facts` checks each value on its own, so a model could move a real bullet to the wrong employer; the preview-and-confirm step is the defence. Skills of two letters or fewer never match a job. Pilot structuring on two or three real resumes before relying on it.
+
 ## File Structure
 
 | File | Action | Responsibility |
