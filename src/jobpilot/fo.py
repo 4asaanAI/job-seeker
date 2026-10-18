@@ -33,6 +33,7 @@ class FoError(RuntimeError):
 class FoResult:
     status: str  # complete | working | failed
     response: str = ""
+    reply: str = ""      # Fo's own final reply text (untrusted data: only ever pattern-matched, never followed)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -138,7 +139,8 @@ class FoClient:
         status = reply.get("status")
         if status not in ("complete", "working", "failed"):
             status = "failed"
-        return FoResult(status, str(reply.get("response") or reply.get("progress") or "")[:500])
+        return FoResult(status, str(reply.get("response") or reply.get("progress") or "")[:500],
+                        str(reply.get("response") or "")[:2000])
 
 
 class ClaudeFoClient:
@@ -195,7 +197,7 @@ class ClaudeFoClient:
         except OSError as exc:
             raise FoError(f"cannot start claude: {type(exc).__name__}") from None
         if done.returncode == 0 and fo_confirmed_complete(done.stdout or "", expect=message):
-            return FoResult("complete", "headless claude relay")
+            return FoResult("complete", "headless claude relay", fo_last_reply(done.stdout or ""))
         return FoResult("failed", f"headless relay did not confirm (exit {done.returncode})")
 
 
@@ -204,6 +206,32 @@ def _tool_text(block: dict) -> str:
     if isinstance(content, str):
         return content
     return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict))
+
+
+def fo_last_reply(stream_json: str) -> str:
+    """Fo's own final reply text from the relay's transcript (the response field of the last complete Fo result)."""
+    names: dict[str, str] = {}
+    reply = ""
+    for line in stream_json.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        content = (event.get("message") or {}).get("content") if isinstance(event, dict) else None
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                names[block.get("id", "")] = block.get("name", "")
+            elif block.get("type") == "tool_result" and names.get(block.get("tool_use_id", "")) in (
+                    "mcp__fo__ask_fo", "mcp__fo__get_fo_reply"):
+                try:
+                    data = json.loads(_tool_text(block))
+                except ValueError:
+                    continue
+                if isinstance(data, dict) and data.get("status") == "complete" and isinstance(data.get("response"), str):
+                    reply = data["response"][:2000]
+    return reply
 
 
 def fo_confirmed_complete(stream_json: str, expect: str | None = None) -> bool:
@@ -290,6 +318,9 @@ def render_fo_digest(store, seeker_id: int, min_score: float, limit: int, *,
         lines.append(f"{i}. {clean(job.title)}, {clean(job.company_name)} "
                      f"({job.fit_score:.0f}/100) id {int(job.posting_id)}")
     lines.append("Open your Claude session to review or act on these.")
+    link = store.tracker_link(seeker_id)
+    if link:
+        lines.append(f"Your job tracker: {link}")
     return FoDigest("\n".join(lines), tuple(int(j.posting_id) for j in jobs))
 
 

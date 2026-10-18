@@ -13,6 +13,7 @@ grammar that is re-checked here in Python, runs JobPilot locally, and answers th
     jp deck           Fo builds a themed Google Slides progress deck
     jp doc <id>       Fo puts your resume tailored to that job into a new Google Doc
     jp letter <id>    Fo puts a cover letter built from your own resume into a new Google Doc
+    jp link           the link to your JobPilot Tracker sheet (jp link reset forgets it)
     jp replies        Fo checks your email for replies to your applications
     jp interview <id> record the outcome yourself (also applied, rejected, withdrawn)
 
@@ -48,14 +49,14 @@ from .server import build_tools
 from .server import MAX_DAILY_APPLY_REQUESTS
 from .store.db import Store
 
-GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck)|(replies)|(applied|interview|rejected|withdrawn)\s+(\d{1,9})|letter\s+(\d{1,9}))\s*$",
+GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck)|(replies)|(applied|interview|rejected|withdrawn)\s+(\d{1,9})|letter\s+(\d{1,9})|(link)(?:\s+(reset))?)\s*$",
                      re.IGNORECASE)
 MAX_COMMANDS = 3
 MAX_OPEN_CODES = 3
 MAX_DAILY_GOOGLE = 10
 MAX_DAILY_TRACKER = 5          # sheet refreshes started by outcome texts
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
-HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp letter <id> | jp deck | jp replies | jp interview|rejected|applied|withdrawn <id>"
+HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp letter <id> | jp link | jp deck | jp replies | jp interview|rejected|applied|withdrawn <id>"
 
 
 class ClaudeReader:
@@ -339,6 +340,12 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
         return _replies(store, sid, out_dir, apply_client)
     if m.group(10):
         return _outcome(store, sid, out_dir, m.group(10).lower(), int(m.group(11)))
+    if m.group(13):
+        if m.group(14):
+            store.reset_tracker_link(sid)
+            return "JobPilot: forgot the saved sheet link. The next jp sync finds or creates the sheet again."
+        link = store.tracker_link(sid)
+        return f"JobPilot: your job tracker: {link}" if link else "JobPilot: no tracker sheet yet. Text jp sync to create it."
     if m.group(12):
         return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(12)), kind="letter")
     if m.group(7):
@@ -401,9 +408,11 @@ def _locked(path: Path):
 
 def _safe_reply(store: Store, sid: int, out_dir: Path, text: str, apply_client=None, google_on: bool = False) -> str:
     try:
-        return reply_for(store, sid, out_dir, text, apply_client, google_on)
+        reply = reply_for(store, sid, out_dir, text, apply_client, google_on)
     except Exception as exc:  # noqa: BLE001 - one bad command must not block the inbox
         return f"JobPilot: that command failed ({type(exc).__name__})."
+    link = store.tracker_link(sid)
+    return f"{reply}\nYour job tracker: {link}" if link and reply != HELP and link not in reply else reply
 
 
 def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_path: Path,

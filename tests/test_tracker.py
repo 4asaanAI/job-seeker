@@ -461,3 +461,94 @@ def test_a_failed_digest_is_reported_and_the_sheet_still_goes(env, capsys):
     deliver(store, cfg, home, bot_factory=lambda: None, fo_factory=lambda: SimpleNamespace(send=send))
     shown = capsys.readouterr()
     assert "failed: FoError: digest down" in shown.out + shown.err and "google tracker: complete" in shown.out
+
+
+# ---- the sheet link ----------------------------------------------------------------------------------------------------
+
+SHEET = "https://docs.google.com/spreadsheets/d/1R1f9aN3Buj5Hm7kha9uxu8R97ZosSOV33qa8G35Le2M/edit?usp=drivesdk"
+CANON = "https://docs.google.com/spreadsheets/d/1R1f9aN3Buj5Hm7kha9uxu8R97ZosSOV33qa8G35Le2M/edit"
+
+
+class TalkingFo(Fo):
+    """A Fo that answers with text, like the real one."""
+    def __init__(self, reply, **kw):
+        super().__init__(**kw)
+        self.text = reply
+
+    def send(self, message):
+        super().send(message)
+        return SimpleNamespace(status=self.status, response="", reply=self.text)
+
+
+@pytest.mark.parametrize("text,expected", [
+    (f"Created it: [JobPilot Tracker]({SHEET})", CANON),
+    ("see https://docs.google.com/spreadsheets/d/abc/edit", None),                         # too short to be an id
+    ("https://evil.example.com/docs.google.com/spreadsheets/d/" + "a" * 30, None),
+    ("http://docs.google.com/spreadsheets/d/" + "a" * 30, None),                            # not https
+    ("https://docs.google.com/document/d/" + "a" * 30, None),                               # not a sheet
+    ("", None), (None, None)])
+def test_only_a_real_sheet_link_is_accepted(text, expected):
+    assert google.sheet_link(text) == expected
+
+
+def test_the_first_link_from_fo_is_saved_and_used_by_id_afterwards(env):
+    store, sid, ids, tools, out, state, home = env
+    assert store.tracker_link(sid) is None
+    first = TalkingFo(f"Created JobPilot Tracker: 10 rows. {SHEET}")
+    assert google.send_tracker(store, sid, first, home).status == "complete"
+    assert store.tracker_link(sid) == CANON
+    assert "Find it, or create it" in first.messages[0]                       # first time: by name
+    second = TalkingFo("Updated.")
+    google.send_tracker(store, sid, second, home)
+    assert "its id is 1R1f9aN3Buj5Hm7kha9uxu8R97ZosSOV33qa8G35Le2M" in second.messages[0]
+    assert "do not create another sheet" in second.messages[0] and "Find it, or create it" not in second.messages[0]
+    assert "whenever I ask for it, text me its link" in second.messages[0]
+
+
+def test_a_different_link_later_is_recorded_but_never_swapped_in(env):
+    store, sid, ids, tools, out, state, home = env
+    google.send_tracker(store, sid, TalkingFo(SHEET), home)
+    other = "https://docs.google.com/spreadsheets/d/" + "Z" * 33 + "/edit"
+    google.send_tracker(store, sid, TalkingFo(f"new one {other}"), home)
+    assert store.tracker_link(sid) == CANON
+    assert store.conn.execute("SELECT detail FROM events WHERE kind = 'tracker_link_mismatch'").fetchone()[0] == other
+
+
+def test_no_link_is_saved_from_a_failed_or_linkless_reply(env):
+    store, sid, ids, tools, out, state, home = env
+    google.send_tracker(store, sid, TalkingFo(SHEET, status="failed"), home)
+    google.send_tracker(store, sid, TalkingFo("Done, no link here."), home)
+    assert store.tracker_link(sid) is None
+
+
+def test_jp_link_shows_resets_and_every_reply_carries_the_link(env):
+    store, sid, ids, tools, out, state, home = env
+    fo = Fo()
+    n, sent = _poll(env, ["jp link"], fo)
+    assert "no tracker sheet yet" in sent[0]
+    store.pin_tracker_link(sid, CANON)
+    n, sent = _poll(env, ["jp link", "jp status", "jp matches"], fo)
+    assert sent[0].count(CANON) == 1 and sent[1].endswith(f"Your job tracker: {CANON}") and CANON in sent[2]
+    n, sent = _poll(env, ["jp link reset"], fo)
+    assert store.tracker_link(sid) is None and "forgot" in sent[0]
+    assert inbox.GRAMMAR.match("jp link") and inbox.GRAMMAR.match("JP LINK RESET") and not inbox.GRAMMAR.match("jp link now")
+
+
+def test_the_digest_carries_the_link_and_the_tool_reports_it(env):
+    from jobpilot.fo import render_fo_digest
+    store, sid, ids, tools, *_ = env
+    assert "Your job tracker" not in render_fo_digest(store, sid, 70.0, 5).text
+    assert tools["my_tracker_link"](sid) == {**tools["my_tracker_link"](sid), "ok": True, "link": None}
+    store.pin_tracker_link(sid, CANON)
+    assert render_fo_digest(store, sid, 70.0, 5).text.endswith(f"Your job tracker: {CANON}")
+    assert tools["my_tracker_link"](sid)["link"] == CANON
+
+
+def test_the_relay_reply_text_is_read_from_the_transcript():
+    import json
+    from jobpilot.fo import fo_last_reply
+    lines = [json.dumps({"message": {"content": [{"type": "tool_use", "id": "1", "name": "mcp__fo__ask_fo", "input": {}}]}}),
+             json.dumps({"message": {"content": [{"type": "tool_result", "tool_use_id": "1", "content": json.dumps(
+                 {"status": "complete", "response": f"done {SHEET}"})}]}})]
+    assert google.sheet_link(fo_last_reply("\n".join(lines))) == CANON
+    assert fo_last_reply("not json") == ""

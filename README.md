@@ -75,7 +75,7 @@ diff it yourself: [all changes since the last pre-hackathon commit](https://gith
 | Facts-only resume tailoring | `src/jobpilot/resume/tailor.py` |
 | Search, score and list on demand | `src/jobpilot/refresh.py` |
 | One-command setup, resume builder, facts-only cover letter | `src/jobpilot/setup.py`, `resume/build.py`, `resume/letter.py` |
-| Text-Fo inbox (experimental, not verified live; includes jp apply / jp yes, jp replies and outcome commands) | `src/jobpilot/inbox.py` |
+| Text-Fo inbox (experimental; texts typed in iMessage are NOT visible to it, see KNOWN-LIMITS; includes jp apply / jp yes, jp replies and outcome commands) | `src/jobpilot/inbox.py` |
 | Injection attack demo and fictional-data demo | `scripts/injection_demo.py`, `scripts/fo_demo.py` |
 | Real-server MCP tests (listing, pinning, malformed and hostile input) | `tests/test_mcp_judge.py`, `tests/test_mcp_stdio.py` |
 | Two independent code reviews, fixes and known limits | `docs/KNOWN-LIMITS.md` |
@@ -87,7 +87,7 @@ About 19,800 lines of code, tests and scripts in 177 commits; 747 tests.
 | Verified live | Built and tested, not live |
 |---|---|
 | Claude -> Fo texts and calendar create/delete | `api` transport (Wajo has not released headless keys) |
-| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released). A polling inbox is built and tested with a fake Fo; live, Fo's transcript API did not expose my test text yet |
+| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released). A polling inbox is built and tested with a fake Fo; live (checked 2026-10-18), Fo's transcript API returns only Fo's own messages in iMessage/SMS threads, never yours, so `jp` texts typed there are never seen |
 | Real Fo permission prompt shows the exact vetted message | |
 
 More: [docs/FO-DEMO.md](docs/FO-DEMO.md) (demo and safety choices) · [docs/APPLYING.md](docs/APPLYING.md) (using it for your own search).

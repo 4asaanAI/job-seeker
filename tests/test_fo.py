@@ -66,7 +66,7 @@ def client(*bodies, **kw):
 
 def test_complete_reply():
     c, op = client(reply("complete", response="sent"))
-    assert c.send("hi") == FoResult("complete", "sent")
+    assert c.send("hi") == FoResult("complete", "sent", "sent")          # the reply text is kept for link capture
     assert op.sent(0)["name"] == "ask_fo"
     assert op.sent(0)["arguments"] == {"message": "hi", "newConversation": True}
 

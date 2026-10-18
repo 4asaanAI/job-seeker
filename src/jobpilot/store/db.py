@@ -1357,6 +1357,24 @@ class Store:
         """Release exactly this claim (a late finisher cannot release somebody else's)."""
         self.record_event("tracker_done", str(claim_id), seeker_id)
 
+    def tracker_link(self, seeker_id: int) -> str | None:
+        """The saved link to this seeker's tracker sheet (taken from Fo's own reply), unless it was reset."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT kind, detail FROM events WHERE seeker_id = ? AND kind IN ('tracker_link', 'tracker_link_reset') "
+                "ORDER BY id DESC LIMIT 1", (seeker_id,)).fetchone()
+        return row["detail"] if row and row["kind"] == "tracker_link" else None
+
+    def pin_tracker_link(self, seeker_id: int, url: str) -> bool:
+        """Save the link the first time only (True when it was saved); a later, different one is never swapped in."""
+        if self.tracker_link(seeker_id):
+            return False
+        self.record_event("tracker_link", url, seeker_id)
+        return True
+
+    def reset_tracker_link(self, seeker_id: int) -> None:
+        self.record_event("tracker_link_reset", "", seeker_id)
+
     def pending_followups(self, seeker_id: int, limit: int = 5) -> list[dict]:
         """Return deliberate 3-day nudges and 7-day expiry candidates."""
         limit = max(0, min(int(limit), 100))

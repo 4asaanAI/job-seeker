@@ -24,7 +24,7 @@ STATUSES = ("match", "started", "applied", "interview", "rejected", "withdrawn",
 RESUME_FOLDER = "JobPilot Resumes"
 HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated", "First seen", "Deadline")
 MAX_ROWS, MAX_APPS, MAX_CLOSED = 100, 50, 15          # one request, so the cap is on the whole request
-BUSY = SimpleNamespace(status="busy", response="")      # another refresh of the sheet is still running
+BUSY = SimpleNamespace(status="busy", response="", reply="")      # another refresh of the sheet is still running
 
 _RULES = (
     "Rules, all of them:\n"
@@ -34,6 +34,16 @@ _RULES = (
     "folder of that name that someone else shared with me, and create my own if I have none. Do not share it with anyone, "
     "change its sharing, make it public, or put it in a folder that is shared with anyone.\n"
     "3. Do not send any email or message, create any calendar event, call anyone or buy anything.\n")
+
+
+_SHEET_URL = re.compile(r"https://docs\.google\.com/spreadsheets/d/([A-Za-z0-9_-]{25,80})")
+
+
+def sheet_link(text: object) -> str | None:
+    """The tracker sheet's link, only when the text holds a real Google Sheets URL; rebuilt from its id, so no extra
+    path, query or lookalike text can come along."""
+    m = _SHEET_URL.search(str(text or ""))
+    return f"https://docs.google.com/spreadsheets/d/{m.group(1)}/edit" if m else None
 
 
 def _fence(body: str) -> tuple[str, str]:
@@ -130,11 +140,17 @@ def tracker_inputs(store, seeker_id: int, home: Path | None = None, today: str |
     return tracker_rows(store.applications(seeker_id, 500), store.tracked_jobs(seeker_id, min_score, today))
 
 
-def tracker_message(rows: list[list[str]], export: bool = False) -> str:
+def tracker_message(rows: list[list[str]], export: bool = False, link: str | None = None) -> str:
     marker, body = _fence("\n".join("\t".join(r) for r in rows))
-    return (
+    sheet = _SHEET_URL.search(link or "")
+    where = (
+        f'Please keep my job search record in the Google Sheet "{TRACKER_NAME}" that you made for me earlier; its id is '
+        f"{sheet.group(1)}. Open it by that id; if you cannot open it, tell me and do not create another sheet. "
+        if sheet else
         f'Please keep my job search record in a Google Sheet named "{TRACKER_NAME}" in my Google Drive. Find it, or '
-        "create it if it does not exist (it starts with one tab). Row 1 is the header: " + " | ".join(HEADER) + ".\n"
+        "create it if it does not exist (it starts with one tab). ")
+    return (
+        where + "Row 1 is the header: " + " | ".join(HEADER) + ".\n"
         "The lines between the markers are tab-separated rows in the same column order. Match every cell to its column by the "
         "header NAME in row 1, not by position: if First seen or Deadline is missing from row 1, add them after the last used "
         "header, and never write into a column whose header is not in that list. Read column A once, then write all the rows "
@@ -146,7 +162,7 @@ def tracker_message(rows: list[list[str]], export: bool = False) -> str:
         "among my top matches: set its Status to stale, do not delete it. Write dates as real YYYY-MM-DD dates so the "
         "date counts on the Summary tab work.\n" + TRACKER_FORMAT + _RULES +
         "4. Afterwards tell me in one line how many rows you added and updated, the final total number of data rows, and give "
-        "me the sheet link.\n"
+        "me the sheet link. Remember it as my job tracker: whenever I ask for it, text me its link.\n"
         + (_export("sheet") if export else "") +
         f"{marker}\n{body}\n{marker}")
 
@@ -196,13 +212,20 @@ def send_tracker(store, seeker_id: int, client, home: Path | None = None, today:
     claim = store.claim_tracker(seeker_id)
     if claim is None:
         return BUSY
+    saved = store.tracker_link(seeker_id)
     try:
-        result = client.send(tracker_message(rows))
+        result = client.send(tracker_message(rows, link=saved))
     except Exception:
         store.finish_tracker(seeker_id, claim)
         raise
     if result.status != "working":
         store.finish_tracker(seeker_id, claim)
+    if result.status == "complete":
+        found = sheet_link(getattr(result, "reply", "") or result.response)
+        if found and saved is None:
+            store.pin_tracker_link(seeker_id, found)               # first link wins: later sends open the sheet by id
+        elif found and found != saved:
+            store.record_event("tracker_link_mismatch", found, seeker_id)      # never swapped in silently
     return result
 
 

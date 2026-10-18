@@ -2,6 +2,7 @@
 
     python -m jobpilot.refresh                 # for [fo] seeker_id (or --seeker N); search + score + plan
     python -m jobpilot.refresh --no-search     # only score the backlog and show the plan
+    python -m jobpilot.refresh --deliver       # then text the new matches through Fo and refresh the tracker sheet
 
 Nothing is applied here: the plan is a read-only list; applying is a separate, approved step (docs/APPLYING.md).
 """
@@ -44,6 +45,8 @@ def main() -> int:
     parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--claude", default="claude")
     parser.add_argument("--no-search", action="store_true")
+    parser.add_argument("--deliver", action="store_true",
+                        help="after searching, text the new matches through Fo and refresh the tracker sheet (needs [fo])")
     parser.add_argument("--max-batches", type=int, default=5, help="scoring batches of 20 jobs (cost cap)")
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -74,6 +77,13 @@ def main() -> int:
         print(f"{len(items)} job(s) Fo can plausibly apply to:")
         for i in items:
             print(f"  id {i['posting_id']} ({i['score']:.0f}) {i['title'][:50]}, {i['company'][:30]} [{i['route']}]")
+        if args.deliver:
+            if not cfg.fo_enabled or cfg.fo_seeker_id != sid:
+                print("deliver: needs [fo] enabled with this seeker_id")
+                return 2
+            from .scheduled import deliver, make_fo_client
+            deliver(store, cfg, home, bot_factory=lambda: None, fo_factory=lambda: make_fo_client(cfg, args.claude))
+            print(f"tracker link: {store.tracker_link(sid) or 'none yet'}")
         return 0
     finally:
         store.close()

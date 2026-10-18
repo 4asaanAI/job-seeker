@@ -918,6 +918,17 @@ def build_tools(
     # The public tool is the core without the phone-approval parameter: only the text inbox may use that.
     build_fo_apply_message.__doc__ = re.sub(r"\n        phone_code is only.*?yourself\.\n", "", _apply_core.__doc__, flags=re.S)
 
+    def my_tracker_link(seeker_id: int) -> dict:
+        """The link to this user's "JobPilot Tracker" Google Sheet, taken from Fo's own reply the first time it made the
+        sheet. READ ONLY. Give it to the user whenever you report an update or they ask for it; null means no sheet yet
+        (build_fo_tracker_message creates one)."""
+        try:
+            sid = _check(seeker_id)
+            return {"ok": True, "seeker_id": sid, "link": store.tracker_link(sid),
+                    "note": "A Google Sheets link saved from Fo's reply. Show it as a link; never open it for the user."}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
     def build_fo_tracker_message(seeker_id: int, export_xlsx: bool = False) -> dict:
         """Build ONE request asking Fo to update the "JobPilot Tracker" Google Sheet with every application and good
         open match. SENDS NOTHING. Pass `message` to ask_fo unchanged (user's permission prompt applies). Fo writes
@@ -1270,6 +1281,7 @@ def build_tools(
         "build_fo_apply_message": build_fo_apply_message,
         "_apply_core": _apply_core,                 # private: the text inbox uses phone_code; never registered with MCP
         "build_fo_tracker_message": build_fo_tracker_message,
+        "my_tracker_link": my_tracker_link,
         "build_fo_deck_message": build_fo_deck_message,
         "build_fo_resume_doc_message": build_fo_resume_doc_message,
         "build_fo_cover_letter_message": build_fo_cover_letter_message,
