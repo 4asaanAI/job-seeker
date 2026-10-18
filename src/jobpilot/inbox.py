@@ -418,9 +418,11 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
             fp = fingerprint(msg)
             if fp not in seen and all(fp != t[0] for t in todo):
                 todo.append((fp, msg["text"]))
-        done, failure, changed = 0, None, False
+        done, failure, changed, synced = 0, None, False, False
         for fp, text in todo[:max_commands]:
             reply = _safe_reply(store, seeker_id, out_dir, text, apply_client, google_on)
+            changed = changed or bool(_CHANGED.match(reply))           # the command's effect, whether or not the reply is delivered
+            synced = synced or "updated your tracker sheet" in reply
             try:
                 send(None, reply)             # raises unless Fo confirms
             except FoError as exc:
@@ -429,8 +431,7 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
             seen[fp] = time.time()
             _save(state_path, seen)
             done += 1
-            changed = changed or bool(_CHANGED.match(reply))
-        if changed and google_on and apply_client is not None:
+        if changed and not synced and google_on and apply_client is not None:       # jp sync in this poll already refreshed it
             _refresh_tracker(store, seeker_id, apply_client)
         if failure and not done:
             raise failure

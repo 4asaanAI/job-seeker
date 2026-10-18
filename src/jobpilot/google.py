@@ -66,15 +66,18 @@ DOC_FORMAT = (
     "Do not use a table for layout, images, columns or text boxes, so that applicant systems can read it.\n")
 
 
-_SHEET_NOUN = (r"rows?|columns?|tabs?|sheets?|spreadsheets?|files?|folders?|drive|access|status|entries|public|link|formula|"
-               r"stale|expired|rejected|applied|interview|offer|withdrawn|match")
 _STATE = r"stale|expired|rejected|applied|interview|offer|withdrawn|public|match"
+_VERBS = (r"mark|set|change|update|make|move|rename|retitle|clear|remove|share|treat|flag|label|give|grant|put|add|insert|"
+          r"erase|wipe|trash|copy|tell|open|delete|hide|show|email|send|publish")
+_THINGS = (r"rows?|columns?|tabs?|sheets?|spreadsheets?|files?|folders?|drive|access|formulas?|permissions?|importrange")
+# A title or company that reads like an operation on the sheet itself. Real titles that merely contain "Public",
+# "Status", "Applied" or "Update" must pass, so a status word alone never triggers: it needs an action verb with a
+# sheet thing, a quantifier over rows, or "all/each ... as <status>".
 _SHEET_OPS = re.compile(
-    r"\bjobpilot\b|\b(viewable|editable|accessible)\b|\b(rows?|columns?|status|entries|sheet|tab)\b.*\b(" + _STATE + r")\b|"
-    r"\b(" + _STATE + r")\b.*\b(rows?|columns?|status|entries|sheet|tab)\b|"
-    r"\banyone with\b|\bpermissions?\b|\boverwrite\b|\bpublish\b|\bimportrange\b|\bformulas?\b|\bteam drive\b|\bspreadsheet\b|"
-    r"\b(mark|set|change|update|make|move|rename|retitle|clear|remove|share|treat|flag|label|give|grant|put|add|insert|erase|"
-    r"wipe|trash|copy|tell|open|delete|hide|show|list|count|report|say)\b.*\b(" + _SHEET_NOUN + r")\b", re.I)
+    r"\bjobpilot\b|\b(viewable|editable|shareable)\b|\banyone with\b|\boverwrite\b|\bimportrange\b|\bteam drive\b|"
+    r"\b(" + _VERBS + r")\b.*\b(" + _THINGS + r")\b|"
+    r"\b(all|every|each|other|remaining)\b.{0,20}\b(rows?|entries|jobs|applications|statuses)\b|"
+    r"\b(all|every|each)\b.{0,12}\b(to|as|is|are)\b.{0,10}\b(" + _STATE + r")\b", re.I)
 
 
 def _cell(text: object, limit: int) -> str:
@@ -87,8 +90,17 @@ def _day(value: object) -> str:
     return str(value or "")[:10]
 
 
+def _pair(title: object, company: object) -> tuple[str, str]:
+    """Title and company, each screened alone and also together (an operation can be split across the two cells)."""
+    t, c = _cell(title, 60), _cell(company, 40)
+    if "[withheld]" not in (t, c) and _SHEET_OPS.search(f"{t} {c}"):
+        return "[withheld]", "[withheld]"
+    return t, c
+
+
 def tracker_rows(apps: list[dict], tracked: list[dict]) -> list[list[str]]:
-    """At most MAX_ROWS rows: the newest applications, then jobs whose deadline just passed, then the best open matches.
+    """At most MAX_ROWS rows: the newest applications, then the best open matches, then jobs whose deadline just passed
+    (closed ones are reserved a few slots so they are never crowded out).
 
     `tracked` comes from Store.tracked_jobs (each item says whether it is closed). Status: an application's own status;
     otherwise `deadline passed` for a closed job and `match` for an open one. Every cell is vetted and formula-inert."""
@@ -97,13 +109,15 @@ def tracker_rows(apps: list[dict], tracked: list[dict]) -> list[list[str]]:
     apps = sorted(apps, key=lambda a: a.get("response_at") or a.get("applied_at") or "9999", reverse=True)[:MAX_APPS]
     for a in apps:
         seen.add(a["posting_id"])
-        rows.append([str(int(a["posting_id"])), _cell(a["title"], 60), _cell(a["company_name"], 40), a["status"],
+        title, company = _pair(a["title"], a["company_name"])
+        rows.append([str(int(a["posting_id"])), title, company, a["status"],
                      "", _day(a.get("applied_at")), _day(a.get("response_at") or a.get("applied_at")), "", ""])
     fresh = [t for t in tracked if t["posting_id"] not in seen]
     closed = [t for t in fresh if t["closed"]][:max(0, min(MAX_CLOSED, MAX_ROWS - len(rows)))]
     opened = [t for t in fresh if not t["closed"]][:max(0, MAX_ROWS - len(rows) - len(closed))]
     for t in opened + closed:
-        rows.append([str(int(t["posting_id"])), _cell(t["title"], 60), _cell(t["company_name"], 40),
+        title, company = _pair(t["title"], t["company_name"])
+        rows.append([str(int(t["posting_id"])), title, company,
                      "deadline passed" if t["closed"] else "match", f"{float(t['fit_score']):.0f}", "", "",
                      _day(t.get("first_seen_at")), _day(t.get("valid_through"))])
     return [[_inert(c) for c in r] for r in rows]
@@ -221,6 +235,6 @@ def deck_inputs(store, seeker_id: int, home: Path | None = None,
     counts["match"] = len(good)                  # the true count; only the first 6 rows are shown
     if len(tracked) > len(good):
         counts["deadline passed"] = len(tracked) - len(good)
-    top = [[str(int(m["posting_id"])), _cell(m["title"], 60), _cell(m["company_name"], 40), f"{float(m['fit_score']):.0f}"]
+    top = [[str(int(m["posting_id"])), *_pair(m["title"], m["company_name"]), f"{float(m['fit_score']):.0f}"]
            for m in good[:6]]
     return {k: v for k, v in counts.items() if v}, [[_inert(c) for c in r] for r in top]
