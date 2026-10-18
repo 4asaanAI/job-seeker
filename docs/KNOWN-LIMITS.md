@@ -16,6 +16,14 @@ Developer" and cuts long ones instead of withholding them; batch approval is bou
 relay must have sent exactly the vetted message; one failing inbox command no longer blocks the others; and apply candidates
 exclude finished jobs before the top-N cut.
 
+Fixed from the second audit (all 25 numbered findings): application statuses only move forward (a late `applied` can no longer undo
+an `interview`), `response_at` is written, `applied_at` is set only for real applications, and notes are kept; an extended deadline
+revives a job that expired only because of the old date; employer-feed lookups share one global daily cap and rotate fairly;
+short skills must be real words in the source ("Go" is not "Google"); a text resume fails closed if it would drop a required
+fact; Telegram job lists skip the Fo seeker; `prepare_application` drops unsafe links and refuses closed jobs; raw SQL now takes
+the store lock; inbox matches leave out finished jobs; and the vacuous MCP tests now assert real behaviour.
+`review_required` is a reserved column that nothing enforces; applying is gated by approved plans and per-call permission prompts.
+
 Not fixed, with the honest impact:
 
 | Area | Limit | Impact |

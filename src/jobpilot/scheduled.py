@@ -114,7 +114,7 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
                 return None
             return int(seeker.telegram_user_id)
         print(f"digests sent: {push_digests(store, bot.send, recipient=to_telegram)}")
-        print(f"job lists sent: {push_job_lists(store, bot.send_job_list)}")
+        print(f"job lists sent: {push_job_lists(store, bot.send_job_list, skip={fo_id} if fo_id else ())}")
     except Exception as exc:  # noqa: BLE001
         print(f"telegram delivery failed: {type(exc).__name__}: {exc}")
 

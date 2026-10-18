@@ -108,7 +108,7 @@ def fingerprint(msg: dict) -> str:
 
 
 def _matches(store: Store, sid: int) -> str:
-    rows = store.best_matches(sid, 3)
+    rows = store.best_matches(sid, 3, open_only=True)
     if not rows:
         return "JobPilot: no scored matches yet."
     lines = ["JobPilot top matches"]
@@ -119,7 +119,9 @@ def _matches(store: Store, sid: int) -> str:
 
 
 def _status(store: Store, sid: int) -> str:
-    q = lambda sql: store.conn.execute(sql, (sid,)).fetchone()[0]  # noqa: E731
+    def q(sql):
+        with store._lock:
+            return store.conn.execute(sql, (sid,)).fetchone()[0]
     return ("JobPilot status\n"
             f"jobs linked: {q('SELECT COUNT(*) FROM seeker_jobs WHERE seeker_id = ?')}\n"
             f"scored: {q('SELECT COUNT(*) FROM scores WHERE seeker_id = ?')}\n"

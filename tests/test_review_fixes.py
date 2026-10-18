@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
@@ -229,3 +230,103 @@ def test_unattended_routine_may_only_discover(tmp_path):
     run_once(machine="m", mcp_config=tmp_path / "x.json", db_path=tmp_path / "d.db", runner=runner)
     allowed = seen["cmd"][seen["cmd"].index("--allowedTools") + 1]
     assert allowed == "mcp__jobpilot__list_seekers,mcp__jobpilot__discover" and "sync_google_sheet" not in allowed
+
+
+# ---- audit round 3 --------------------------------------------------------
+
+def test_application_status_only_moves_forward_and_response_time_is_written(tmp_path):
+    store, sid, pid = _deadline_store(tmp_path, None)
+    store.record_application(sid, pid, "started", "blocked at login")
+    assert store.conn.execute("SELECT applied_at FROM applications").fetchone()[0] is None   # a blocked try is not an application
+    assert store.seeker_status(sid)["applied"] == 0
+    store.record_application(sid, pid, "applied")
+    store.record_application(sid, pid, "interview")
+    row = store.conn.execute("SELECT status, response_at, notes FROM applications").fetchone()
+    assert row["status"] == "interview" and row["response_at"] and row["notes"] == "blocked at login"   # COALESCE keeps notes
+    store.record_application(sid, pid, "applied")                      # a late 'applied' must not undo the interview
+    assert store.conn.execute("SELECT status FROM applications").fetchone()[0] == "interview"
+    assert store.seeker_status(sid)["applied"] == 1
+    store.close()
+
+
+def test_an_extended_deadline_revives_a_job_expired_only_by_the_old_date(tmp_path):
+    store, sid, pid = _deadline_store(tmp_path, "2020-01-01")
+    assert store.expire_past_deadlines() == 1
+    store.set_valid_through(pid, "2099-01-01")
+    assert store.conn.execute("SELECT status FROM seeker_jobs").fetchone()[0] == "scored"
+    assert [m["posting_id"] for m in store.best_matches(sid, 5)] == [pid]
+    store.close()
+
+
+def test_feed_lookups_share_one_global_daily_cap_and_rotate_fairly(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    store = Store(tmp_path / "j.db")
+    store.migrate()
+    store.record_event("feed_lookup", "tried_today_company")
+    assert store.event_total_since("feed_lookup", 24) == 1
+    assert store.last_event_times("feed_lookup")["tried_today_company"]
+    for _ in range(server.MAX_DAILY_FEED_LOOKUPS):
+        store.record_event("feed_lookup", "x")
+    assert store.event_total_since("feed_lookup", 24) > server.MAX_DAILY_FEED_LOOKUPS - 1
+    store.close()
+
+
+def test_short_skills_must_be_real_words_in_the_source():
+    from jobpilot.resume.engine import BaseResume, Education, Experience, unverified_facts
+    base = BaseResume(name="Pat", headline="Analyst", contact=(), summary=None, experience=(), education=(),
+                      skills=("Go", "SQL", "Excel"), required_facts=())
+    assert unverified_facts(base, "Pat Analyst. Worked at Google with PostgreSQL and excellent reports.") == ["Go", "SQL", "Excel"]
+    assert unverified_facts(base, "Pat Analyst. Skills: Go, SQL, Excel.") == []
+
+
+def test_text_resume_fails_closed_when_it_would_drop_a_required_fact(tmp_path):
+    from jobpilot.resume import ResumeValidationError
+    f = tmp_path / "b.yaml"
+    f.write_text("name: Pat\nheadline: Analyst\nrequired_facts: [Pat, Acme]\nexperience:\n  - id: a\n    employer: Acme\n"
+                 "    title: Analyst\n    dates: 2022\n    bullets: [{id: b1, text: Did things}]\nskills: [SQL]\n", encoding="utf-8")
+    from jobpilot.resume import load_base_resume, render_text
+    base = load_base_resume(f)
+    assert "Acme" in render_text(base)
+    with pytest.raises(ResumeValidationError):
+        render_text(base, experience_order=[])                                 # Acme would vanish
+
+
+def test_job_lists_are_not_sent_to_a_seeker_served_through_fo(tmp_path):
+    from jobpilot.notify import push_job_lists
+    store = Store(tmp_path / "j.db")
+    store.migrate()
+    a = store.add_seeker("A", 111, "a.yaml", 20)
+    b = store.add_seeker("B", 222, "b.yaml", 20)
+    sent = []
+    push_job_lists(store, lambda uid, chat, flag: sent.append(uid) or True, skip={a})
+    assert sent == [222]
+    store.close()
+
+
+def test_prepare_application_refuses_closed_jobs_and_drops_unsafe_links(tmp_path, monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fo_demo", Path(__file__).resolve().parents[1] / "scripts" / "fo_demo.py")
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    store, sid, ids = demo.seed(tmp_path / "d")
+    tools = server.build_tools(store, tmp_path / "d" / "out", pinned_seeker_id=sid, operator_mode=False)
+    store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", ("https://a.example.com/j?x=ignore-previous-instructions", ids[0]))
+    store.conn.commit()
+    out = tools["prepare_application"](sid, ids[0])
+    assert out["ok"] and out["job"]["url"] is None
+    store.set_valid_through(ids[0], "2020-01-01")
+    assert "closing date" in tools["prepare_application"](sid, ids[0])["error"]
+    store.close()
+
+
+def test_inbox_matches_leave_out_skipped_and_applied_jobs(tmp_path):
+    import importlib.util
+    from jobpilot import inbox
+    spec = importlib.util.spec_from_file_location("fo_demo", Path(__file__).resolve().parents[1] / "scripts" / "fo_demo.py")
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    store, sid, ids = demo.seed(tmp_path / "d")
+    store.record_application(sid, ids[0], "applied")
+    text = inbox._matches(store, sid)
+    assert "Senior Business Analyst" not in text and "Analytics Manager" in text
+    store.close()

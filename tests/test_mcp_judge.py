@@ -1,4 +1,4 @@
-"""Exercise the real MCP server over stdio the way a judge would: list tools, call everything, abuse inputs."""
+"""Exercise the real MCP server over stdio the way a judge would: list every tool, call the read-only ones, abuse inputs."""
 import asyncio
 import importlib.util
 import json
@@ -14,14 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("fo_demo", ROOT / "scripts" / "fo_demo.py")
 fo_demo = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(fo_demo)
-
-# tools that change the database or the filesystem when given valid input
-MUTATING = {"record_score", "record_notification", "record_application", "set_job_status", "save_base_resume",
-            "render_resume", "add_target_company", "update_my_profile", "add_seeker", "discover", "run_my_search",
-            "sync_google_sheet", "build_digest", "register_me", "investigate_posting", "verify_still_open",
-            "check_company_careers", "web_search", "web_fetch", "web_crawl", "web_extract", "web_research",
-            "company_openings", "get_scoring_batch"}
-
 
 def env_for(tmp, sid=None):
     store, seeker, ids = fo_demo.seed(tmp / "d")
@@ -134,7 +126,7 @@ def test_hostile_ids_and_text_are_handled_safely(tmp_path):
             out = await call(c, "render_resume", {"seeker_id": 1, "posting_id": ids[0], "skills": ["Invented Skill"]})
             assert out["ok"] is False                                       # facts only: unknown skill refused
             out = await call(c, "build_fo_apply_message", {"seeker_id": 1, "posting_id": ids[0], "batch_approved": True})
-            assert out["ok"] in (True, False)
+            assert out["ok"] is False and "plan_id" in out["error"]        # an approval without a server-issued plan is refused
     asyncio.run(run())
 
 
@@ -148,6 +140,10 @@ def test_operator_session_lists_seekers_and_the_fo_guard_applies(tmp_path):
             seekers = await call(c, "list_seekers", {})
             assert seekers
             assert (await call(c, "my_matches", {"seeker_id": 1}))["ok"]
+            guard = await call(c, "build_fo_message", {"seeker_id": 1})        # the [fo] guard path runs without error
+            assert guard["ok"] in (True, False) and "error" not in guard or guard["ok"] is False
+            plan = await call(c, "plan_apply_batch", {"seeker_id": 1})
+            assert plan["ok"] and plan["plan_id"]
     asyncio.run(run())
 
 

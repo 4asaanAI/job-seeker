@@ -972,7 +972,7 @@ class Store:
                 "AND delivered_at >= ?", (seeker_id, since)
             ).fetchone()[0]
             applied = self.conn.execute(
-                "SELECT COUNT(*) FROM applications WHERE seeker_id = ? "
+                "SELECT COUNT(*) FROM applications WHERE seeker_id = ? AND status IN ('applied', 'interview', 'offer') "
                 "AND applied_at >= ?", (seeker_id, since)
             ).fetchone()[0]
             total_jobs = self.conn.execute(
@@ -1009,13 +1009,32 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def event_total_since(self, kind: str, hours: int) -> int:
+        """Events of one kind across all seekers (used for global daily caps)."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with self._lock:
+            return int(self.conn.execute(
+                "SELECT COUNT(*) FROM events WHERE kind = ? AND created_at >= ?", (kind, since)).fetchone()[0])
+
+    def last_event_times(self, kind: str) -> dict[str, str]:
+        """detail -> most recent time, for rotating through work fairly."""
+        with self._lock:
+            return {r["detail"]: r["t"] for r in self.conn.execute(
+                "SELECT detail, MAX(created_at) AS t FROM events WHERE kind = ? GROUP BY detail", (kind,))}
+
     def set_valid_through(self, posting_id: int, value: str | None) -> None:
         """Record a closing date (any ISO date or datetime; stored as YYYY-MM-DD, the last open day)."""
         day = (value or "")[:10]
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             return
         with self._lock, self.conn:
+            prior = self.conn.execute("SELECT valid_through, date('now') AS today FROM job_postings WHERE id = ?",
+                                      (posting_id,)).fetchone()
             self.conn.execute("UPDATE job_postings SET valid_through = ? WHERE id = ?", (day, posting_id))
+            if prior and prior["valid_through"] and prior["valid_through"] < prior["today"] <= day:
+                # the source extended the deadline: bring back jobs that were expired only because of the old date
+                self.conn.execute("UPDATE seeker_jobs SET status = 'scored' WHERE posting_id = ? AND status = 'expired'",
+                                  (posting_id,))
 
     def expire_past_deadlines(self) -> int:
         """Mark every seeker's job expired once its closing date has passed (never a job already applied to)."""
@@ -1188,17 +1207,24 @@ class Store:
                 ).fetchone()
                 if valid is None:
                     raise ValueError("resume_version_id is not a validated version for this posting")
-            applied_at = _now() if status in ("started", "applied") else None
+            existing = self.conn.execute(
+                "SELECT status FROM applications WHERE seeker_id = ? AND posting_id = ?",
+                (seeker_id, posting_id)).fetchone()
+            if existing and existing["status"] in ("interview", "offer", "rejected") and status in ("started", "applied"):
+                return                          # a later outcome is never rolled back to an earlier stage
+            applied_at = _now() if status == "applied" else None
+            response_at = _now() if status in ("interview", "offer", "rejected") else None
             self.conn.execute(
                 "INSERT INTO applications "
-                "(seeker_id, posting_id, status, resume_version_id, applied_at, notes) "
-                "VALUES (?,?,?,?,?,?) "
+                "(seeker_id, posting_id, status, resume_version_id, applied_at, notes, response_at) "
+                "VALUES (?,?,?,?,?,?,?) "
                 "ON CONFLICT(seeker_id, posting_id) DO UPDATE SET "
+                "response_at=COALESCE(excluded.response_at, applications.response_at), "
                 "status=excluded.status, "
                 "resume_version_id=COALESCE(excluded.resume_version_id, applications.resume_version_id), "
                 "applied_at=COALESCE(excluded.applied_at, applications.applied_at), "
                 "notes=CASE WHEN excluded.notes = '' THEN applications.notes ELSE excluded.notes END",
-                (seeker_id, posting_id, status, resume_version_id, applied_at, clean_notes),
+                (seeker_id, posting_id, status, resume_version_id, applied_at, clean_notes, response_at),
             )
             if status == "applied":
                 self.conn.execute(

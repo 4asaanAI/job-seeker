@@ -7,6 +7,8 @@ considered deliverable.
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -358,7 +360,11 @@ def render_text(
     picked = _select_skills(base, skills)
     if picked:
         lines += ["", "SKILLS", ", ".join(picked)]
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    report = _report("text", Path("<text>"), text, base.required_facts)
+    if not report.ok:                      # the same fail-closed check the DOCX path has
+        raise ResumeValidationError(report)
+    return text
 
 
 def render_docx(
@@ -419,4 +425,13 @@ def unverified_facts(base: BaseResume, source_text: str) -> list[str]:
         values += [item.employer, item.title, item.dates, *(text for _, text in item.bullets)]
     for item in base.education:
         values += [item.institution, item.degree, item.dates]
-    return [value for value in values if value and _squash(value) not in haystack]
+    tokens = {t.strip(".") for t in re.findall(r"[a-z0-9+#.]+", source_text.lower())}
+
+    def present(value: str) -> bool:
+        squashed = _squash(value)
+        if squashed not in haystack:
+            return False
+        if len(squashed) <= 8 and len(value.split()) == 1:   # "Go", "SQL", "Excel" must be real words, not pieces of "Google", "PostgreSQL", "excellent"
+            return all(w.strip(".") in tokens for w in re.findall(r"[a-z0-9+#.]+", value.lower()))
+        return True
+    return [value for value in values if value and not present(value)]

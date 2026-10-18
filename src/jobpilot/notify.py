@@ -72,11 +72,11 @@ def push_followups(store: Store, send: Callable[[int, str], object],
     return sent
 
 
-def push_job_lists(store: Store, send_list: Callable[[int, int, bool], bool]) -> int:
-    """Send each linked seeker their spreadsheet when new jobs arrived today."""
+def push_job_lists(store: Store, send_list: Callable[[int, int, bool], bool], skip=()) -> int:
+    """Send each linked seeker their spreadsheet when new jobs arrived today (not those served through Fo)."""
     sent = 0
     for seeker in store.list_seekers():
-        if not seeker.telegram_user_id:
+        if not seeker.telegram_user_id or seeker.id in skip:
             continue
         uid = int(seeker.telegram_user_id)
         try:

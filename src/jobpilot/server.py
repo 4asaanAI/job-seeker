@@ -131,16 +131,26 @@ def build_tools(
             for n, sc in group.items():
                 if sc.enabled and n not in PROHIBITED_SOURCES:
                     covered.setdefault(normalise(sc.company_name), n)
-        chosen, report, pending = {}, {}, []
+        chosen, report, uncovered = {}, {}, []
         for company in companies:
             key = normalise(company)
             if key in covered:
                 chosen[company] = covered[key]
                 report[company] = "already covered by its own careers feed"
-            elif key not in pending and len(pending) >= limit:
-                report[company] = "not checked this time; save it again later"
-            elif key not in pending:
-                pending.append(key)
+            elif key not in uncovered:
+                uncovered.append(key)
+        # One global daily cap across every caller (profile saves, registration, discovery), and the company tried
+        # least recently goes first, so the same few names never use up the whole budget.
+        remaining = max(0, MAX_DAILY_FEED_LOOKUPS - store.event_total_since("feed_lookup", 24))
+        last_tried = store.last_event_times("feed_lookup")
+        uncovered.sort(key=lambda k: last_tried.get(k, ""))
+        pending = uncovered[:min(limit, remaining)]
+        for key in uncovered[len(pending):]:
+            for company in companies:
+                if normalise(company) == key:
+                    report[company] = "not checked this time; save it again later"
+        for key in pending:
+            store.record_event("feed_lookup", key)
         lookup = {normalise(c): c for c in reversed(companies)}  # first spelling wins
         # Each lookup is several web requests; two at a time keeps a profile
         # save to well under a minute without flooding the search engines.
@@ -744,9 +754,10 @@ def build_tools(
             if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
                    for a in store.applications(sid, 500)):
                 raise ValueError("an application for this job is already recorded")
-            closed = store.conn.execute(
-                "SELECT 1 FROM job_postings WHERE id = ? AND valid_through IS NOT NULL AND valid_through < date('now')",
-                (int(posting_id),)).fetchone()
+            with store._lock:
+                closed = store.conn.execute(
+                    "SELECT 1 FROM job_postings WHERE id = ? AND valid_through IS NOT NULL AND valid_through < date('now')",
+                    (int(posting_id),)).fetchone()
             if closed:
                 raise ValueError("the closing date for this job has passed")
             link = vetted_job_url(posting["url"])
@@ -910,6 +921,12 @@ def build_tools(
             posting = store.posting_view(sid, int(posting_id))
             if posting is None:
                 raise ValueError("posting is not linked to this seeker")
+            with store._lock:
+                if store.conn.execute(
+                        "SELECT 1 FROM job_postings WHERE id = ? AND valid_through IS NOT NULL AND valid_through < date('now')",
+                        (int(posting_id),)).fetchone():
+                    raise ValueError("the closing date for this job has passed")
+            posting = {**posting, "url": vetted_job_url(posting["url"])}      # an unsafe link is dropped, never passed on
             base = load_base_resume(_base_resume_path(sid))
             text = render_text(base, experience_order=experience_order, skills=skills,
                                bullet_order=bullet_order)
@@ -1109,15 +1126,11 @@ def build_tools(
 
         targets, feeds_added = [], {}
         # A real daily cap: lookups already spent in the last 24 hours (any seeker) come off the budget.
-        spent = sum(store.event_count_since(sk.id, "feed_lookup", 24) for sk in store.list_seekers())
-        budget = [max(0, MAX_DAILY_FEED_LOOKUPS - spent)]  # shared across seekers: engines throttle
+        budget = [max(0, MAX_DAILY_FEED_LOOKUPS - store.event_total_since("feed_lookup", 24))]  # engines throttle
         skipped = {}
         for seeker in seekers:
             try:
-                before = budget[0]
                 added = _heal_feeds(seeker.id, budget)
-                for _ in range(max(0, before - budget[0])):
-                    store.record_event("feed_lookup", "employer feed search", seeker_id=seeker.id)
                 if added:
                     feeds_added[seeker.id] = added
                 _, _, profile = _profile_for(seeker.id)
