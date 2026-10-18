@@ -1,7 +1,0 @@
-== 2026-10-18T07:41:36Z daily run
-OK   Python 3.12
-OK   claude CLI on PATH (scoring and the Fo relay need it)
-OK   config.toml parses
-OK   at least one seeker exists
-
-All good.
