@@ -44,3 +44,12 @@ def test_fo_client_traces_its_calls_without_the_key():
     entry = client.trace[0]
     assert entry["tool"] == "mcp__fo__ask_fo" and entry["status"] == "complete" and entry["chars"] == 11
     assert "wak_secretkey" not in j.dumps(client.trace)
+
+
+def test_record_from_the_command_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    assert runlog.main(["record", "apply_demo", "ok", "job=1", "note=submitted live"]) == 0
+    assert runlog.main(["record", "apply_demo", "fail", "error=captcha"]) == 0
+    assert runlog.main(["record", "apply_demo", "maybe"]) == 2
+    runs = runlog.read_runs(tmp_path)
+    assert runlog.run_count(runs) == {"apply_demo": {"runs": 2, "succeeded": 1}} and runs[0]["steps"]["job"] == "1"

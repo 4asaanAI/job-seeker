@@ -84,7 +84,16 @@ def render_trace(run: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["record"]:                  # python -m jobpilot.runlog record <kind> ok|fail [key=value ...]
+        if len(argv) < 3 or argv[2] not in ("ok", "fail"):
+            print("usage: python -m jobpilot.runlog record <kind> ok|fail [key=value ...]")
+            return 2
+        steps = dict(item.split("=", 1) for item in argv[3:] if "=" in item)
+        record_run(argv[1], argv[2] == "ok", steps)
+        print(f"recorded {argv[1]}: {argv[2]}")
+        return 0
     runs = read_runs()
     if not runs:
         print("No runs recorded yet.")
