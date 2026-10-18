@@ -60,3 +60,27 @@ def suggest(base: BaseResume, title: str, description: str, max_bullets: int = 4
         "keywords_missing_from_resume": [k for k in keywords if k not in resume_terms][:15],
         "keywords_matched": [k for k in keywords if k in resume_terms][:15],
     }
+
+
+def top_bullets(base: BaseResume, title: str, description: str, n: int = 2,
+                experience_order: list[str] | None = None,
+                bullet_order: dict[str, list[str]] | None = None) -> tuple[list[tuple[str, str]], bool]:
+    """(employer, bullet) pairs, verbatim, that share the most terms with the job, and whether any actually matched.
+
+    Only bullets the application really uses are considered (experience_order / bullet_order, same meaning as in
+    the resume render); ties keep resume order."""
+    keywords = job_keywords(title, description)
+    items = []
+    for e in base.experience:
+        if experience_order is not None and e.id not in experience_order:
+            continue
+        keep = set(bullet_order[e.id]) if bullet_order and e.id in bullet_order else None
+        items += [(e.employer, text) for bid, text in e.bullets if keep is None or bid in keep]
+    ranked = sorted(enumerate(items), key=lambda it: (-_score(it[1][1], keywords), it[0]))[:n]
+    return [item for _, item in ranked], any(_score(item[1], keywords) > 0 for _, item in ranked)
+
+
+def matching_skills(base: BaseResume, title: str, description: str, n: int = 6) -> list[str]:
+    """The seeker's own skills that the job mentions, in resume order."""
+    keywords = job_keywords(title, description)
+    return [s for s in base.skills if _score(s, keywords) > 0][:n]

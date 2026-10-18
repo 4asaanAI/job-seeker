@@ -90,6 +90,8 @@ class Config:
     fo_transport: str = "auto"
     # Keep a Google Sheet record and Google Docs resumes through Fo (needs Fo enabled).
     google_enabled: bool = False
+    # Put a facts-only cover letter into applications whose form REQUIRES one (off unless the user turns it on).
+    apply_cover_letters: bool = False
     llm: "LLMConfig" = field(default_factory=lambda: LLMConfig())
 
 
@@ -275,6 +277,10 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(google_enabled, bool):
         raise ValueError('[google] enabled must be true or false (no quotes)')
 
+    apply_cover_letters = raw.get("apply", {}).get("cover_letters", False)
+    if not isinstance(apply_cover_letters, bool):
+        raise ValueError('[apply] cover_letters must be true or false (no quotes)')
+
     base = home
     return Config(
         home=base,
@@ -289,6 +295,7 @@ def load_config(path: Path | None = None) -> Config:
         fo_url=str(fo.get("url") or "https://mcp.api.wajo.ai/fo"),
         fo_transport=fo_transport,
         google_enabled=google_enabled,
+        apply_cover_letters=apply_cover_letters,
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,

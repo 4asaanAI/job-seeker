@@ -104,6 +104,26 @@ def resume_doc_message(title: str, company: str, posting_id: int, resume_text: s
         f"{marker}\n{body}\n{marker}")
 
 
+LETTER_FORMAT = (
+    "Style it as a plain business letter using real named styles: one clean font (Arial or Calibri) at 11 point, 1 inch "
+    "margins, left-aligned paragraphs with a blank line between them, and lines starting with '- ' as real bullets. "
+    "Do not use a table, images, columns or text boxes.\n")
+
+
+def cover_letter_message(posting_id: int, letter_text: str, export: bool = False) -> str:
+    marker, body = _fence(letter_text)
+    return (
+        f'Please create a new Google Doc named "JobPilot cover letter - job {int(posting_id)}" inside a folder '
+        f'named "{RESUME_FOLDER}" in my Google Drive (create the folder if it is missing).\n'
+        f"The document body is EXACTLY the letter text between the two lines containing {marker}, character for "
+        "character: do not add, remove, reword or reorder anything, and do not add facts. Formatting is all you may "
+        "change, and the text itself stays identical (you may drop the leading '- ' of bullet lines when making them real "
+        "bullets).\n" + LETTER_FORMAT + _RULES +
+        "4. Afterwards give me the link to the document.\n"
+        + (_export("doc") if export else "") +
+        f"{marker}\n{body}\n{marker}")
+
+
 def send_tracker(store, seeker_id: int, client):
     """Ask Fo (through an already vetted client) to refresh the tracker sheet. None when there is nothing to record."""
     rows = tracker_rows(store.applications(seeker_id, 500), store.best_matches(seeker_id, 25, open_only=True))

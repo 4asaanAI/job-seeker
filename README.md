@@ -50,7 +50,7 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
   "ask me before submitting", **no calendar event**). A calendar entry appears only when the company itself sends an invitation
   (`build_fo_reply_check_message`). Nothing is sent by JobPilot; every `ask_fo` passes Claude Code's permission prompt.
 - **Google Sheets and Docs through Fo.** A tracker sheet Fo keeps current (`jp sync`, or automatic with `[google] enabled`) and each
-  job's tailored resume as a Google Doc (`jp doc <id>`). Details in [docs/APPLYING.md](docs/APPLYING.md).
+  job's tailored resume as a Google Doc (`jp doc <id>`) or a facts-only cover letter (`jp letter <id>`). Details in [docs/APPLYING.md](docs/APPLYING.md).
 - **Real-server test.** The MCP server is started over stdio and driven like Claude would, including seeker pinning.
 
 ```mermaid

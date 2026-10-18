@@ -28,6 +28,10 @@ enabled = false
 # work in your own Google account; JobPilot holds no Google credentials for this.
 enabled = false
 
+[apply]
+# Use a facts-only cover letter (built from your own resume) where an application form REQUIRES one. Off by default.
+cover_letters = false
+
 # ---- Official employer ATS JSON (R4) ----
 # Add one block per verified public JSON endpoint, then add the same source key
 # to the seeker's profile. Keep these disabled until the endpoint has been

@@ -32,6 +32,8 @@ from .resume import (
 from .apply import (apply_message, classify_route, reply_check_message, safe_title_company, sweep_message,
                     vetted_job_url)
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
+from .resume.letter import build_letter
+from .resume.tailor import matching_skills, top_bullets
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
 from . import google
@@ -695,6 +697,20 @@ def build_tools(
                     hint["keywords_missing_from_resume"])
         return experience_order, skills, bullet_order, []
 
+    def _letter_for(base, posting, company, experience_order=None, bullet_order=None) -> str:
+        """Facts-only letter: the job post only ranks the seeker's own text, none of it is copied. Raises ValueError."""
+        if len(str(posting["company_name"] or "")) > 80:
+            raise ValueError("the company name is too long to use safely in a letter")
+        title, desc = posting["title"] or "", posting["description"] or ""
+        bullets, matched = top_bullets(base, title, desc, 2, experience_order, bullet_order)
+        return build_letter(base, company, bullets, matched, matching_skills(base, title, desc))
+
+    def _letters_on() -> bool:
+        try:
+            return load_config().apply_cover_letters
+        except (OSError, ValueError, KeyError):
+            return False
+
     def apply_candidates(seeker_id: int, limit: int = 10, min_score: float = 70.0) -> dict:
         """List your best-scoring jobs that Fo can most plausibly apply to, easiest route first. READ ONLY.
 
@@ -856,8 +872,14 @@ def build_tools(
             tailored = experience_order is None and skills is None and bullet_order is None
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
+            letter = None
+            if _letters_on():
+                try:
+                    letter = _letter_for(base, posting, names[1], experience_order, bullet_order)
+                except ValueError:
+                    letter = None                         # no letter is better than an unsafe one; the application still works
             message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit),
-                                    attach_pdf=_google_on())
+                                    attach_pdf=_google_on(), letter_text=letter, posting_id=int(posting_id))
             if phone_code:
                 with store._lock:                       # only now, with the message built: check, consume and mark started as one step
                     if not _phone_approval_ok(sid, int(posting_id), phone_code):
@@ -877,6 +899,7 @@ def build_tools(
         route, route_note = classify_route(link)
         return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
                 "route": route, "route_note": route_note, "tailored_to_job": tailored, "resume_pdf_via_google_docs": _google_on(),
+                "cover_letter_if_required": letter is not None,
                 "job_terms_missing_from_resume": gaps,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
@@ -937,6 +960,28 @@ def build_tools(
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
             return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "job_terms_missing_from_resume": gaps,
                     "message": google.resume_doc_message(names[0], names[1], int(posting_id), text, export_docx),
+                    "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def build_fo_cover_letter_message(seeker_id: int, posting_id: int, export_docx: bool = False) -> dict:
+        """Build ONE request asking Fo to put this job's facts-only cover letter into a new Google Doc. SENDS NOTHING.
+
+        The letter is assembled from the user's own saved resume (their best-matching bullets, copied exactly) and the
+        company name. Nothing is invented and the job post is not copied. Pass `message` to ask_fo unchanged.
+        """
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            names = safe_title_company(posting["title"], posting["company_name"])
+            if names is None:
+                raise ValueError("this posting's title or company looks unsafe")
+            base = load_base_resume(_base_resume_path(sid))
+            return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id),
+                    "message": google.cover_letter_message(int(posting_id), _letter_for(base, posting, names[1]), export_docx),
                     "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -1225,6 +1270,7 @@ def build_tools(
         "build_fo_tracker_message": build_fo_tracker_message,
         "build_fo_deck_message": build_fo_deck_message,
         "build_fo_resume_doc_message": build_fo_resume_doc_message,
+        "build_fo_cover_letter_message": build_fo_cover_letter_message,
         "build_fo_reply_check_message": build_fo_reply_check_message,
         "build_fo_sweep_replies_message": build_fo_sweep_replies_message,
         "my_dashboard": my_dashboard,

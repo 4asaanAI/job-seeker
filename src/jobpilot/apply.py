@@ -77,17 +77,38 @@ def classify_route(url: str | None) -> tuple[str, str]:
     return "unknown", "Unknown application route; Fo will stop and ask if it needs an account or a code."
 
 
+def _scrub(text: str) -> str:
+    return re.sub(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}", "", text)         # marker-like runs only; phone numbers survive
+
+
 def apply_message(title: str, company: str, url: str, resume_text: str, *, approved: bool = False,
-                  attach_pdf: bool = False) -> str:
+                  attach_pdf: bool = False, letter_text: str | None = None, posting_id: int | None = None) -> str:
     marker = secrets.token_hex(8)
-    body = re.sub(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}", "", resume_text)   # marker-like runs only; phone numbers survive
+    body = _scrub(resume_text)
+    others = "ID, certificate, transcript, portfolio" if letter_text else "cover letter, ID, certificate, transcript, portfolio"
     file_rule = (
         "7. If the application wants my resume as a FILE (an upload field, or an email attachment): create a Google Doc named "
         '"JobPilot resume" in a folder "JobPilot Resumes" that I own in my Google Drive (ignore any same-named folder '
         'shared with me) whose body is EXACTLY the resume '
         "text between the markers, export it as a PDF, and use that PDF for the resume or CV field only. Do not share the "
-        "document, change its sharing, or put it in a shared folder. Any OTHER file (cover letter, ID, certificate, transcript, portfolio) is not in "
+        f"document, change its sharing, or put it in a shared folder. Any OTHER file ({others}) is not in "
         "scope: stop and tell me what it asks, without submitting.\n") if attach_pdf else ""
+    letter_rule, letter_block = "", ""
+    if letter_text:
+        letter_marker = secrets.token_hex(8)
+        name = f"JobPilot cover letter - job {int(posting_id)}" if posting_id is not None else "JobPilot cover letter"
+        upload = (
+            f' For an upload field, create a NEW Google Doc named "{name}" (never reuse an older one) in the folder '
+            '"JobPilot Resumes" that I own, whose body is EXACTLY that text, export it as a PDF and use that PDF for the '
+            "cover letter field only; do not share it or change its sharing.") if attach_pdf else (
+            " If the form wants the cover letter as an uploaded file, stop and tell me, without submitting.")
+        letter_rule = (
+            f"{8 if attach_pdf else 7}. Use the letter between the two lines containing {letter_marker} ONLY where the form "
+            "REQUIRES a cover letter (a required text box, a required upload, or an email body): put in EXACTLY that text and "
+            f"change nothing.{upload} If a cover letter field is optional, leave it empty. The letter is not a source of "
+            "answers for any other field: answer those only from the resume text.\n")
+        letter_block = f"\n{letter_marker}\n{_scrub(letter_text)}\n{letter_marker}"
+    other_file = ("a file other than my resume or cover letter" if letter_text else "a file other than my resume") if attach_pdf else "a file"
     return (
         f"Please help me apply to this job: {title}, {company}. Posting: {url}\n"
         "Rules, all of them:\n"
@@ -95,7 +116,7 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         f"2. Use only the resume text between the two lines containing {marker}. Do not add or change any fact.\n"
         + ("3. I have ALREADY approved applying to this exact job. Complete the form with my resume facts and submit it "
            "once, only if every answer comes from the resume text. If any field asks for something not in the resume "
-           f"(salary, notice period, a question, {'a file other than my resume' if attach_pdf else 'a file'}), do NOT guess: "
+           f"(salary, notice period, a question, {other_file}), do NOT guess: "
            "stop and tell me what it asks, without submitting.\n"
            if approved else
            "3. If the application is by email, show me the draft and send it ONLY after I confirm. If a web form asks for "
@@ -105,7 +126,7 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         "5. If the page needs an account, a password or a one-time code that only my phone could receive, STOP right away "
         "and tell me; do not create accounts, do not retry more than once, and do not use any other email or number.\n"
         "6. Afterwards tell me exactly what you submitted and where.\n"
-        f"{file_rule}{marker}\n{body}\n{marker}")
+        f"{file_rule}{letter_rule}{marker}\n{body}\n{marker}{letter_block}")
 
 
 def reply_check_message(title: str, company: str) -> str:

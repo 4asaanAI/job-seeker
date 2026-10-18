@@ -12,6 +12,7 @@ grammar that is re-checked here in Python, runs JobPilot locally, and answers th
     jp sync           Fo refreshes your "JobPilot Tracker" Google Sheet
     jp deck           Fo builds a themed Google Slides progress deck
     jp doc <id>       Fo puts your resume tailored to that job into a new Google Doc
+    jp letter <id>    Fo puts a cover letter built from your own resume into a new Google Doc
     jp replies        Fo checks your email for replies to your applications
     jp interview <id> record the outcome yourself (also applied, rejected, withdrawn)
 
@@ -47,13 +48,13 @@ from .server import build_tools
 from .server import MAX_DAILY_APPLY_REQUESTS
 from .store.db import Store
 
-GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck)|(replies)|(applied|interview|rejected|withdrawn)\s+(\d{1,9}))\s*$",
+GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck)|(replies)|(applied|interview|rejected|withdrawn)\s+(\d{1,9})|letter\s+(\d{1,9}))\s*$",
                      re.IGNORECASE)
 MAX_COMMANDS = 3
 MAX_OPEN_CODES = 3
 MAX_DAILY_GOOGLE = 10
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
-HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp deck | jp replies | jp interview|rejected|applied|withdrawn <id>"
+HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp letter <id> | jp deck | jp replies | jp interview|rejected|applied|withdrawn <id>"
 
 
 class ClaudeReader:
@@ -195,6 +196,8 @@ def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> st
     return (f"JobPilot: ready to apply to {clean(job['title'])}, {clean(job['company'])} (id {posting_id}).\n"
             f"Resume tailored to this job; it lacks {len(built['job_terms_missing_from_resume'])} of its terms (none added).\n"
             f"Fo will stop and text you if the form asks for anything not in your resume.\n"
+            + ("A cover letter from your own resume is used only if the form requires one (see it with jp letter).\n"
+               if built.get("cover_letter_if_required") else "") +
             f"To apply, reply: jp yes {code}\nValid for 2 hours. Ignore this to do nothing.")
 
 
@@ -235,7 +238,8 @@ def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -
             "so it will not be sent twice. Check with Fo, or apply by hand.")
 
 
-def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool, *, doc: int | str | None) -> str:
+def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool, *, doc: int | str | None,
+            kind: str = "doc") -> str:
     """Sheet or Doc through Fo. Both only touch the user's own Drive, so they need no code."""
     if not google_on:
         return "JobPilot: Google is off. Set [google] enabled = true to use jp sync and jp doc."
@@ -259,15 +263,15 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
         what = "your tracker sheet"
     else:
         tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
-        built = tools["build_fo_resume_doc_message"](sid, doc)
+        built = tools["build_fo_cover_letter_message" if kind == "letter" else "build_fo_resume_doc_message"](sid, doc)
         if not built.get("ok"):
             return f"JobPilot: no document for id {doc}: {clean(built.get('error'), 110)}."
-        if any(d == str(doc) for d, _ in store.recent_event_details(sid, "phone_doc", 3, 50)):
+        if any(d == str(doc) for d, _ in store.recent_event_details(sid, f"phone_{kind}", 3, 50)):
             return f"JobPilot: a Google Doc for id {doc} was already requested in the last 3 hours; check your Drive."
-        store.record_event("phone_google", f"doc {doc}", sid)
-        store.record_event("phone_doc", str(doc), sid, doc)         # before sending: a lost reply must not make a second Doc
+        store.record_event("phone_google", f"{kind} {doc}", sid)
+        store.record_event(f"phone_{kind}", str(doc), sid, doc)     # before sending: a lost reply must not make a second Doc
         result = apply_client.send(built["message"])
-        what = f"a Google Doc for id {doc}"
+        what = f"a cover letter for id {doc}" if kind == "letter" else f"a Google Doc for id {doc}"
     if result.status == "complete":
         return f"JobPilot: Fo has updated {what}. Its reply with the link is in your Fo chat."
     return f"JobPilot: Fo did not confirm {what} ({result.status}). Try again later."
@@ -326,6 +330,8 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
         return _replies(store, sid, out_dir, apply_client)
     if m.group(10):
         return _outcome(store, sid, out_dir, m.group(10).lower(), int(m.group(11)))
+    if m.group(12):
+        return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(12)), kind="letter")
     if m.group(7):
         return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(7)))
     return _tailor(store, sid, out_dir, int(m.group(3)))
