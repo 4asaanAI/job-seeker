@@ -27,36 +27,39 @@ and the Discord form close Tue Oct 20, 10:15 AM PT. Scoring: 50% judges, 50% com
 | Agent craft (20) | Tools built on top of the Fo MCP; the run count shows it works more than once; 890+ tests |
 | Real need (10) | Job search is a daily chore; the sheet and texts replace the spreadsheet and the checking |
 
-## 3. Trial run first (nothing recorded, nothing irreversible)
+## 3. Trial runs done before recording (nothing submitted)
 
-Each step has a pass condition. No step sends an application.
-
-| # | Trial | Pass if |
+| # | Trial | Result |
 |---|---|---|
-| T1 | Focus guard: bring Messages forward, confirm it is the frontmost app, type text into the box without sending, clear it | the text is in Messages and not in VS Code |
-| T2 | Layout: Terminal window over the Messages sidebar, conversation pane visible on the right; screenshot | no other chat visible anywhere in the region |
-| T3 | Sheet in an app-style Chrome window (no tabs, no bookmarks), signed in, scroll and switch to the Summary tab | rows and chart visible, no login page |
-| T4 | Claude Code session driven from Terminal: open, send a prompt, read the answer, approve a prompt, exit | the answer is read back correctly |
-| T5 | Read-only Fo probe of the real application page (nothing filled or submitted) | Fo says whether an account or code is needed and what the form asks |
-| T6 | A direct API refresh of the sheet takes under 2 minutes | time measured |
-| T7 | Judge path in a fresh clone: install, tests, fictional-data demo, doctor | all green |
+| T1 | Focus guard: refuse to type unless the target app is frontmost | works: it aborted once when VS Code held focus instead of typing into it |
+| T2 | Layout: Terminal covering the Messages sidebar, only the Fo conversation visible beside it | works; old Terminal windows must be closed first (done) |
+| T3 | Sheet in an app-style Chrome window, signed in | works: header, banded rows, status dropdowns, Tracker and Summary tabs; dismiss Google's promo banner first |
+| T4 | Claude Code in Terminal driven by keystrokes, answer read back | works; start it with `--permission-mode default` so the Fo permission prompt is shown |
+| T5 | Read-only Fo probe of real application forms | Anthropic (essay, visa, consents: poor fit 20-35), Turing (resume only, no account, no code), Zeta and Meesho (CTC, notice period answers) |
+| T6 | Direct Fo API | works: 25-60 s per call; long Google Doc tasks exceed the client's 3-minute wait |
+| T7 | Judge path in a fresh clone | install, 897 tests, fictional demo all pass |
+| T8 | Real search with the new employer feeds on a copy of my data | Meesho PM I 72, Zeta PM II 70, Paytm APM 70, Turing PM 60; Turing's direct form link is now chosen over the Indeed link (bug fixed) |
+| T9 | Apply request, rehearsed with "do not submit" | see the rehearsal notes in the run ledger |
+
+Known limits found: attachments sent from this Mac to Fo do not deliver ("Not Delivered"), and making a PDF through a Google Doc
+takes minutes, so the application pastes the resume text where the form allows it (`resume_file=False`).
 
 ## 4. The take (V2): one unedited recording, region = Terminal over the Messages sidebar + the Fo thread
 
-Narration is optional; on-screen captions are added only as separate text in the post, not inside the video.
+Chosen application: Turing, "Product Manager" (remote, India), Greenhouse, no account, no code, fields all from the resume.
+Nothing is submitted without my explicit go before the take; the take then submits live.
 
-1. Messages thread visible. I ask Fo: "Can you send me the link to my JobPilot Tracker sheet?" Fo texts it. (about 1 min)
-2. Terminal: `python -m jobpilot.refresh --deliver` searches Indeed, foundit and Himalayas for my real profile, scores, and Fo texts
-   the new matches with the sheet link, then a one-line sheet update. (about 5 min over the API)
-3. Terminal: Claude Code with the JobPilot and Fo tools. "Prepare my application for the chosen job and show what you would send,
-   without my contact details." The `ask_fo` permission prompt shows the exact vetted message (the safety moment).
-4. I approve. Fo opens the company's page, fills the form from my resume, and asks me to confirm. I confirm. Fo submits.
-5. JobPilot records the application; Fo refreshes the sheet row and texts the update line with the link. I open the sheet
-   in a clean Chrome window and show the row.
-6. End on the sheet and the text. Total is long; V1 is the plain 2-minute excerpt around steps 4-5.
+1. Terminal: `python -m jobpilot.refresh --deliver`. Real search of Indeed, foundit, Himalayas and the employer feeds (Turing, Zeta,
+   Meesho, Paytm, Mindtickle), scoring, Fo texts the new matches with the sheet link, then a one-line sheet update. (about 6 min)
+2. Messages: I text Fo "Can you send me the link to my JobPilot Tracker sheet?" and Fo replies with it. (about 1 min)
+3. Terminal: Claude Code started with `claude --permission-mode default`. "Prepare my application for job 1 and show what you would
+   send, without my contact details; paste my resume, no PDF." The `ask_fo` permission prompt shows the exact vetted message.
+4. I approve. Fo opens Turing's page, fills the form from my resume, and asks me to confirm. I confirm. Fo submits.
+5. "Record it as applied and update my tracker." JobPilot records the application; Fo refreshes the sheet and texts the update.
+6. Chrome app window: the sheet with the new "applied" row and the Summary tab. End.
+V1 is a plain 2-minute excerpt of V2 (no speed-up, no cuts inside); the full take is the unlisted link.
 
-If the application cannot be completed (account or code required), the take shows that live: Fo stops safely and says why, which is
-the "user stays in control" criterion. We then pick another job; the failed attempt stays in the run count.
+If the form blocks Fo (a captcha, a code), the take shows that live: Fo stops safely and says why. That attempt stays in the run count.
 
 ## 5. Safety checks before anything is posted
 
