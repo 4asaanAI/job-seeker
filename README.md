@@ -30,6 +30,7 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python scripts/injection_demo.py   # a poisoned job posting is neutralized before Fo sees it
 .venv/bin/python scripts/fo_demo.py          # dry run on a fictional seeker: the exact messages Fo would get
 .venv/bin/python -m pytest -q                # 890+ offline tests, including one that starts the real MCP server
+.venv/bin/python -m jobpilot.setup           # your own profile and resume in one guided command (asks before writing anything)
 ```
 
 ## What is new for the hackathon
