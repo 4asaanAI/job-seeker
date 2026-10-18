@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Text-Fo inbox poll on macOS, every 10 minutes (each poll runs one small headless Claude session, so a shorter
+     interval costs more). Copy to ~/Library/LaunchAgents/com.jobpilot.inbox.plist, fix the paths, then:
+     launchctl load ~/Library/LaunchAgents/com.jobpilot.inbox.plist     Stop it: launchctl unload <same file>
+     Logs: <JOBPILOT_HOME>/data/inbox.log -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jobpilot.inbox</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>/path/to/jobpilot/scripts/inbox.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>JOBPILOT_HOME</key><string>/path/to/jobpilot</string>
+    <key>JOBPILOT_CLAUDE</key><string>/path/to/claude</string>
+    <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>600</integer>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

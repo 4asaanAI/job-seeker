@@ -42,6 +42,17 @@ It runs `scripts/daily.sh`, which runs `jobpilot.doctor` first and stops if anyt
 Delivery goes through Fo when `[fo] enabled = true` (one Fo account serves one person), otherwise Telegram. Put personal settings such as
 `[fo]` in a git-ignored `config.local.toml`; it is layered over `config.toml`, so the shared file stays clean.
 
+### Text Fo from your phone (optional, macOS)
+
+A second launchd job polls your Fo texts every 10 minutes so `jp matches`, `jp apply <id>`, `jp sync`, `jp deck` and the rest get answered.
+
+```bash
+sed -e "s#/path/to/jobpilot#$PWD#g" -e "s#/path/to/claude#$(which claude)#" scripts/com.jobpilot.inbox.plist.example > ~/Library/LaunchAgents/com.jobpilot.inbox.plist
+launchctl load ~/Library/LaunchAgents/com.jobpilot.inbox.plist     # stop with launchctl unload
+```
+
+Logs: `data/inbox.log`. Each poll runs one small headless Claude session, so a shorter interval costs more.
+
 ## 4. Web tools through a shared Wigolo (optional)
 
 `web_fetch`, `web_search`, `web_crawl`, `web_extract` and `web_research` need a Wigolo server. Either install one locally
