@@ -925,6 +925,8 @@ def build_tools(
         try:
             sid = _check(seeker_id)
             _fo_seeker_guard(sid)
+            if store.tracker_busy(sid):
+                raise ValueError("a sheet update is still running; try again in a few minutes")
             rows = google.tracker_inputs(store, sid)
             if not rows:
                 return {"ok": True, "seeker_id": sid, "message": None, "note": "Nothing to record yet."}

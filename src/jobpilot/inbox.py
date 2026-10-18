@@ -257,10 +257,15 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
         store.record_event("phone_google", "deck", sid)
         result, what = apply_client.send(built["message"]), "your progress deck"
     elif doc is None:
-        store.record_event("phone_google", "sync", sid)
-        result = google.send_tracker(store, sid, apply_client)
+        try:
+            result = google.send_tracker(store, sid, apply_client)
+        except BaseException:
+            store.record_event("phone_google", "sync", sid)           # a failed attempt still used a Fo turn
+            raise
         if result is None:
             return "JobPilot: nothing to record yet."
+        if result is not google.BUSY:
+            store.record_event("phone_google", "sync", sid)
         what = "your tracker sheet"
     else:
         tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
@@ -301,9 +306,16 @@ def _replies(store: Store, sid: int, out_dir: Path, apply_client) -> str:
 
 def _outcome(store: Store, sid: int, out_dir: Path, status: str, posting_id: int) -> str:
     """Your own word on how an application went. Records only; statuses never move backwards."""
+    def current():
+        return next((a["status"] for a in store.applications(sid, 500) if a["posting_id"] == posting_id), None)
+
+    if status != "applied" and current() is None:
+        return f"JobPilot: id {posting_id} has no application yet. Text jp applied {posting_id} first."
     done = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)["record_application"](sid, posting_id, status)
     if not done.get("ok"):
         return f"JobPilot: could not record id {posting_id}: {clean(done.get('error'), 110)}."
+    if current() != status:
+        return f"JobPilot: id {posting_id} stays {current()} (a status never moves backwards)."
     return f"JobPilot: id {posting_id} recorded as {status}."
 
 
@@ -341,11 +353,13 @@ def _refresh_tracker(store: Store, sid: int, apply_client) -> None:
     """One best-effort sheet refresh after the outcomes of a poll. The outcomes are already recorded and answered."""
     if store.event_count_since(sid, "phone_tracker", 24) >= MAX_DAILY_TRACKER:
         return
-    store.record_event("phone_tracker", "refresh", sid)               # before sending: a lost reply must not allow a storm
     try:
-        google.send_tracker(store, sid, apply_client)
-    except Exception:  # noqa: BLE001
-        pass
+        result = google.send_tracker(store, sid, apply_client)
+    except Exception:  # noqa: BLE001 - it was tried, so it counts
+        store.record_event("phone_tracker", "refresh", sid)
+        return
+    if result is not None and result is not google.BUSY:
+        store.record_event("phone_tracker", "refresh", sid)           # a refresh that never started does not use a slot
 
 
 SEEN_TTL = 72 * 3600          # the reader only looks back 48 hours

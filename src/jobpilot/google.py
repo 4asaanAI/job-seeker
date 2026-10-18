@@ -56,7 +56,7 @@ TRACKER_FORMAT = (
     "(COUNTIF formulas on the Status column are fine there and only there), a bar chart of those counts, the counts "
     "'New since yesterday' (First seen is yesterday or today) and 'Closing within 7 days' (Deadline within 7 days), and a note: "
     "'Edits here do not reach JobPilot. To record an outcome text jp applied, jp interview, jp rejected or jp withdrawn followed "
-    "by the job ID. Stale means no longer listed; deadline passed means the closing date is over.'\n")
+    "by the job ID. Stale means it is no longer among your top matches; deadline passed means the closing date is over.'\n")
 
 DOC_FORMAT = (
     "Style the resume (never shorten, merge or drop anything to fit a page) using real named styles, not manual formatting: the name line as Title, the "
@@ -66,10 +66,15 @@ DOC_FORMAT = (
     "Do not use a table for layout, images, columns or text boxes, so that applicant systems can read it.\n")
 
 
+_SHEET_NOUN = (r"rows?|columns?|tabs?|sheets?|spreadsheets?|files?|folders?|drive|access|status|entries|public|link|formula|"
+               r"stale|expired|rejected|applied|interview|offer|withdrawn|match")
+_STATE = r"stale|expired|rejected|applied|interview|offer|withdrawn|public|match"
 _SHEET_OPS = re.compile(
-    r"\banyone with\b|\bpermissions?\b|\boverwrite\b|\bpublish\b|"
-    r"\b(mark|set|change|update|make|move|rename|clear|remove|share)\b.{0,30}\b(rows?|sheet|columns?|tab|status|stale|"
-    r"rejected|applied|interview|public)\b", re.I)
+    r"\bjobpilot\b|\b(viewable|editable|accessible)\b|\b(rows?|columns?|status|entries|sheet|tab)\b.*\b(" + _STATE + r")\b|"
+    r"\b(" + _STATE + r")\b.*\b(rows?|columns?|status|entries|sheet|tab)\b|"
+    r"\banyone with\b|\bpermissions?\b|\boverwrite\b|\bpublish\b|\bimportrange\b|\bformulas?\b|\bteam drive\b|\bspreadsheet\b|"
+    r"\b(mark|set|change|update|make|move|rename|retitle|clear|remove|share|treat|flag|label|give|grant|put|add|insert|erase|"
+    r"wipe|trash|copy|tell|open|delete|hide|show|list|count|report|say)\b.*\b(" + _SHEET_NOUN + r")\b", re.I)
 
 
 def _cell(text: object, limit: int) -> str:
@@ -121,10 +126,11 @@ def tracker_message(rows: list[list[str]], export: bool = False) -> str:
         "header, and never write into a column whose header is not in that list. Read column A once, then write all the rows "
         "in ONE range update instead of cell by cell. For each row, update the row whose ID matches, or add a new row at the "
         "bottom. Never delete or reorder other rows, and write cells as plain text, never as formulas (except the Summary "
-        "tab's counts). A blank cell here means unknown: keep what the sheet already has. Never move a status backwards: a "
-        "row already applied, interview, offer, rejected or withdrawn keeps that status. A row whose Status is match and "
-        "whose ID is not between the markers is no longer among my best open matches: set its Status to stale, do not delete "
-        "it.\n" + TRACKER_FORMAT + _RULES +
+        "tab's counts). A blank cell here means unknown: keep what the sheet already has. Never change a row back to match, "
+        "stale or deadline passed once its Status is started, applied, interview, offer, rejected or withdrawn; any other Status "
+        "given for a row is the new one. A row whose Status is match and whose ID is not between the markers is no longer "
+        "among my top matches: set its Status to stale, do not delete it. Write dates as real YYYY-MM-DD dates so the "
+        "date counts on the Summary tab work.\n" + TRACKER_FORMAT + _RULES +
         "4. Afterwards tell me in one line how many rows you added and updated, the final total number of data rows, and give "
         "me the sheet link.\n"
         + (_export("sheet") if export else "") +
@@ -173,15 +179,16 @@ def send_tracker(store, seeker_id: int, client, home: Path | None = None, today:
     rows = tracker_inputs(store, seeker_id, home, today)
     if not rows:
         return None
-    if not store.claim_tracker(seeker_id):
+    claim = store.claim_tracker(seeker_id)
+    if claim is None:
         return BUSY
     try:
         result = client.send(tracker_message(rows))
     except Exception:
-        store.finish_tracker(seeker_id)
+        store.finish_tracker(seeker_id, claim)
         raise
     if result.status != "working":
-        store.finish_tracker(seeker_id)
+        store.finish_tracker(seeker_id, claim)
     return result
 
 
@@ -214,6 +221,6 @@ def deck_inputs(store, seeker_id: int, home: Path | None = None,
     counts["match"] = len(good)                  # the true count; only the first 6 rows are shown
     if len(tracked) > len(good):
         counts["deadline passed"] = len(tracked) - len(good)
-    top = [[str(int(m["posting_id"])), clean(m["title"], 60), clean(m["company_name"], 40), f"{float(m['fit_score']):.0f}"]
+    top = [[str(int(m["posting_id"])), _cell(m["title"], 60), _cell(m["company_name"], 40), f"{float(m['fit_score']):.0f}"]
            for m in good[:6]]
     return {k: v for k, v in counts.items() if v}, [[_inert(c) for c in r] for r in top]

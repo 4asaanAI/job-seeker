@@ -192,7 +192,8 @@ def test_phone_outcome_records_and_never_moves_back(env):
     assert "recorded as interview" in _poll(env, f"jp interview {ids[0]}")[0]
     _poll(env, f"jp applied {ids[0]}")
     assert store.applications(sid)[0]["status"] == "interview"
-    assert "could not record" in _poll(env, "jp rejected 99999")[0]
+    assert "no application yet" in _poll(env, "jp rejected 99999")[0]
+    assert "stays interview" in _poll(env, f"jp applied {ids[0]}")[0]
 
 
 def test_phone_replies_sweeps_only_submitted(env):

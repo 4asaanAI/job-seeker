@@ -1063,6 +1063,10 @@ class Store:
         day = (value or "")[:10]
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             return
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            return                                   # 2026-13-45 is not a deadline
         with self._lock, self.conn:
             prior = self.conn.execute("SELECT valid_through, date('now') AS today FROM job_postings WHERE id = ?",
                                       (posting_id,)).fetchone()
@@ -1314,31 +1318,44 @@ class Store:
                 (seeker_id, float(min_score), today, today, f"-{int(closed_days)} days", max(0, int(closed_limit)))).fetchall()
         return [dict(r) for r in opened] + [dict(r) for r in closed]
 
-    def claim_tracker(self, seeker_id: int, minutes: int = 30) -> bool:
-        """Take the one lease for refreshing the tracker sheet. False when a refresh started in the last `minutes`
-        has not finished (two Fo turns writing one sheet would duplicate rows). Atomic across processes."""
+    def _open_tracker_claim(self, seeker_id: int, minutes: int) -> int | None:
+        """The id of the latest refresh claim that started within `minutes` and has no matching done event, else None."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+        row = self.conn.execute("SELECT id, created_at FROM events WHERE seeker_id = ? AND kind = 'tracker_pending' "
+                                "ORDER BY id DESC LIMIT 1", (seeker_id,)).fetchone()
+        if row is None or row["created_at"] < cutoff:
+            return None
+        done = self.conn.execute("SELECT 1 FROM events WHERE seeker_id = ? AND kind = 'tracker_done' AND detail = ?",
+                                 (seeker_id, str(row["id"]))).fetchone()
+        return None if done else int(row["id"])
+
+    def tracker_busy(self, seeker_id: int, minutes: int = 30) -> bool:
+        """Read-only: is a refresh of the sheet still running?"""
+        with self._lock:
+            return self._open_tracker_claim(seeker_id, minutes) is not None
+
+    def claim_tracker(self, seeker_id: int, minutes: int = 30) -> int | None:
+        """Take the one lease for refreshing the tracker sheet; returns the claim id, or None when a refresh started in
+        the last `minutes` has not finished (two Fo turns writing one sheet would duplicate rows). Atomic across processes."""
         with self._lock:
             self.conn.execute("BEGIN IMMEDIATE")
             try:
-                def latest(kind):
-                    return self.conn.execute("SELECT MAX(created_at) FROM events WHERE seeker_id = ? AND kind = ?",
-                                             (seeker_id, kind)).fetchone()[0]
-                pending, done = latest("tracker_pending"), latest("tracker_done")
-                if pending and pending >= cutoff and (done is None or done < pending):
+                if self._open_tracker_claim(seeker_id, minutes) is not None:
                     self.conn.execute("ROLLBACK")
-                    return False
-                self.conn.execute("INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) VALUES (?,?,?,?,?)",
-                                  (seeker_id, None, "tracker_pending", "refresh", _now()))
+                    return None
+                cur = self.conn.execute(
+                    "INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) VALUES (?,?,?,?,?)",
+                    (seeker_id, None, "tracker_pending", "refresh", _now()))
                 self.conn.execute("COMMIT")
-                return True
+                return int(cur.lastrowid)
             except BaseException:
                 if self.conn.in_transaction:
                     self.conn.execute("ROLLBACK")
                 raise
 
-    def finish_tracker(self, seeker_id: int) -> None:
-        self.record_event("tracker_done", "refresh", seeker_id)
+    def finish_tracker(self, seeker_id: int, claim_id: int) -> None:
+        """Release exactly this claim (a late finisher cannot release somebody else's)."""
+        self.record_event("tracker_done", str(claim_id), seeker_id)
 
     def pending_followups(self, seeker_id: int, limit: int = 5) -> list[dict]:
         """Return deliberate 3-day nudges and 7-day expiry candidates."""
