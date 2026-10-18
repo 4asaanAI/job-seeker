@@ -76,6 +76,42 @@ never reverted by Fo on its own; the next request decides.
 
 `deck_inputs` counts: applications by status, plus `match` (open, at or above min_score, true count) and `expired`.
 
+## Review amendments (supersede the sections above wherever they differ)
+
+Three reviews (adversarial, five-voice roundtable, correctness) all found the same defect in the first draft: every Fo send
+starts a fresh conversation, so a "stale only on the final chunk" rule would mark every earlier chunk's rows stale on every run.
+
+- R1. NO CHUNKING. One request, at most 100 rows: up to 50 newest applications, then up to 15 recently closed jobs (deadline within
+  the last 14 days, newest first), then open matches filling the rest. Rows beyond the cap stay on the sheet as they were; an
+  open match that no longer fits is set to `stale` by the existing rule, whose meaning is now "no longer listed".
+- R2. Open list parity with `best_matches`: seeker job status not in (skipped, applied, expired) and no application row of any
+  status. The stored status `expired` set by the 7-day nudge is NOT a deadline and never becomes a closed row. A closed row needs
+  `valid_through < today`, status not skipped/applied, and no application row. Today's date is passed in as a parameter
+  (local date), never `date('now')` inside the query, so tests are deterministic.
+- R3. Sheet status for a closed job is `deadline passed` (own colour, orange). `expired` stays in the dropdown for old rows;
+  `stale` is grey and means "no longer listed". Statuses are never moved backwards by Fo: a row already applied, interview, offer,
+  rejected or withdrawn is never set to match, deadline passed or stale.
+- R4. Fo maps cells by header NAME. If First seen or Deadline is missing from row 1, add them after the last used header; never
+  write into a column whose header is not in the list. Read column A once, write all rows in one range update, and report the
+  final total number of data rows. A note on the Summary tab says edits in the sheet do not reach JobPilot; to record an outcome
+  text `jp applied|interview|rejected|withdrawn <id>`. Summary gains "new since yesterday" and "closing within 7 days" counts.
+- R5. Lease. `Store.claim_tracker(seeker_id, minutes=30)` atomically checks and records `tracker_pending`; `send_tracker` returns
+  a `busy` result when a refresh started in the last 30 minutes has not finished. `tracker_done` is recorded on complete or
+  failed, left open on `working` (a timeout). All triggers share it (daily run, `jp sync`, outcome refresh, MCP tool users call
+  `send_tracker` only through these paths).
+- R6. The refresh after outcome commands (and after `jp yes`) is ONE refresh at the end of `poll_once`, after every reply of that
+  poll was sent, only when Google is on and a Fo client exists, at most 5 per day (event `phone_tracker`, recorded before the
+  send), under the lease. Failures are swallowed; the outcome is already recorded.
+- R7. `profiles.seeker_min_score(profile_path, home)` never raises, returns a finite value clamped to 50..100, default 70. Used by
+  `tracker_rows`, the MCP tool, the daily run, `jp sync` and `deck_inputs`.
+- R8. Tracker cells for title and company are screened for sheet-operation phrases ("mark ... rejected", "make sheet public",
+  share/publish/permission/overwrite) in addition to `clean()`; a hit becomes `[withheld]`.
+- R9. The daily run sends the tracker in its own try block so a failed digest cannot skip it.
+- R10. `deck_inputs` uses the same query: a true count of open matches and a `deadline passed` count (no capped list).
+- R11. KNOWN-LIMITS records: a 100-row request has not been run live (pilot it on a copy of the sheet and count the rows that
+  land); `working` timeouts hold the lease for 30 minutes; the two-process claim relies on SQLite.
+- R12. Dropped from the first draft: chunking, the separate `phone_tracker` row cap, the "started older than 7 days" rule.
+
 ## Security
 
 - Nothing new reaches Fo except title, company, score, dates and ids, all through the existing vetting, between random markers,
