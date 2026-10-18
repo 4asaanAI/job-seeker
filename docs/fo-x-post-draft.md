@@ -4,12 +4,12 @@
 My job search now texts me.
 JobPilot scores new roles. Fo delivers the matches to my phone and books the follow-up on my calendar. I just talk to Claude.
 Job posts are written by strangers, so Fo only ever sees an id, a score and a vetted title. Never the post.
-Demo + code: <REPO LINK> @wajo_ai #GSDhackathon
+Demo + code: https://github.com/4asaanAI/job-seeker @wajo_ai #GSDhackathon
 
 ## Option 2 (shorter)
 Built JobPilot x Fo: Claude finds the jobs, Fo does the real-world part (texts, calendar, follow-ups).
 Safe by design: Fo gets an id and a score, never the job post. 490 tests, real MCP end to end.
-<REPO LINK> @wajo_ai
+https://github.com/4asaanAI/job-seeker @wajo_ai
 
 ## Attach
 60-90s screen recording: phone buzzes with 3 matches -> ask Claude "prepare my application for the Fabrikam role"
@@ -17,5 +17,5 @@ Safe by design: Fo gets an id and a score, never the job post. 490 tests, real M
 Use the fictional seeker (python scripts/fo_demo.py --send). No real resume or contacts on screen.
 
 ## Before posting
-- Repo must be public (or judges invited) and the link filled in above.
+- Repo is public; link filled in above.
 - Post with hours to spare, not at 3:59pm.
