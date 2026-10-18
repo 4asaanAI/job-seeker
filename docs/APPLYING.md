@@ -18,6 +18,14 @@ against the demo folder, and never put your real resume in anything you post pub
 "Run my search" -> `run_my_search`; "what are my best matches?" -> `my_matches`. Scoring uses the
 `[scoring]` model in `config.toml` (use `haiku` to save credits).
 
+## 2b. Pick jobs Fo can actually apply to
+
+`apply_candidates` lists your best matches, easiest route first: **direct** (a public form on the company's own applicant
+system, no account), **aggregator** (a listing whose Apply button leads to the company's page), **login** (foundit, Naukri,
+Indeed, LinkedIn, Workday: an account and often a phone code Fo cannot always receive). Lesson from the first real attempt:
+foundit's phone verification never delivered a code, so Fo could not get in, and nothing was submitted. Start with
+direct and aggregator jobs, and apply by hand where a board needs a code only your phone gets.
+
 ## 3. Apply with Fo (one job at a time, only with your yes)
 
 1. "Prepare my application for job 12" -> `prepare_application` shows your facts-only resume text and the job's title,
@@ -59,7 +67,7 @@ your base resume yourself (`save_base_resume`) if it is true.
 - Fo says it can drive a website in a browser for you (searches, filling application forms). This is Fo's own
   claim and is not tested here; ask Fo to show you what a form needs before it submits.
 
-- Fo takes text only: it cannot attach a file. Applications go as pasted resume text, or Fo works
+- Fo takes text only: it cannot attach a file. It cannot complete phone or email codes it cannot read (the request tells it to stop). Applications go as pasted resume text, or Fo works
   through whatever form or email route the posting offers. That is Fo's own capability and is not verified here;
   the first real application is a supervised pilot. Many postings need a web form or account.
   How well Fo handles those is up to Fo; ask it to tell you before it submits.

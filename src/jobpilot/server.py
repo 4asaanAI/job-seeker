@@ -26,7 +26,7 @@ from .resume import (
     render_text,
     unverified_facts,
 )
-from .apply import apply_message, reply_check_message, safe_title_company, vetted_job_url
+from .apply import apply_message, classify_route, reply_check_message, safe_title_company, vetted_job_url
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
@@ -644,6 +644,32 @@ def build_tools(
                     "bullets and skills. Do not add wording, numbers or experience that is not in resume_facts.",
         }
 
+    def apply_candidates(seeker_id: int, limit: int = 10, min_score: float = 70.0) -> dict:
+        """List your best-scoring jobs that Fo can most plausibly apply to, easiest route first. READ ONLY.
+
+        Each item says how the application route works (direct company form, login-required board, or an
+        aggregator page). Login boards that need a phone code are flagged: Fo cannot always complete those.
+        Jobs already applied to, skipped or expired are left out. Titles/companies are untrusted text.
+        """
+        try:
+            sid = _check(seeker_id)
+            done = {a["posting_id"] for a in store.applications(sid, 500) if a["status"] != "withdrawn"}
+            order = {"direct": 0, "aggregator": 1, "unknown": 2, "login": 3}
+            items = []
+            for m in store.best_matches(sid, 25):
+                if m["posting_id"] in done or m["status"] in ("skipped", "applied", "expired"):
+                    continue
+                if m["fit_score"] is None or m["fit_score"] < min_score:
+                    continue
+                link = vetted_job_url(m["url"])
+                route, note = classify_route(link) if link else ("blocked", "Link failed the safety check; apply by hand.")
+                items.append({"posting_id": m["posting_id"], "title": m["title"], "company": m["company_name"],
+                              "score": m["fit_score"], "route": route, "route_note": note})
+            items.sort(key=lambda i: (order.get(i["route"], 9), -i["score"]))
+            return {"ok": True, "seeker_id": sid, "items": items[:max(1, min(int(limit), 25))], "note": UNTRUSTED}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
     def build_fo_apply_message(
         seeker_id: int,
         posting_id: int,
@@ -678,7 +704,9 @@ def build_tools(
             message = apply_message(names[0], names[1], link, text)
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
+        route, route_note = classify_route(link)
         return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
+                "route": route, "route_note": route_note,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
 
@@ -841,6 +869,7 @@ def build_tools(
         "build_digest": build_digest,
         "build_plain_digest": build_plain_digest,
         "build_fo_message": build_fo_message,
+        "apply_candidates": apply_candidates,
         "build_fo_apply_message": build_fo_apply_message,
         "build_fo_reply_check_message": build_fo_reply_check_message,
         "investigate_posting": investigate_posting,

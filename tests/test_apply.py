@@ -93,3 +93,33 @@ def test_reply_check_needs_a_submitted_application(env):
     assert out["ok"] and "ONLY if the company itself" in out["message"]
     store.record_application(sid, ids[0], "withdrawn")
     assert tools["build_fo_reply_check_message"](sid, ids[0])["ok"] is False
+
+
+@pytest.mark.parametrize("url,route", [
+    ("https://boards.greenhouse.io/acme/jobs/1", "direct"), ("https://jobs.lever.co/acme/x", "direct"),
+    ("https://www.foundit.in/job/x", "login"), ("https://in.indeed.com/viewjob?jk=1", "login"),
+    ("https://acme.wd1.myworkdayjobs.com/x", "login"), ("https://himalayas.app/companies/x/jobs/y", "aggregator"),
+    ("https://careers.example.com/1", "unknown"), (None, "unknown")])
+def test_route_classification(url, route):
+    assert ap.classify_route(url)[0] == route
+
+
+def test_apply_message_tells_fo_to_stop_at_phone_codes():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r")
+    assert "one-time code that only my phone could receive, STOP" in m and "do not create accounts" in m
+
+
+def test_apply_candidates_orders_by_route_and_leaves_out_done_jobs(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0], "https://www.foundit.in/job/1")
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    https_link(store, ids[2], "https://himalayas.app/companies/a/jobs/3")
+    store.record_application(sid, ids[3], "applied") if False else None
+    out = tools["apply_candidates"](sid)
+    assert out["ok"]
+    routes = [i["route"] for i in out["items"]]
+    assert routes == sorted(routes, key=lambda r: {"direct": 0, "aggregator": 1, "unknown": 2, "login": 3}[r])
+    assert routes[0] == "direct" and "login" in routes
+    store.record_application(sid, ids[1], "applied")
+    assert ids[1] not in [i["posting_id"] for i in tools["apply_candidates"](sid)["items"]]
+    assert tools["build_fo_apply_message"](sid, ids[0])["route"] == "login"

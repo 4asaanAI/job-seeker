@@ -40,6 +40,33 @@ def vetted_job_url(url: str | None) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
 
+_DIRECT = ("boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com",
+           "apply.workable.com", "jobs.smartrecruiters.com", "bamboohr.com", "breezy.hr")
+_LOGIN = ("foundit.in", "naukri.com", "indeed.com", "linkedin.com", "glassdoor.com", "monster.com",
+          "myworkdayjobs.com", "shine.com", "ziprecruiter.com")
+_AGGREGATOR = ("himalayas.app", "remoteok.com", "jobicy.com", "remotive.com")
+
+
+def _host_in(host: str, names) -> bool:
+    return any(host == n or host.endswith("." + n) for n in names)
+
+
+def classify_route(url: str | None) -> tuple[str, str]:
+    """How hard is it for Fo to apply here? (route, plain-language note). No network.
+
+    direct: usually a public application form on the company's own ATS (no account needed).
+    login: the site needs an account and often a phone/email code that Fo cannot always receive.
+    aggregator: a listing page whose Apply button leads to the company's own page."""
+    host = (urlsplit(url or "").hostname or "").lower()
+    if _host_in(host, _DIRECT):
+        return "direct", "Public application form on the company's applicant system; usually no account needed."
+    if _host_in(host, _LOGIN):
+        return "login", "This site needs an account and often a one-time code sent to your phone, which Fo cannot always receive. Apply by hand if it asks."
+    if _host_in(host, _AGGREGATOR):
+        return "aggregator", "A listing page: its Apply button leads to the company's own page, which decides what is needed."
+    return "unknown", "Unknown application route; Fo will stop and ask if it needs an account or a code."
+
+
 def apply_message(title: str, company: str, url: str, resume_text: str) -> str:
     marker = secrets.token_hex(8)
     body = re.sub(r"[0-9a-fA-F]{12,}", "", resume_text)
@@ -52,7 +79,9 @@ def apply_message(title: str, company: str, url: str, resume_text: str) -> str:
         "anything not in the resume, ask me. Do not submit anything until I confirm.\n"
         "4. Do NOT create any calendar event, and do not call anyone, buy anything or send any other message. A "
         "calendar entry is made later, only if the company itself sends me an interview invitation.\n"
-        "5. Afterwards tell me exactly what you submitted and where.\n"
+        "5. If the page needs an account, a password or a one-time code that only my phone could receive, STOP right away "
+        "and tell me; do not create accounts, do not retry more than once, and do not use any other email or number.\n"
+        "6. Afterwards tell me exactly what you submitted and where.\n"
         f"{marker}\n{body}\n{marker}")
 
 
