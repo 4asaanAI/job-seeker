@@ -53,6 +53,7 @@ readable through `get_fo_conversation`, treat this as built and unit-tested, not
 ```bash
 python scripts/fo_demo.py            # dry run: builds the fictional data, prints what Fo would get
 export FO_API_KEY=...                # from the hackathon early-access email (never commit it)
+# or save it once, readable only by you:  mkdir -p ~/.config/jobpilot && chmod 700 ~/.config/jobpilot && (umask 077; printf %s "$KEY" > ~/.config/jobpilot/fo_api_key)
 python scripts/fo_demo.py --send     # really sends through your Fo account (asks you to type: yes)
 ```
 

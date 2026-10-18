@@ -634,6 +634,7 @@ def test_transport_selection_and_config(tmp_path, monkeypatch):
     from jobpilot.scheduled import make_fo_client
     c = lambda t: SimpleNamespace(fo_transport=t, fo_url=FO_URL)
     monkeypatch.delenv("FO_API_KEY", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))                 # never read the real ~/.config key file in tests
     assert isinstance(make_fo_client(c("auto")), ClaudeFoClient)
     assert make_fo_client(c("api")) is None
     monkeypatch.setenv("FO_API_KEY", KEY)
@@ -737,3 +738,29 @@ def test_a_confirmed_send_after_an_uncertain_one_clears_the_guard(store):
     store.conn.execute("UPDATE events SET created_at = '2020-01-01T00:00:00+00:00' WHERE kind = 'fo_send_pending'")
     store.conn.commit()                                              # the half hour has passed
     assert notify.push_digests(store, lambda to, t: "ok", **kw) == 1
+
+
+# ---- the API key file --------------------------------------------------------------------------------------------------
+
+def test_fo_api_key_comes_from_env_then_a_private_file(tmp_path, monkeypatch):
+    from jobpilot.scheduled import fo_api_key
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("FO_API_KEY", raising=False)
+    assert fo_api_key() is None
+    folder = tmp_path / ".config" / "jobpilot"
+    folder.mkdir(parents=True)
+    key_file = folder / "fo_api_key"
+    key_file.write_text("wak_abc\n")
+    key_file.chmod(0o600)
+    assert fo_api_key() == "wak_abc"
+    monkeypatch.setenv("FO_API_KEY", "from_env")
+    assert fo_api_key() == "from_env"                      # the environment wins
+    monkeypatch.delenv("FO_API_KEY")
+    key_file.chmod(0o640)
+    assert fo_api_key() is None                            # readable by others: ignored, never read
+    key_file.chmod(0o600)
+    key_file.write_text("x" * 300)
+    assert fo_api_key() is None                            # not a key
+    key_file.unlink()
+    key_file.symlink_to(tmp_path)                          # not a regular file
+    assert fo_api_key() is None

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,9 +70,25 @@ def run_once(
         store.close()
 
 
+def fo_api_key() -> str | None:
+    """The Fo API key: FO_API_KEY, else the private file ~/.config/jobpilot/fo_api_key. The file is used only if it is a
+    regular file only you can read (a key in a group- or world-readable file is ignored, never read)."""
+    key = os.environ.get("FO_API_KEY")
+    if key:
+        return key
+    path = Path.home() / ".config" / "jobpilot" / "fo_api_key"
+    try:
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 256:
+            return None
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
 def make_fo_client(cfg, claude_bin: str = "claude"):
     """API key when allowed and present; otherwise the headless claude relay; None = skip."""
-    key = os.environ.get("FO_API_KEY")
+    key = fo_api_key()
     if cfg.fo_transport in ("api", "auto") and key:
         return FoClient(key, cfg.fo_url)
     if cfg.fo_transport in ("claude", "auto"):
