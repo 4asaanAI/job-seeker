@@ -1,5 +1,5 @@
 import { Composition } from "remotion";
-import { Caption, Intro, Output, Outro, Thumb } from "./Cards";
+import { Caption, Intro, Output, Outro, Thumb, Attack } from "./Cards";
 
 export const RemotionRoot: React.FC = () => (
   <>
@@ -11,5 +11,7 @@ export const RemotionRoot: React.FC = () => (
       defaultProps={{ title: "", lines: [], note: "" }} />
     <Composition id="Thumb" component={Thumb} durationInFrames={1} fps={30} width={1920} height={1080}
       defaultProps={{ line1: "", line2: "" }} />
+    <Composition id="Attack" component={Attack} durationInFrames={1} fps={30} width={1920} height={1080}
+      defaultProps={{ head: "", sub: "", lines: [], tone: "#e8ecff", note: "" }} />
   </>
 );

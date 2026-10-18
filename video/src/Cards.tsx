@@ -69,3 +69,17 @@ export const Thumb: React.FC<{ line1: string; line2: string }> = ({ line1, line2
     </div>
   </AbsoluteFill>
 );
+
+export const Attack: React.FC<{ head: string; sub: string; lines: string[]; tone: string; note: string }> = ({ head, sub, lines, tone, note }) => (
+  <AbsoluteFill style={{ background: BG, alignItems: "center", justifyContent: "center", fontFamily: SANS }}>
+    <div style={{ width: 1640 }}>
+      <div style={{ fontSize: 60, fontWeight: 800, color: tone }}>{head}</div>
+      <div style={{ fontSize: 34, color: DIM, margin: "8px 0 28px" }}>{sub}</div>
+      <div style={{ background: "#111833", border: `2px solid ${tone}`, borderRadius: 20, padding: "28px 36px",
+        fontFamily: "Menlo, 'SF Mono', Consolas, monospace", fontSize: 31, lineHeight: 1.55, color: INK }}>
+        {lines.map((l, i) => <div key={i}>{l}</div>)}
+      </div>
+      <div style={{ fontSize: 30, color: AMBER, marginTop: 24 }}>{note}</div>
+    </div>
+  </AbsoluteFill>
+);

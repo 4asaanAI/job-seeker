@@ -6,6 +6,9 @@
 
 [![tests](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml/badge.svg)](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml)
 
+**Who it is for:** anyone running a job search who wants an assistant that can act (text, email, calendar) without letting
+strangers' job posts steer it.
+
 **Claude finds and judges the jobs. [Fo](https://wajo.ai) (Wajo's assistant, over MCP) does the real-world part: it texts me the matches,
 applies when I say yes, and adds an interview to my calendar only when the company sends the invite.** One Claude session holds both MCP servers; you just ask in plain English.
 Built for the GSD hackathon. JobPilot already existed; the Fo link, the safety layer, tailored resumes and the
@@ -51,6 +54,24 @@ flowchart LR
   Fo --> phone([Your phone and calendar])
   JP -.->|scheduled digest: headless relay, vetted text only| Fo
 ```
+
+## Built this weekend (Oct 17-18)
+
+JobPilot (discovery, scoring, ledger, resume engine, MCP server) predates the hackathon. Everything below is new, and you can
+diff it yourself: [all changes since the last pre-hackathon commit](https://github.com/4asaanAI/job-seeker/compare/6be3992...main).
+
+| New | Where |
+|---|---|
+| Fo MCP client, vetted digest, headless relay, delivery confirmation | `src/jobpilot/fo.py`, `notify.py`, `scheduled.py` |
+| Safe applying (vetted request, route check, approved batch, no calendar until the company writes) | `src/jobpilot/apply.py`, `server.py` |
+| Facts-only resume tailoring | `src/jobpilot/resume/tailor.py` |
+| Search, score and list on demand | `src/jobpilot/refresh.py` |
+| Text-Fo inbox (experimental, not verified live) | `src/jobpilot/inbox.py` |
+| Injection attack demo and fictional-data demo | `scripts/injection_demo.py`, `scripts/fo_demo.py` |
+| Real-server MCP tests (listing, pinning, malformed and hostile input) | `tests/test_mcp_judge.py`, `tests/test_mcp_stdio.py` |
+| Two independent code reviews, fixes and known limits | `docs/KNOWN-LIMITS.md` |
+
+About 3,400 lines of new code and tests in 40 commits.
 
 ## Honest status
 
