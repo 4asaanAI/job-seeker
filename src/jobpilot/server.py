@@ -5,6 +5,7 @@ requests discovery data, scores it, and asks the server to persist the result.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 import secrets
@@ -116,7 +117,10 @@ def build_tools(
         Employer feeds cover one company; add them when the user targets that
         employer. Remote feeds suit users who accept remote work.
         """
-        return [{"source": n, "covers": d} for n, d in _source_catalog().items()]
+        # Feeds found automatically for one seeker's target employers still serve everyone who names that employer
+        # (see _attach_company_feeds), but are not advertised: the list would reveal who targets which employer.
+        hidden = {row["name"] for row in store.company_feeds()} - set(load_config().ats_sources)
+        return [{"source": n, "covers": d} for n, d in _source_catalog().items() if n not in hidden]
 
     def _attach_company_feeds(
         companies: list[str], limit: int = MAX_FEED_LOOKUPS,
@@ -312,18 +316,18 @@ def build_tools(
 
     def get_notifiable(
         seeker_id: int, min_score: float = 70.0, limit: int = 5
-    ) -> list[dict] | dict:
-        """List scored jobs above the threshold not previously shown."""
+    ) -> dict:
+        """List scored jobs above the threshold not previously shown (items; titles are untrusted text)."""
         try:
             sid = _check(seeker_id)
         except PermissionError as exc:
             return {"ok": False, "error": str(exc)}
-        return [
+        return {"ok": True, "seeker_id": sid, "note": UNTRUSTED, "items": [
             {"posting_id": j.posting_id, "title": j.title,
              "company": j.company_name, "url": j.url,
              "fit_score": j.fit_score, "reasoning": j.reasoning}
             for j in store.notifiable_postings(sid, min_score, limit)
-        ]
+        ]}
 
     def record_notification(
         seeker_id: int, posting_id: int, channel: str, kind: str = "first"
@@ -692,7 +696,18 @@ def build_tools(
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
-    _plans: dict[str, dict] = {}   # plan_id -> approved list (in this server process only)
+    def _find_plan(sid: int, plan_id: str | None) -> dict | None:
+        if not plan_id:
+            return None
+        for detail, _created in store.recent_event_details(sid, "apply_plan", 2, 20):   # plans last two hours
+            try:
+                plan = json.loads(detail)
+            except ValueError:
+                continue
+            if plan.get("id") == plan_id:
+                return {"ids": set(plan["ids"]), "min_score": float(plan["min_score"])}
+        return None
+
 
     def _eligible_for_batch(sid: int, limit: int, min_score: float = 70.0) -> list[dict]:
         out = apply_candidates(sid, limit=25, min_score=min_score)
@@ -713,8 +728,9 @@ def build_tools(
             _fo_seeker_guard(sid)
             items = _eligible_for_batch(sid, max(1, min(int(limit), 10)), float(min_score))
             plan_id = secrets.token_hex(6)
-            _plans[plan_id] = {"sid": sid, "ids": {i["posting_id"] for i in items}, "min_score": float(min_score),
-                               "expires": time.time() + 2 * 3600}
+            # Stored in the database (not in memory) so a restarted server still honours an approved plan.
+            store.record_event("apply_plan", json.dumps({"id": plan_id, "ids": [i["posting_id"] for i in items],
+                                                         "min_score": float(min_score)}), seeker_id=sid)
             return {"ok": True, "seeker_id": sid, "items": items, "plan_id": plan_id,
                     "skipped_login_boards": [i for i in apply_candidates(sid, 25, float(min_score)).get("items", [])
                                              if i["route"] in ("login", "blocked")][:10],
@@ -764,8 +780,11 @@ def build_tools(
             if link is None:
                 raise ValueError("this posting's link failed the safety check; apply to it by hand")
             if batch_approved:
-                plan = _plans.get(plan_id or "")
-                if not plan or plan["sid"] != sid or plan["expires"] < time.time():
+                if store.get_seeker(sid).review_required:
+                    raise ValueError("this seeker is in review mode: every application needs its own confirmation. "
+                                     "To allow approved batches, the user can turn review mode off with set_review_mode.")
+                plan = _find_plan(sid, plan_id)
+                if not plan:
                     raise ValueError("batch approval needs a current plan_id from plan_apply_batch for this seeker")
                 eligible = {i["posting_id"] for i in _eligible_for_batch(sid, 25, plan["min_score"])
                             if i["posting_id"] in plan["ids"]}
@@ -791,6 +810,20 @@ def build_tools(
                 "route": route, "route_note": route_note,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
+
+    def set_review_mode(seeker_id: int, review_required: bool) -> dict:
+        """Choose how applying works for this seeker. ONLY when the USER says so, never on your own.
+
+        review_required=true (the default): every application needs its own confirmation (build_fo_apply_message
+        without batch_approved). review_required=false: the user may approve one list (plan_apply_batch) and Fo
+        then submits those applications without a second confirmation, stopping at anything not in the resume.
+        """
+        try:
+            sid = _check(seeker_id)
+            store.set_review_required(sid, bool(review_required))
+            return {"ok": True, "seeker_id": sid, "review_required": bool(review_required)}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
 
     def my_dashboard(seeker_id: int) -> dict:
         """One-call answer to "what is going on with my job search". READ ONLY.
@@ -1048,6 +1081,7 @@ def build_tools(
         "build_fo_reply_check_message": build_fo_reply_check_message,
         "build_fo_sweep_replies_message": build_fo_sweep_replies_message,
         "my_dashboard": my_dashboard,
+        "set_review_mode": set_review_mode,
         "manual_apply_packet": manual_apply_packet,
         "investigate_posting": investigate_posting,
         "verify_still_open": verify_still_open,
@@ -1158,7 +1192,10 @@ def build_tools(
             for wcfg in cfg.wigolo_sources.values()
             if wcfg.enabled
         )
+        before_run = store.max_source_run_id()
         results = run_discovery(store, sources, targets)
+        if seeker_ids and len(targets) < len([sk for sk in store.list_seekers()]):
+            store.mark_partial_runs_since(before_run)
         expired_now = store.expire_past_deadlines()
         return {
             "ok": True,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -21,6 +22,8 @@ JOB_STATUSES = {
     "discovered", "scored", "shortlisted", "presented", "applied",
     "skipped", "deferred", "expired",
 }
+LOCATION_REPAIR_VERSION = 1
+
 APPLICATION_STATUSES = {
     "started", "applied", "withdrawn", "rejected", "interview", "offer",
 }
@@ -95,7 +98,12 @@ class Store:
     def migrate(self) -> None:
         with self._lock, self.conn:
             self.conn.executescript(SCHEMA.read_text(encoding="utf-8"))
-            self._migrate_location_columns()
+            # The location/hash backfill re-reads every posting, so it runs once per version: user_version is only
+            # raised AFTER it succeeds, so a half-finished upgrade still repairs itself on the next start. Bump
+            # LOCATION_REPAIR_VERSION whenever parse_location or the content hash changes.
+            if self.conn.execute("PRAGMA user_version").fetchone()[0] < LOCATION_REPAIR_VERSION:
+                self._migrate_location_columns()
+                self.conn.execute(f"PRAGMA user_version = {int(LOCATION_REPAIR_VERSION)}")
             self._add_missing_columns("seekers", {"review_required": "INTEGER NOT NULL DEFAULT 1"})
             self._add_missing_columns("job_postings", {"valid_through": "TEXT"})
 
@@ -219,6 +227,11 @@ class Store:
         daily_cap: int = 20,
     ) -> int:
         with self._lock, self.conn:
+            folder = os.path.dirname(profile_path.replace("\\", "/")).lower()
+            for (other,) in self.conn.execute("SELECT profile_path FROM seekers").fetchall():
+                if folder and os.path.dirname(other.replace("\\", "/")).lower() == folder:
+                    # resume, rubric and uploads are found from the profile's folder: sharing one would share files
+                    raise ValueError("that profile folder already belongs to another seeker; use a new folder")
             cur = self.conn.execute(
                 "INSERT INTO seekers "
                 "(name, telegram_user_id, profile_path, output_token, daily_cap) "
@@ -826,7 +839,7 @@ class Store:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT results_count FROM source_runs WHERE source = ? AND status IN ('healthy', 'degraded') "
-                "AND results_count > 0 "
+                "AND results_count > 0 AND notes NOT LIKE '[partial]%' "
                 "ORDER BY id DESC LIMIT ?",
                 (source, limit),
             ).fetchall()
@@ -1008,6 +1021,29 @@ class Store:
                 (seeker_id, query.strip(), needle, needle, needle, limit),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def recent_event_details(self, seeker_id: int, kind: str, hours: int, limit: int = 50) -> list[tuple[str, str]]:
+        """(detail, created_at), newest first."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with self._lock:
+            return [(r["detail"], r["created_at"]) for r in self.conn.execute(
+                "SELECT detail, created_at FROM events WHERE seeker_id = ? AND kind = ? AND created_at >= ? "
+                "ORDER BY id DESC LIMIT ?", (seeker_id, kind, since, int(limit)))]
+
+    def set_review_required(self, seeker_id: int, required: bool) -> None:
+        with self._lock, self.conn:
+            self.get_seeker(seeker_id)
+            self.conn.execute("UPDATE seekers SET review_required = ? WHERE id = ?", (int(bool(required)), seeker_id))
+
+    def max_source_run_id(self) -> int:
+        with self._lock:
+            return int(self.conn.execute("SELECT COALESCE(MAX(id), 0) FROM source_runs").fetchone()[0])
+
+    def mark_partial_runs_since(self, run_id: int) -> None:
+        """Runs made for a subset of seekers say nothing about a source's normal volume: keep them out of its history."""
+        with self._lock, self.conn:
+            self.conn.execute("UPDATE source_runs SET notes = '[partial] ' || notes WHERE id > ? AND notes NOT LIKE '[partial]%'",
+                              (run_id,))
 
     def event_total_since(self, kind: str, hours: int) -> int:
         """Events of one kind across all seekers (used for global daily caps)."""

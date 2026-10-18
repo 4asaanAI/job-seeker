@@ -12,6 +12,30 @@ def _telegram_recipient(seeker) -> int | None:
     return int(seeker.telegram_user_id) if seeker.telegram_user_id else None
 
 
+PENDING_WINDOW_HOURS = 0.5
+
+
+def _unconfirmed_send(store: Store, seeker_id: int, channel: str) -> bool:
+    """True when an earlier Fo send timed out or was cut off and may still complete: wait before sending again."""
+    if channel == "telegram":
+        return False
+    pending = store.recent_event_details(seeker_id, "fo_send_pending", PENDING_WINDOW_HOURS, 1)
+    if not pending:
+        return False
+    done = store.recent_event_details(seeker_id, "fo_send_done", PENDING_WINDOW_HOURS, 1)
+    return not done or done[0][1] < pending[0][1]
+
+
+def _mark_pending(store: Store, seeker_id: int, channel: str, ids) -> None:
+    if channel != "telegram":
+        store.record_event("fo_send_pending", ",".join(str(i) for i in ids), seeker_id=seeker_id)
+
+
+def _mark_resolved(store: Store, seeker_id: int, channel: str, outcome: str) -> None:
+    if channel != "telegram":
+        store.record_event("fo_send_done", outcome, seeker_id=seeker_id)
+
+
 def _require_one_seeker(channel: str, seeker_ids) -> None:
     """One Fo account belongs to one person: never fan out to it."""
     if channel != "telegram" and (seeker_ids is None or len(seeker_ids) != 1):
@@ -41,7 +65,17 @@ def push_digests(store: Store, send: Callable[[int, str], object],
                             channel=channel, record=False)
             if not digest.posting_ids:
                 continue
-            ref = send(to, digest.text)
+            if _unconfirmed_send(store, seeker.id, channel):
+                _log(f"digest for seeker {seeker.id} skipped: an earlier send is still unconfirmed")
+                continue
+            _mark_pending(store, seeker.id, channel, digest.posting_ids)
+            try:
+                ref = send(to, digest.text)
+            except Exception as exc:
+                if "(working)" not in str(exc):          # a clear failure: nothing was sent, so retry freely
+                    _mark_resolved(store, seeker.id, channel, "failed")
+                raise
+            _mark_resolved(store, seeker.id, channel, "delivered")
             for posting_id in digest.posting_ids:
                 store.record_notification(seeker.id, posting_id, channel, "first",
                                           ref if isinstance(ref, str) else None)
@@ -62,7 +96,17 @@ def push_followups(store: Store, send: Callable[[int, str], object],
             items = store.pending_followups(seeker_id, limit)
             if not items:
                 continue
-            ref = send(seeker_id, render(items))
+            if _unconfirmed_send(store, seeker_id, channel):
+                _log(f"follow-ups for seeker {seeker_id} skipped: an earlier send is still unconfirmed")
+                continue
+            _mark_pending(store, seeker_id, channel, [i["posting_id"] for i in items])
+            try:
+                ref = send(seeker_id, render(items))
+            except Exception as exc:
+                if "(working)" not in str(exc):
+                    _mark_resolved(store, seeker_id, channel, "failed")
+                raise
+            _mark_resolved(store, seeker_id, channel, "delivered")
             for item in items:
                 store.record_notification(seeker_id, item["posting_id"], channel,
                                           item["kind"], ref if isinstance(ref, str) else None)

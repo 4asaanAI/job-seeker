@@ -126,7 +126,7 @@ def test_hostile_ids_and_text_are_handled_safely(tmp_path):
             out = await call(c, "render_resume", {"seeker_id": 1, "posting_id": ids[0], "skills": ["Invented Skill"]})
             assert out["ok"] is False                                       # facts only: unknown skill refused
             out = await call(c, "build_fo_apply_message", {"seeker_id": 1, "posting_id": ids[0], "batch_approved": True})
-            assert out["ok"] is False and "plan_id" in out["error"]        # an approval without a server-issued plan is refused
+            assert out["ok"] is False and ("review mode" in out["error"] or "plan_id" in out["error"])   # no auto-approval by default
     asyncio.run(run())
 
 

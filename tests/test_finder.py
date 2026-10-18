@@ -93,11 +93,12 @@ def test_target_companies_get_their_feeds_found_and_shared(home):
     profile = yaml.safe_load((path / seeker.profile_path).read_text())
     assert profile["sources"] == ["indeed_us", "ashby_northwind", "stripe"]
 
-    # Found once, the feed is offered to everyone and never looked up again.
+    # Found once, the feed serves everyone who names that employer and is never looked up again, but it is not
+    # advertised in the catalog (that list would reveal who targets which employer).
     other = build_tools(store, path, operator_mode=False, onboard_telegram_id=10,
                         feed_finder=_finder(calls))
     names = {row["source"] for row in other["available_sources"]()}
-    assert "ashby_northwind" in names
+    assert "ashby_northwind" not in names
     assert "already covered" in other["register_me"](
         "Kim", "PM", "Austin", ["pm"], ["indeed_us"], target_companies=["Northwind Inc"]
     )["target_companies"]["Northwind Inc"]

@@ -47,9 +47,9 @@ def test_record_score_then_notifiable_then_suppressed(operator):
     sid, pid = _seed(store)
     assert tools["record_score"](sid, pid, 91.0,
                                   "Direct M&S account experience")["ok"]
-    assert [n["posting_id"] for n in tools["get_notifiable"](sid, 70.0, 5)] == [pid]
+    assert [n["posting_id"] for n in tools["get_notifiable"](sid, 70.0, 5)["items"]] == [pid]
     assert tools["record_notification"](sid, pid, "digest", "first")["ok"]
-    assert tools["get_notifiable"](sid, 70.0, 5) == []
+    assert tools["get_notifiable"](sid, 70.0, 5)["items"] == []
 
 
 def test_pinned_process_refuses_another_seeker(tmp_path):
@@ -62,7 +62,7 @@ def test_pinned_process_refuses_another_seeker(tmp_path):
     refused = pinned["get_notifiable"](b, 70.0, 5)
     assert refused["ok"] is False
     assert "pinned" in refused["error"]
-    assert pinned["get_notifiable"](a, 70.0, 5) == []
+    assert pinned["get_notifiable"](a, 70.0, 5)["items"] == []
     store2.close()
 
 
@@ -308,7 +308,7 @@ def test_seeker_actions_and_application_records_are_scoped(operator):
     assert applications["ok"] is True
     assert applications["items"][0]["status"] == "applied"
     assert store.seeker_jobs(sid)[0].status == "applied"
-    assert tools["get_notifiable"](sid, 70, 5) == []
+    assert tools["get_notifiable"](sid, 70, 5)["items"] == []
 
     other = store.add_seeker("Other", 2, "other.yaml", 20)
     refused = tools["record_application"](other, pid, "applied")

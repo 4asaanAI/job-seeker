@@ -24,17 +24,19 @@ fact; Telegram job lists skip the Fo seeker; `prepare_application` drops unsafe 
 the store lock; inbox matches leave out finished jobs; and the vacuous MCP tests now assert real behaviour.
 `review_required` is a reserved column that nothing enforces; applying is gated by approved plans and per-call permission prompts.
 
-Not fixed, with the honest impact:
+Fixed in the last pass (every limit that code alone can fix): the JavaScript-rendering retry in `web_fetch` is gone; auto-found
+employer feeds still serve everyone who names that employer but are no longer advertised in the source catalog; two seekers can
+no longer share a profile folder (enforced in the store, so every path is covered); single-seeker searches no longer skew a
+source's health history; the posting re-check in `migrate()` runs once per schema version and is retried if it fails; apply plan
+ids are stored in the database, so a restarted server still honours an approved plan; a Fo send that timed out is not repeated
+for 30 minutes (a clear failure can be retried at once); `get_notifiable` now returns an object that carries the
+untrusted-data note; and `review_required` now means something: it is on by default and blocks batch auto-submission until the
+user turns it off with `set_review_mode`.
 
-| Area | Limit | Impact |
+What remains, honestly:
+
+| Area | Limit | Why it cannot be closed here |
 |---|---|---|
-| `web_fetch` (Telegram bot only) | Host is checked once; the fetcher resolves it again (DNS rebinding), and a JS-rendering retry can run page scripts that reach private addresses. | Needs an egress proxy that refuses private ranges. Do not expose the web tools to untrusted users. |
-| Shared employer feeds | Feeds found for one seeker are stored globally and listed to all seekers. | Reveals which employers someone targets; stored names are seeker-supplied. |
-| Profile folders | Two profiles in one folder share resume, rubric and uploads. | Operator error only; the bot creates one folder per seeker. |
-| Source health | A single-seeker search records counts used for the "degraded" median. | Can mislabel a source as degraded. |
-| Schema migration | `migrate()` re-checks every posting on each start by design, so a half-finished upgrade repairs itself. | Slower starts with a large database. |
-| Plan ids live in the server process | A restarted MCP server forgets plan ids; ask for a new plan. | A minor inconvenience, and the safe default. |
-| `ask_fo` is not idempotent | A send that times out may still complete; the next run can duplicate a text. | A duplicate text, never a lost digest. |
-| Untrusted-data notes | `get_notifiable` returns a bare list, so it cannot carry the note. | The model is told scraped text is untrusted by the other tools and the system prompt. |
-
-Git history still contains a third party's first name from early commits; it was removed from the current tree.
+| `web_fetch` DNS rebinding (Telegram bot only) | We check the host, then Wigolo resolves it again; a malicious DNS server could change its answer in between. | Closing it needs an egress proxy that refuses private ranges, or pinning the connection inside Wigolo. Do not expose the web tools to untrusted users. |
+| `ask_fo` is not idempotent | Fo's MCP has no idempotency key, so a send that times out may still complete. The 30-minute guard makes a duplicate unlikely, not impossible. | It needs support from Fo's API. |
+| Git history | Early commits still contain a third party's first name; it was removed from the current tree. | Removing it means rewriting public history (force-push), which changes every commit id. Only done on the owner's explicit say-so. |

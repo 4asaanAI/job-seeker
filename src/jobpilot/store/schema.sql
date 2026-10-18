@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS seekers (
     -- Spec 17.7: the first weeks of digests queue for the operator's review
     -- before reaching this seeker; a global flag would gate a later-onboarded
     -- seeker the same as one already cleared, which is wrong.
-    -- reserved: not enforced anywhere yet (see docs/KNOWN-LIMITS.md); applying is gated by approved plans instead
+    -- review mode: 1 = every application needs its own confirmation; 0 = approved batches allowed (set_review_mode)
     review_required  INTEGER NOT NULL DEFAULT 1
 );
 

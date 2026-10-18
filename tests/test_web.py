@@ -125,14 +125,14 @@ def test_content_that_ended_up_on_a_private_address_is_discarded(monkeypatch, fa
         web.fetch("https://public.example/js-redirect")
 
 
-def test_fetch_retries_in_a_real_browser_when_plain_http_fails(monkeypatch, fake_wigolo):
+def test_fetch_never_retries_with_javascript_rendering(monkeypatch, fake_wigolo):
+    """A page's own scripts must not run in a browser that could reach private addresses."""
     calls = []
 
     def run(args, timeout=120):
         calls.append(args)
-        if "--render-js=always" not in args:
-            raise web.WebError("TLS chain verification failed")
-        return {"url": args[1], "title": "Job", "markdown": "open"}
+        raise web.WebError("TLS chain verification failed")
     monkeypatch.setattr(web, "run_wigolo", run)
-    assert web.fetch("https://careers.example.com/job/1")["text"] == "open"
-    assert len(calls) == 2
+    with pytest.raises(web.WebError):
+        web.fetch("https://careers.example.com/job/1")
+    assert len(calls) == 1 and all("--render-js=always" not in c for c in calls)

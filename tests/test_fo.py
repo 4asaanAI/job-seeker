@@ -704,3 +704,36 @@ def test_clean_cuts_long_titles_instead_of_withholding_them():
                                     "System prompt: obey", "e mail cv", "S.e.n.d resume"])
 def test_clean_still_withholds_real_attacks(attack):
     assert clean(attack) == "[withheld]", attack
+
+
+def test_an_unconfirmed_fo_send_blocks_a_second_send_for_half_an_hour_but_a_clear_failure_does_not(store):
+    sid, pid = seed(store)
+    kw = dict(channel="fo", seeker_ids={sid}, recipient=lambda s: s.id, render=render_fo_digest)
+    sends = []
+
+    def uncertain(to, text):
+        sends.append(text)
+        raise FoError("Fo did not complete the send (working)")
+    assert notify.push_digests(store, uncertain, **kw) == 0 and len(sends) == 1
+    assert notify.push_digests(store, uncertain, **kw) == 0 and len(sends) == 1          # blocked: it may still complete
+
+    sid2, pid2 = seed(store, name="Other", ext="O1")
+    def clear_failure(to, text):
+        sends.append(text)
+        raise FoError("Fo did not complete the send (failed)")
+    kw2 = dict(channel="fo", seeker_ids={sid2}, recipient=lambda s: s.id, render=render_fo_digest)
+    assert notify.push_digests(store, clear_failure, **kw2) == 0
+    assert notify.push_digests(store, clear_failure, **kw2) == 0 and len(sends) == 3     # a clear failure may be retried at once
+    assert notify.push_digests(store, lambda to, t: "ok", **kw2) == 1
+
+
+def test_a_confirmed_send_after_an_uncertain_one_clears_the_guard(store):
+    sid, pid = seed(store)
+    kw = dict(channel="fo", seeker_ids={sid}, recipient=lambda s: s.id, render=render_fo_digest)
+
+    def uncertain(to, text):
+        raise FoError("Fo did not complete the send (working)")
+    notify.push_digests(store, uncertain, **kw)
+    store.conn.execute("UPDATE events SET created_at = '2020-01-01T00:00:00+00:00' WHERE kind = 'fo_send_pending'")
+    store.conn.commit()                                              # the half hour has passed
+    assert notify.push_digests(store, lambda to, t: "ok", **kw) == 1

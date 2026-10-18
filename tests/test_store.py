@@ -1026,6 +1026,7 @@ def test_migrate_rehashes_and_merges_rows_when_the_new_parser_collides(tmp_path)
         "VALUES (?,?,?,?,?)", (sid, country_id, 80.0, "kept", "b")
     )
     s.conn.commit()
+    s.conn.execute("PRAGMA user_version = 0")      # a legacy database: the repair has not run yet
 
     s.migrate()
     rows = s.conn.execute(
@@ -1107,3 +1108,26 @@ def test_degraded_runs_count_as_history_so_a_new_normal_clears(tmp_path):
         s.record_source_run(source="x", canary_ok=True, canary_count=1, raw_count=count,
                             results_count=count, status=status, notes="", latency_ms=1)
     assert s.recent_counts("x", 7) == [9, 90]
+
+
+def test_posting_repair_runs_once_per_version_and_a_failed_run_is_retried(tmp_path, monkeypatch):
+    from jobpilot.store import db as dbmod
+    s = Store(tmp_path / "v.db")
+    s.migrate()
+    assert s.conn.execute("PRAGMA user_version").fetchone()[0] == dbmod.LOCATION_REPAIR_VERSION
+    calls = []
+    monkeypatch.setattr(s, "_migrate_location_columns", lambda: calls.append(1))
+    s.migrate()
+    assert calls == []                                   # current version: no re-parse of every posting
+    s.conn.execute("PRAGMA user_version = 0")
+    s.migrate()
+    assert calls == [1]                                  # a legacy database is repaired once
+    s.conn.execute("PRAGMA user_version = 0")
+
+    def boom():
+        raise RuntimeError("half-finished")
+    monkeypatch.setattr(s, "_migrate_location_columns", boom)
+    with pytest.raises(RuntimeError):
+        s.migrate()
+    assert s.conn.execute("PRAGMA user_version").fetchone()[0] == 0     # not marked done, so the next start retries
+    s.close()

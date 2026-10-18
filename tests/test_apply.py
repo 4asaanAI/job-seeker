@@ -137,6 +137,7 @@ def test_batch_plan_excludes_login_boards_and_orders_best_first(env):
 
 
 def _approve(tools, sid):
+    tools["set_review_mode"](sid, False)          # the user chose approved batches
     return tools["plan_apply_batch"](sid, 5)["plan_id"]
 
 
@@ -152,6 +153,7 @@ def test_approved_batch_message_submits_without_second_confirmation_but_stops_on
 def test_approved_batch_needs_a_real_plan_id(env):
     store, sid, ids, tools = env
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    tools["set_review_mode"](sid, False)
     for bad in (None, "", "forged", "0" * 12):
         out = tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=bad)
         assert out["ok"] is False and "plan_id" in out["error"], bad
@@ -161,6 +163,7 @@ def test_a_plan_id_only_covers_the_jobs_on_that_plan(env):
     store, sid, ids, tools = env
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
     https_link(store, ids[2], "https://boards.greenhouse.io/acme/jobs/3")
+    tools["set_review_mode"](sid, False)
     plan = tools["plan_apply_batch"](sid, 1)["plan_id"]                        # a plan of ONE job
     out = tools["build_fo_apply_message"](sid, ids[2], batch_approved=True, plan_id=plan)
     assert out["ok"] is False and "not on the approved apply list" in out["error"]
@@ -246,3 +249,32 @@ def test_open_only_best_matches_do_not_get_crowded_out_by_finished_jobs(env):
     store.conn.commit()
     open_ids = [m["posting_id"] for m in store.best_matches(sid, 1, open_only=True)]
     assert open_ids and open_ids[0] not in (ids[0], ids[1])
+
+
+def test_review_mode_is_the_default_and_blocks_batch_approval_until_the_user_turns_it_off(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    assert store.get_seeker(sid).review_required is True
+    plan = tools["plan_apply_batch"](sid, 5)["plan_id"]
+    out = tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=plan)
+    assert out["ok"] is False and "review mode" in out["error"]
+    assert tools["build_fo_apply_message"](sid, ids[1])["ok"]                 # per-job confirmation path still works
+    assert tools["set_review_mode"](sid, False)["review_required"] is False
+    assert tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=plan)["ok"]
+    assert tools["set_review_mode"](sid + 9, True)["ok"] is False
+
+
+def test_plan_ids_survive_a_server_restart(tmp_path):
+    from jobpilot.server import build_tools
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fo_demo", Path(__file__).resolve().parents[1] / "scripts" / "fo_demo.py")
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    store, sid, ids = demo.seed(tmp_path / "d")
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    first = build_tools(store, tmp_path / "d" / "out", pinned_seeker_id=sid, operator_mode=False)
+    first["set_review_mode"](sid, False)
+    plan = first["plan_apply_batch"](sid, 5)["plan_id"]
+    second = build_tools(store, tmp_path / "d" / "out", pinned_seeker_id=sid, operator_mode=False)   # "restarted" server
+    assert second["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=plan)["ok"]
+    store.close()

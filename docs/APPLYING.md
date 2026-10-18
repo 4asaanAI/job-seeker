@@ -47,6 +47,10 @@ Nothing is applied by this: it ends with a list you can approve.
 
 ## Apply to all my new jobs (whenever you ask)
 
+**Review mode.** By default (`review_required`) every application needs its own confirmation, so a batch cannot auto-submit.
+To allow approved batches, tell Claude to run `set_review_mode(false)`; turn it back on any time. Plan ids are stored in the
+database, so a restarted server still honours the plan you approved (they expire after two hours).
+
 Say "apply to my new jobs". Claude runs `plan_apply_batch` and shows you the list (at most 10, best first, no login-gated
 boards, nothing already applied, started or skipped). You give ONE yes for that exact list. Then, one job at a time, Claude
 builds `build_fo_apply_message(..., batch_approved=True)` and passes it to `ask_fo` unchanged (you still see Claude Code's
