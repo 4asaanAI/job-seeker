@@ -17,9 +17,9 @@ SAY: "Job hunting is a lot of tabs and a lot of forgetting. I built JobPilot, wh
 connected it to Fo, so the real-world part, texts and calendar, just happens."
 
 **0:12 Ask for matches** (Claude Code terminal)
-DO: type `What are my best new matches?`
+DO: type `What are my top three matches?`
 SAY: "I just talk to Claude. Claude has two tools connected: JobPilot for the data, and Fo for actions."
-DO: let it answer. Point at the three roles and their scores.
+DO: let it answer. Point at the three roles and their scores (92, 88, 84). If it lists more, say "top three" again; the list also holds older and lower-scored roles.
 
 **0:30 Prepare an application** (terminal)
 DO: type `Prepare my application for the Fabrikam role, and show me what you'd send.`
@@ -33,7 +33,7 @@ SAY: "Fo can email, call and buy for me, and job posts are written by strangers.
 Fo only ever gets an id, a score and a vetted title. Never the job post itself."
 
 **1:05 It lands on the phone** (phone screen, then back)
-DO: show the text arriving: "JobPilot: 3 new match(es) ..."
+DO: show the text arriving: "JobPilot: 3 new match(es) ..." (the three roles that had not been sent yet: ids 1, 2 and 3)
 SAY: "And there it is, on my phone."
 
 **1:15 Follow-up** (terminal)
