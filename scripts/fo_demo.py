@@ -99,7 +99,7 @@ def seed(base: Path, keep: bool = False) -> tuple[Store, int, list[int]]:
         pid = store.upsert_posting(Posting(
             company_name=company, source="indeed_us", external_id=f"demo-{n}",
             title=title, location="Austin, TX", description="Fictional demo posting.",
-            url=f"https://example.com/jobs/demo-{n}", posted_at="2026-10-17"))
+            url=f"https://github.com/4asaanAI/job-seeker/blob/main/docs/demo-jobs/demo-{n}.md", posted_at="2026-10-17"))
         store.link_posting(sid, pid)
         store.record_score(sid, pid, float(score), why, "demo")
         return pid
