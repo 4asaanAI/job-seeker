@@ -40,7 +40,7 @@ SAY: "And there it is, on my phone."
 DO: type `I applied to the Fabrikam role. Remind me to follow up in three days.`
 DO: approve the Fo prompt again. Show the calendar entry if it appears.
 SAY: "I record the application, and Fo books the follow-up. If it never gets a reply, JobPilot reminds me again."
-(If no calendar entry shows up, say instead: "...and Fo texts me the reminder." Do not claim a calendar entry you did not see.)
+(Fo creating a calendar entry was verified live. If it still does not appear on camera, say "...and Fo texts me the reminder" and do not claim an entry you did not see.)
 
 **1:28 Close** (README with the repo link)
 SAY: "JobPilot already existed. For this hackathon I added the Fo connection, the safety layer, and applications.

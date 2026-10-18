@@ -26,6 +26,7 @@ and your replies inside Fo do not come back to JobPilot. Replying and acting hap
 
 ## What is verified live
 
+- Calendar: verified. Through a Claude session, Fo created a calendar entry, and then deleted it (checked by the owner).
 - Interactive path (A): verified. `ask_fo` through a logged-in Claude session sent a real iMessage, and the
   reply shape (a text block holding JSON with `status`, `response`, `conversationId`) is covered by a test.
 - Scheduled notifier (B): covered by tests with a fake Fo, NOT yet run live. It needs `FO_API_KEY`, and the
