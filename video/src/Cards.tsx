@@ -43,3 +43,19 @@ export const Caption: React.FC<CardProps> = ({ text }) => (
     </div>
   </AbsoluteFill>
 );
+
+export type OutputProps = { title: string; lines: string[]; note: string };
+
+// A text card for evidence that was not captured on screen. It says so in its note.
+export const Output: React.FC<OutputProps> = ({ title, lines, note }) => (
+  <AbsoluteFill style={{ background: BG, alignItems: "center", justifyContent: "center", fontFamily: SANS }}>
+    <div style={{ width: 1560 }}>
+      <div style={{ fontSize: 56, fontWeight: 800, color: INK, marginBottom: 28 }}>{title}</div>
+      <div style={{ background: "#111833", border: "2px solid #26305c", borderRadius: 20, padding: "30px 40px",
+        fontFamily: "Menlo, 'SF Mono', Consolas, monospace", fontSize: 34, lineHeight: 1.5, color: "#6ee7a8" }}>
+        {lines.map((l, i) => <div key={i}>{l}</div>)}
+      </div>
+      <div style={{ fontSize: 32, color: AMBER, marginTop: 28 }}>{note}</div>
+    </div>
+  </AbsoluteFill>
+);

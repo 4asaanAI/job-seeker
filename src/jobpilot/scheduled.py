@@ -122,28 +122,37 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one bounded JobPilot routine")
     parser.add_argument("--machine", default=os.environ.get("JOBPILOT_MACHINE", "local"))
-    parser.add_argument("--mcp-config", type=Path, required=True)
+    parser.add_argument("--mcp-config", type=Path, default=None)
     parser.add_argument("--db", type=Path, default=None)
+    parser.add_argument("--config", type=Path, default=None, help="config.toml to use instead of the home one")
     parser.add_argument("--claude", default="claude")
     parser.add_argument("--max-budget-usd", type=float, default=2.0)
+    parser.add_argument("--deliver-only", action="store_true",
+                        help="skip discovery and scoring; only push digests and follow-ups")
     args = parser.parse_args()
-    result = run_once(
-        machine=args.machine, mcp_config=args.mcp_config, db_path=args.db,
-        claude_bin=args.claude, max_budget_usd=args.max_budget_usd,
-    )
-    print(result.output, end="")
-    if result.returncode == 0:
+    if not args.deliver_only and args.mcp_config is None:
+        parser.error("--mcp-config is required unless --deliver-only is given")
+    returncode = 0
+    if not args.deliver_only:
+        result = run_once(
+            machine=args.machine, mcp_config=args.mcp_config, db_path=args.db,
+            claude_bin=args.claude, max_budget_usd=args.max_budget_usd,
+        )
+        print(result.output, end="")
+        returncode = result.returncode
+    if returncode == 0:
         from .config import load_config
         from .score_runner import claude_scorer, score_all
         from .telegram_bot import Bot, _find_token
         home = jobpilot_home()
-        cfg = load_config()
+        cfg = load_config(args.config)
         store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
         try:
             store.migrate()
-            for row in score_all(store, home, claude_scorer(
-                    args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort)):
-                print(f"scoring: {row}")
+            if not args.deliver_only:
+                for row in score_all(store, home, claude_scorer(
+                        args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort)):
+                    print(f"scoring: {row}")
             deliver(
                 store, cfg, home,
                 bot_factory=lambda: (lambda t: Bot(t, home, store) if t else None)(_find_token(home)),
@@ -151,7 +160,7 @@ def main() -> int:
             )
         finally:
             store.close()
-    return result.returncode
+    return returncode
 
 
 if __name__ == "__main__":

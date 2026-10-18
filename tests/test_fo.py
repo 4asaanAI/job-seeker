@@ -607,3 +607,20 @@ def test_transport_selection_and_config(tmp_path, monkeypatch):
     f.write_text(BASE + '[fo]\ntransport="telepathy"\n')
     with pytest.raises(ValueError, match="transport"):
         load_config(f)
+
+
+def test_deliver_only_skips_discovery_and_scoring(store, tmp_path, monkeypatch, capsys):
+    """`python -m jobpilot.scheduled --deliver-only` must push digests without running claude discovery."""
+    import jobpilot.scheduled as sched
+    sid, _ = seed(store)
+    store.close()
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    cfgfile = tmp_path / "cfg.toml"
+    cfgfile.write_text(BASE + f'[fo]\nenabled=true\nseeker_id={sid}\ntransport="claude"\n')
+    monkeypatch.setattr(sched, "run_once", lambda **k: pytest.fail("discovery must not run"))
+    monkeypatch.setattr(sched, "make_fo_client", lambda cfg, claude="claude": SimpleNamespace(
+        send=lambda m: FoResult("complete", "relay")))
+    monkeypatch.setattr("sys.argv", ["scheduled", "--deliver-only", "--config", str(cfgfile),
+                                     "--db", str(tmp_path / "t.db")])
+    assert sched.main() == 0
+    assert "fo digests sent: 1" in capsys.readouterr().out
