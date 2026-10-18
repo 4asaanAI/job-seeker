@@ -26,6 +26,13 @@ Indeed, LinkedIn, Workday: an account and often a phone code Fo cannot always re
 foundit's phone verification never delivered a code, so Fo could not get in, and nothing was submitted. Start with
 direct and aggregator jobs, and apply by hand where a board needs a code only your phone gets.
 
+## Find the best new jobs (whenever you ask)
+
+Say "find me new jobs". Claude runs `run_my_search` (3 a day) to discover from your enabled boards, scores what is new with the
+rubric (a years-of-experience mismatch caps a score below 50), then runs `plan_apply_batch`. From a terminal:
+`python -m jobpilot.refresh --seeker N` does all three headlessly (`--no-search` to only score, `--max-batches` caps cost).
+Nothing is applied by this: it ends with a list you can approve.
+
 ## Apply to all my new jobs (whenever you ask)
 
 Say "apply to my new jobs". Claude runs `plan_apply_batch` and shows you the list (at most 10, best first, no login-gated

@@ -34,6 +34,7 @@ location: Austin, TX
 sources: [indeed_us]
 search_terms: [business analyst, analytics manager]
 min_score: 70
+rubric: general
 """
 
 RESUME = """\
