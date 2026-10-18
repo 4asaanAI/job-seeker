@@ -7,9 +7,12 @@ grammar that is re-checked here in Python, runs JobPilot locally, and answers th
     jp matches        your three best matches
     jp status         a few counts
     jp tailor <id>    tailor your resume to that job (a local DOCX); texts a summary
+    jp apply <id>     preview the application and text back a one-time code (applies to nothing yet)
+    jp yes <code>     your yes: Fo applies to THAT job with a resume tailored to it
 
-Commands never apply, email or change a job's status, so the worst a manipulated relay can cause is a harmless
-vetted text. The relay can see the user's own Fo threads (it runs on the user's own login); see the design doc.
+Only `jp yes <code>` can cause an application. The code is random, bound to one job, single use and expires in two
+hours, so a replayed or invented command cannot apply; the other commands are read-only, so the worst a manipulated
+relay can cause is a harmless vetted text. The relay can see the user's own Fo threads (it runs on the user's own login); see the design doc.
 """
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ try:
 except ImportError:          # Windows: no flock; polls are then not serialized, so run one scheduler
     fcntl = None
 import re
+import secrets
 import subprocess
 import tempfile
 import time
@@ -34,10 +38,11 @@ from .paths import jobpilot_home
 from .server import build_tools
 from .store.db import Store
 
-GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9}))\s*$", re.IGNORECASE)
+GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6}))\s*$",
+                     re.IGNORECASE)
 MAX_COMMANDS = 3
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
-HELP = "JobPilot commands: jp matches | jp status | jp tailor <id>"
+HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id>"
 
 
 class ClaudeReader:
@@ -114,7 +119,7 @@ def _matches(store: Store, sid: int) -> str:
     lines = ["JobPilot top matches"]
     for i, r in enumerate(rows, 1):
         lines.append(f"{i}. {clean(r['title'])}, {clean(r['company_name'])} ({float(r['fit_score']):.0f}/100) id {int(r['posting_id'])}")
-    lines.append("Reply jp tailor <id> to tailor your resume for one.")
+    lines.append("Reply jp apply <id> to apply to one (you confirm first), or jp tailor <id> to tailor only.")
     return "\n".join(lines)
 
 
@@ -147,7 +152,53 @@ def _tailor(store: Store, sid: int, out_dir: Path, posting_id: int) -> str:
             "Nothing was invented or sent.")
 
 
-def reply_for(store: Store, sid: int, out_dir: Path, text: str) -> str:
+def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> str:
+    tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
+    built = tools["build_fo_apply_message"](sid, posting_id)        # validates the job and link; sends and records nothing
+    if not built.get("ok"):
+        return f"JobPilot: cannot apply to id {posting_id}: {clean(built.get('error'), 110)}."
+    if built["route"] == "login":
+        return (f"JobPilot: id {posting_id} is on a board that needs an account or a phone code Fo cannot receive. "
+                "Apply by hand; ask Claude for manual_apply_packet.")
+    job = tools["tailor_resume"](sid, posting_id)["job"]
+    code = secrets.token_hex(3)
+    store.record_event("phone_apply", json.dumps({"code": code, "posting_id": posting_id}), sid, posting_id)
+    return (f"JobPilot: ready to apply to {clean(job['title'])}, {clean(job['company'])} (id {posting_id}).\n"
+            f"Resume tailored to this job; it lacks {len(built['job_terms_missing_from_resume'])} of its terms (none added).\n"
+            f"Fo will stop and text you if the form asks for anything not in your resume.\n"
+            f"To apply, reply: jp yes {code}\nValid for 2 hours. Ignore this to do nothing.")
+
+
+def _pending_posting(store: Store, sid: int, code: str) -> int | None:
+    for detail, _ in store.recent_event_details(sid, "phone_apply", 2, 20):
+        try:
+            p = json.loads(detail)
+        except ValueError:
+            continue
+        if p.get("code") == code and isinstance(p.get("posting_id"), int):
+            return p["posting_id"]
+    return None
+
+
+def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -> str:
+    posting_id = _pending_posting(store, sid, code)
+    if posting_id is None:
+        return "JobPilot: that code is not valid or has expired. Send jp apply <id> for a new one."
+    if apply_client is None:
+        return "JobPilot: no Fo transport is available to apply."
+    tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
+    built = tools["build_fo_apply_message"](sid, posting_id, phone_code=code)   # re-checks everything; consumes the code
+    if not built.get("ok"):
+        return f"JobPilot: not applied: {clean(built.get('error'), 110)}."
+    result = apply_client.send(built["message"])
+    if result.status == "complete":
+        return (f"JobPilot: Fo has handled your application for id {posting_id}. It stops and texts you if the form "
+                "needed anything not in your resume. Ask Claude 'how am I doing' to record the result.")
+    return (f"JobPilot: Fo did not confirm the application for id {posting_id} ({result.status}); it is marked started, "
+            "so it will not be sent twice. Check with Fo, or apply by hand.")
+
+
+def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=None) -> str:
     m = GRAMMAR.match(text)
     if not m:
         return HELP
@@ -155,6 +206,10 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str) -> str:
         return _matches(store, sid)
     if m.group(2):
         return _status(store, sid)
+    if m.group(4):
+        return _apply_preview(store, sid, out_dir, int(m.group(4)))
+    if m.group(5):
+        return _apply_yes(store, sid, out_dir, m.group(5).lower(), apply_client)
     return _tailor(store, sid, out_dir, int(m.group(3)))
 
 
@@ -195,15 +250,15 @@ def _locked(path: Path):
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def _safe_reply(store: Store, sid: int, out_dir: Path, text: str) -> str:
+def _safe_reply(store: Store, sid: int, out_dir: Path, text: str, apply_client=None) -> str:
     try:
-        return reply_for(store, sid, out_dir, text)
+        return reply_for(store, sid, out_dir, text, apply_client)
     except Exception as exc:  # noqa: BLE001 - one bad command must not block the inbox
         return f"JobPilot: that command failed ({type(exc).__name__})."
 
 
 def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_path: Path,
-              *, max_commands: int = MAX_COMMANDS) -> int:
+              *, max_commands: int = MAX_COMMANDS, apply_client=None) -> int:
     """Returns how many commands were answered. A command is marked handled only after ITS reply was delivered."""
     with _locked(state_path):
         seen = _load(state_path)
@@ -217,7 +272,7 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
         done, failure = 0, None
         for fp, text in todo[:max_commands]:
             try:
-                send(None, _safe_reply(store, seeker_id, out_dir, text))   # raises unless Fo confirms
+                send(None, _safe_reply(store, seeker_id, out_dir, text, apply_client))   # raises unless Fo confirms
             except FoError as exc:
                 failure = failure or exc      # this one is retried next poll; the others still run
                 continue
@@ -255,7 +310,7 @@ def main() -> int:
             return 2
         reader = ClaudeReader(args.claude, cfg.fo_url)
         n = poll_once(store, cfg.fo_seeker_id, cfg.out_dir, reader, fo_sender(client),
-                      home / "data" / "fo_inbox_seen.json")
+                      home / "data" / "fo_inbox_seen.json", apply_client=client)
         print(f"fo inbox: answered {n} command(s)")
         return 0
     except Exception as exc:  # noqa: BLE001 - report, exit non-zero, never traceback into a scheduler log

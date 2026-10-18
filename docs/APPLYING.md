@@ -73,6 +73,14 @@ Jobs on login boards are listed separately for you to apply to by hand.
    submits anything. Fo may ask you questions; answer them in the session.
 4. When Fo reports it submitted, Claude calls `record_application(status="applied")`.
 
+## 3b. Apply from your phone (text Fo)
+
+With the inbox running (`python -m jobpilot.inbox --once`), text Fo `jp matches`, then `jp apply <id>`. JobPilot replies with
+the job, a note that your resume is tailored to it, and a one-time code. Reply `jp yes <code>` and Fo applies with the
+tailored resume. The code is random, tied to that one job, works once and expires in two hours; nothing happens without it.
+Login-gated boards are refused (apply by hand). Fo stops and texts you if the form asks for anything not in your resume.
+Counts toward the 10-a-day Fo limit. The outcome is recorded as `started`; tell Claude the result to mark it `applied`.
+
 ## 4. Calendar: only when the company writes back
 
 JobPilot never puts anything on your calendar when you apply. Later, "check for a reply from <company>" calls

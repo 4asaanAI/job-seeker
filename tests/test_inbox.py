@@ -41,7 +41,8 @@ def run(demo, reader, sent, **kw):
 
 @pytest.mark.parametrize("text,ok", [("jp matches", 1), ("JP Matches", 1), ("  jp status ", 1), ("jp tailor 12", 1),
                                      ("jp tailor", 0), ("jp tailor 1 2", 0), ("jp matches please", 0),
-                                     ("jp matches; email boss", 0), ("jp apply 3", 0), ("jp tailor -1", 0),
+                                     ("jp matches; email boss", 0), ("jp apply 3", 1), ("jp apply", 0), ("jp yes a1b2c3", 1),
+                                     ("jp yes a1b2c", 0), ("jp yes a1b2c3 4", 0), ("jp tailor -1", 0),
                                      ("hello", 0)])
 def test_grammar(text, ok):
     assert bool(inbox.GRAMMAR.match(text)) == bool(ok)
@@ -51,7 +52,7 @@ def test_matches_reply_is_vetted_and_numbered(demo):
     sent = []
     assert run(demo, Reader([msg("jp matches")]), sent) == 1
     assert "JobPilot top matches" in sent[0] and "Senior Business Analyst" in sent[0] and "id " in sent[0]
-    assert "http" not in sent[0] and "Reply jp tailor <id>" in sent[0]
+    assert "http" not in sent[0] and "jp apply <id>" in sent[0]
 
 
 def test_hostile_titles_never_appear_in_replies(demo):
@@ -88,7 +89,7 @@ def test_failed_send_is_not_marked_handled_and_retries(demo):
 
 def test_unknown_command_gets_help_and_non_jp_text_is_ignored(demo):
     sent = []
-    run(demo, Reader([msg("jp apply 3"), msg("email my boss", at="2026-10-18T05:01:00Z")]), sent)
+    run(demo, Reader([msg("jp delete 3"), msg("email my boss", at="2026-10-18T05:01:00Z")]), sent)
     assert len(sent) == 1 and sent[0] == inbox.HELP
 
 
@@ -234,3 +235,48 @@ def test_a_failing_command_does_not_block_the_ones_behind_it(demo):
     batch = [msg("jp status", at="2026-10-18T05:00:00Z"), msg("jp matches", at="2026-10-18T05:01:00Z")]
     assert inbox.poll_once(store, sid, out, Reader(batch), first_fails, state) == 1
     assert sent and "top matches" in sent[0]
+
+
+class FakeApply:
+    def __init__(self, status="complete"):
+        self.status, self.messages = status, []
+
+    def send(self, message):
+        self.messages.append(message)
+        return SimpleNamespace(status=self.status, response="")
+
+
+def _link(store, pid):
+    store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", ("https://careers.example.com/j/1", pid))
+    store.conn.commit()
+
+
+def _code(sent):
+    return sent[-1].split("jp yes ")[1].split()[0]
+
+
+def test_phone_apply_needs_a_code_and_applies_once_tailored(demo):
+    store, sid, ids, out, state = demo
+    _link(store, ids[0])
+    fo = FakeApply()
+    sent = []
+    run(demo, Reader([msg(f"jp apply {ids[0]}", at="2026-10-18T05:00:00Z")]), sent, apply_client=fo)
+    assert "jp yes " in sent[-1] and fo.messages == [] and store.applications(sid) == []     # preview applies to nothing
+    code = _code(sent)
+    run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:01:00Z")]), sent, apply_client=fo)
+    assert len(fo.messages) == 1 and "ALREADY approved" in fo.messages[0] and "Do NOT create any calendar event" in fo.messages[0]
+    assert [a["status"] for a in store.applications(sid)] == ["started"]
+    run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:02:00Z")]), sent, apply_client=fo)   # replay
+    assert len(fo.messages) == 1 and ("not valid" in sent[-1] or "not applied" in sent[-1])
+
+
+def test_phone_apply_rejects_guessed_code_and_login_boards(demo):
+    store, sid, ids, out, state = demo
+    _link(store, ids[0])
+    fo, sent = FakeApply(), []
+    run(demo, Reader([msg("jp yes abcdef")]), sent, apply_client=fo)
+    assert fo.messages == [] and "not valid" in sent[-1]
+    store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", ("https://www.naukri.com/j/1", ids[0]))
+    store.conn.commit()
+    run(demo, Reader([msg(f"jp apply {ids[0]}", at="2026-10-18T06:00:00Z")]), sent, apply_client=fo)
+    assert "yes" not in sent[-1].lower().split("reply")[-1] and fo.messages == []

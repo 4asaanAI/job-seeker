@@ -727,6 +727,20 @@ def build_tools(
         return None
 
 
+    def _phone_approval_ok(sid: int, posting_id: int, code: str) -> bool:
+        """A code the seeker was texted for exactly this job (jp apply), not yet used, under two hours old."""
+        def codes(kind: str, hours: int) -> list[dict]:
+            out = []
+            for detail, _ in store.recent_event_details(sid, kind, hours, 50):
+                try:
+                    out.append(json.loads(detail))
+                except ValueError:
+                    pass
+            return out
+        if any(u.get("code") == code for u in codes("phone_apply_used", 3)):
+            return False
+        return any(p.get("code") == code and p.get("posting_id") == posting_id for p in codes("phone_apply", 2))
+
     def _eligible_for_batch(sid: int, limit: int, min_score: float = 70.0) -> list[dict]:
         out = apply_candidates(sid, limit=25, min_score=min_score)
         # unknown domains never go into an auto-submitting batch: they use the per-job path with a confirmation
@@ -764,8 +778,12 @@ def build_tools(
         bullet_order: dict[str, list[str]] | None = None,
         batch_approved: bool = False,
         plan_id: str | None = None,
+        phone_code: str | None = None,
     ) -> dict:
         """Build the request that asks Fo to apply to ONE job. SENDS NOTHING.
+
+        phone_code is only for the text inbox (`jp apply` then `jp yes <code>`): the user approved this exact job
+        from their phone. Never invent or pass it yourself.
 
         With batch_approved=True you must also pass the `plan_id` that plan_apply_batch returned (and the user
         approved): it ties the approval to that exact list and expires after two hours.
@@ -811,14 +829,25 @@ def build_tools(
                                      "threshold, already attempted or skipped)")
                 if store.event_count_since(sid, "fo_apply_batch", 24) >= MAX_DAILY_APPLY_REQUESTS:
                     raise ValueError("daily limit of Fo apply requests reached; try again tomorrow")
+            if phone_code:
+                if batch_approved:
+                    raise ValueError("use either batch_approved or phone_code, not both")
+                if classify_route(link)[0] == "login":
+                    raise ValueError("this board needs an account or a code Fo cannot receive; apply by hand (manual_apply_packet)")
+                if not _phone_approval_ok(sid, int(posting_id), phone_code):
+                    raise ValueError("that approval code is not valid for this job, was already used, or has expired")
+                if store.event_count_since(sid, "fo_apply_batch", 24) >= MAX_DAILY_APPLY_REQUESTS:
+                    raise ValueError("daily limit of Fo apply requests reached; try again tomorrow")
             names = safe_title_company(posting["title"], posting["company_name"])
             if names is None:
                 raise ValueError("this posting's title or company looks unsafe; apply to it by hand")
             base = load_base_resume(_base_resume_path(sid))
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
-            message = apply_message(names[0], names[1], link, text, approved=batch_approved)
-            if batch_approved:
+            message = apply_message(names[0], names[1], link, text, approved=batch_approved or bool(phone_code))
+            if phone_code:
+                store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
+            if batch_approved or phone_code:
                 store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
                 # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
                 store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")

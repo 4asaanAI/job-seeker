@@ -31,9 +31,13 @@ runs JobPilot locally, and answers through Fo's send path.
 
 ## Not in scope
 
-Applying, emailing, calendar changes, free-form questions, a daemon. A scheduler or `/loop` can run `--once`.
+Emailing, calendar changes, free-form questions, a daemon. A scheduler or `/loop` can run `--once`.
 
 ## Tests (no network)
 
 Grammar accept/reject table; relay output with injection text is filtered; dedupe across polls; reply written only after
 confirmed delivery; unknown/unlinked ids; reply content has no hostile text; rate limit; relay failure leaves state alone.
+
+## Addendum: applying by text
+
+`jp apply <id>` previews and texts a random one-time code (stored as an event, bound to one posting, two-hour expiry). `jp yes <code>` is the only command with an effect: the server re-validates the code, link, route (no login boards), daily cap and duplicates, consumes the code, then sends the tailored apply request through the same Fo client. Everything else stays read-only.
