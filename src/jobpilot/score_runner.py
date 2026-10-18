@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 
 from .fo import child_env
@@ -62,17 +64,22 @@ def parse_scores(text: str, wanted: set[int]) -> list[tuple[int, float, str]]:
 
 
 def claude_scorer(claude_bin: str = "claude", model: str | None = None,
-                  effort: str | None = None, runner=subprocess.run):
+                  effort: str | None = None, runner=subprocess.run, neutral: bool = False):
+    """neutral=True also runs in an empty directory with only user settings, so a project's own settings, hooks and
+    CLAUDE.md cannot sit next to untrusted text (same hardening as the inbox reader)."""
     def ask(prompt: str) -> str:
         command = [claude_bin, "--print", "--no-session-persistence", "--strict-mcp-config",
                    "--tools", "", "--disable-slash-commands"]
+        if neutral:
+            command += ["--setting-sources", "user"]
         if model:
             command += ["--model", model]
         if effort:
             command += ["--effort", effort]
-        done = runner(command, input=prompt, capture_output=True, text=True,
-                      encoding="utf-8", timeout=600, check=False,
-                      env=child_env())
+        with tempfile.TemporaryDirectory(prefix="jobpilot-") if neutral else nullcontext() as cwd:
+            done = runner(command, input=prompt, capture_output=True, text=True,
+                          encoding="utf-8", timeout=600, check=False,
+                          env=child_env(), **({"cwd": cwd} if neutral else {}))
         out = done.stdout or ""
         # A usage limit is printed on stdout, sometimes with exit code 0.
         if done.returncode != 0 or re.search(r"hit your .{0,20}limit|usage limit", out[:300], re.I):

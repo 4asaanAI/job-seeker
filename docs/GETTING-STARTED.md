@@ -4,14 +4,22 @@ Five minutes to set up, then it works for you in the background. For Fo-specific
 
 ## 1. Install and create your profile
 
+First install Python 3.12 and [Claude Code](https://claude.com/claude-code), and run `claude` once to log in. Then:
+
 ```bash
 python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/python -m jobpilot.onboard --help      # name, resume, role, location, search terms, sources
-.venv/bin/python -m jobpilot.doctor              # tells you what is missing, one line each
+.venv/bin/python -m jobpilot.setup
 ```
 
-Copy `.mcp.fo-demo.json.example` to `.mcp.json`, fill in the paths and your seeker id, start Claude Code and log in to Fo
-with `/mcp`.
+Setup asks a few plain questions and then:
+- saves your resume. With a file (PDF, Word or text), Claude lays it out and you see the result before saving; every line must
+  appear in your file, and anything that does not is refused. With no file, it opens a fill-in text file (TextEdit on a Mac);
+  nothing you type is reworded.
+- writes `.mcp.json` (it asks before replacing an existing one) and, if you use Fo, the Fo entry and `config.local.toml`.
+- runs the checker and prints what is left. By hand: log in to Fo with `/mcp` inside Claude Code.
+
+Stop it any time with Ctrl-C and run it again; it picks up where it left off. Prefer manual steps? `python -m jobpilot.onboard --help`,
+then `python -m jobpilot.doctor`, and copy `.mcp.fo-demo.json.example` to `.mcp.json`.
 
 ## 2. What to say to Claude
 

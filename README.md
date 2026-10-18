@@ -74,6 +74,7 @@ diff it yourself: [all changes since the last pre-hackathon commit](https://gith
 | Safe applying (vetted request, route check, approved batch, no calendar until the company writes) | `src/jobpilot/apply.py`, `server.py` |
 | Facts-only resume tailoring | `src/jobpilot/resume/tailor.py` |
 | Search, score and list on demand | `src/jobpilot/refresh.py` |
+| One-command setup, resume builder, facts-only cover letter | `src/jobpilot/setup.py`, `resume/build.py`, `resume/letter.py` |
 | Text-Fo inbox (experimental, not verified live; includes jp apply / jp yes, jp replies and outcome commands) | `src/jobpilot/inbox.py` |
 | Injection attack demo and fictional-data demo | `scripts/injection_demo.py`, `scripts/fo_demo.py` |
 | Real-server MCP tests (listing, pinning, malformed and hostile input) | `tests/test_mcp_judge.py`, `tests/test_mcp_stdio.py` |
