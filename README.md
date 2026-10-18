@@ -29,15 +29,16 @@ Copy `.mcp.fo-demo.json.example` to `.mcp.json` (the older `.mcp.json.example` i
 python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python scripts/injection_demo.py   # a poisoned job posting is neutralized before Fo sees it
 .venv/bin/python scripts/fo_demo.py          # dry run on a fictional seeker: the exact messages Fo would get
-.venv/bin/python -m pytest -q                # 500+ offline tests, including one that starts the real MCP server
+.venv/bin/python -m pytest -q                # 890+ offline tests, including one that starts the real MCP server
 ```
 
 ## What is new for the hackathon
 
 - **Fo delivery with a safety layer.** A minimal digest (id, score, vetted title), random-marker wrapper, host-pinned
   client that never follows redirects, and "delivered" only when Fo confirms. One Fo account serves exactly one seeker.
-- **Two transports.** `api` (an `FO_API_KEY`, ready for when Wajo ships keys; tested with a fake Fo) and `claude`, a
-  headless `claude -p` relay on your own Fo login with only Fo's send/poll tools. The relay is verified live.
+- **Two transports, both verified live.** `api` (a Wajo API key from `FO_API_KEY` or a private `~/.config/jobpilot/fo_api_key`:
+  one text came back complete in 46 seconds with Fo's reply text) and `claude`, a headless `claude -p` relay on your own Fo
+  login with only Fo's send/poll tools.
 - **Tailored resumes, facts-only.** `tailor_resume` ranks your own bullets and skills against a job and lists the
   job terms your resume lacks. `render_resume` can only keep and reorder what your resume already says.
 - **Text Fo, JobPilot answers.** Wajo has no inbound webhook yet, but Fo's MCP can read your own conversation
@@ -49,7 +50,11 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 - **Applying through Fo, on your yes.** `build_fo_apply_message` builds one vetted request per job (safe link, your resume text,
   "ask me before submitting", **no calendar event**). A calendar entry appears only when the company itself sends an invitation
   (`build_fo_reply_check_message`). Nothing is sent by JobPilot; every `ask_fo` passes Claude Code's permission prompt.
-- **Google Sheets and Docs through Fo.** A tracker sheet Fo keeps current (`jp sync`, or automatic with `[google] enabled`) and each
+- **A living job record in Google Sheets, kept by Fo.** Fo created the "JobPilot Tracker" sheet in my Drive and filled it with 82 real
+  jobs, then handed back its link. JobPilot saves that link, opens the sheet by id from then on, and puts "Your job tracker: <link>"
+  in every digest. Ask Fo in iMessage for the link and it texts it; on-demand refreshes text one update line with the link. Statuses
+  (match, started, applied, interview, rejected, offer, deadline passed, stale) are kept current, never deleted.
+- **Google Docs through Fo.** Each
   job's tailored resume as a Google Doc (`jp doc <id>`) or a facts-only cover letter (`jp letter <id>`). Details in [docs/APPLYING.md](docs/APPLYING.md).
 - **Real-server test.** The MCP server is started over stdio and driven like Claude would, including seeker pinning.
 
@@ -80,15 +85,28 @@ diff it yourself: [all changes since the last pre-hackathon commit](https://gith
 | Real-server MCP tests (listing, pinning, malformed and hostile input) | `tests/test_mcp_judge.py`, `tests/test_mcp_stdio.py` |
 | Two independent code reviews, fixes and known limits | `docs/KNOWN-LIMITS.md` |
 
-About 19,800 lines of code, tests and scripts in 177 commits; 747 tests.
+About 20,000 lines of code, tests and scripts in 190+ commits; 897 tests.
+
+## Where the Fo MCP is used
+
+| Fo tool | What JobPilot does with it | Safety |
+|---|---|---|
+| `ask_fo` | Text me the new matches (digest) and follow-ups | Vetted id, score and title only, random-marker wrapper |
+| `ask_fo` | Create and update the Google Sheet job record, return its link, text me one update line | Rows vetted; "only files I own", no sharing, never delete or move a status backwards |
+| `ask_fo` | Apply to a job on my yes: resume text, optional PDF from a Google Doc | One request per job, safe link, Fo asks before submitting, no calendar event |
+| `ask_fo` | Resume and cover-letter Docs, reply check, calendar entry only when a company sends an invite | Each request is built and vetted in Python; every `ask_fo` passes Claude Code's permission prompt |
+| `get_fo_reply` | Wait for a long Fo turn to finish ("working" to "complete") | Only `complete` counts as delivered |
+| `list_fo_conversations`, `get_fo_conversation` | Read-only: the polling inbox looks for `jp ...` texts | Re-checked in Python; cannot see iMessage texts (see KNOWN-LIMITS) |
+| `start_fo_call` | Not used, and explicitly denied to the relays | Calls are never needed |
 
 ## Honest status
 
-| Verified live | Built and tested, not live |
+| Verified live (Oct 17-19, my real profile) | Built and tested, not live |
 |---|---|
-| Claude -> Fo texts and calendar create/delete | `api` transport (Wajo has not released headless keys) |
-| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released). A polling inbox is built and tested with a fake Fo; live (checked 2026-10-18), Fo's transcript API returns only Fo's own messages in iMessage/SMS threads, never yours, so `jp` texts typed there are never seen |
-| Real Fo permission prompt shows the exact vetted message | |
+| Claude -> Fo texts and calendar create/delete | Applying end to end: the form fill, a PDF upload into a form, a company-sent interview invite |
+| Direct Fo **API** with a Wajo key, and the headless `claude` relay | Google Docs, Slides, cover letters and the one-command setup wizard (tested with a fake Fo) |
+| A real search of Indeed, foundit and Himalayas (216 + 289 + 114 jobs), scoring, a digest texted by Fo | `jp ...` texts answering from iMessage: **not possible today**, Fo's transcript API returns only Fo's own messages in SMS threads, never yours (checked live; needs Wajo's inbound webhook) |
+| Fo built the Google Sheet job record (82 real rows) and handed back its link; Fo texted the link when asked in iMessage | |
 
 More: [docs/FO-DEMO.md](docs/FO-DEMO.md) (demo and safety choices) · [docs/APPLYING.md](docs/APPLYING.md) (using it for your own search).
 

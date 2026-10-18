@@ -52,9 +52,9 @@ def vetted_job_url(url: str | None) -> str | None:
 
 _DIRECT = ("greenhouse.io", "lever.co", "jobs.ashbyhq.com",
            "apply.workable.com", "jobs.smartrecruiters.com", "bamboohr.com", "breezy.hr")
-_LOGIN = ("foundit.in", "naukri.com", "indeed.com", "linkedin.com", "glassdoor.com", "monster.com",
+_LOGIN = ("himalayas.app", "foundit.in", "naukri.com", "indeed.com", "linkedin.com", "glassdoor.com", "monster.com",
           "myworkdayjobs.com", "shine.com", "ziprecruiter.com")
-_AGGREGATOR = ("himalayas.app", "remoteok.com", "jobicy.com", "remotive.com")
+_AGGREGATOR = ("remoteok.com", "jobicy.com", "remotive.com")
 
 
 def _host_in(host: str, names) -> bool:

@@ -98,7 +98,7 @@ def test_reply_check_needs_a_submitted_application(env):
 @pytest.mark.parametrize("url,route", [
     ("https://boards.greenhouse.io/acme/jobs/1", "direct"), ("https://jobs.lever.co/acme/x", "direct"),
     ("https://www.foundit.in/job/x", "login"), ("https://in.indeed.com/viewjob?jk=1", "login"),
-    ("https://acme.wd1.myworkdayjobs.com/x", "login"), ("https://himalayas.app/companies/x/jobs/y", "aggregator"),
+    ("https://acme.wd1.myworkdayjobs.com/x", "login"), ("https://himalayas.app/companies/x/jobs/y", "login"), ("https://remoteok.com/remote-jobs/y", "aggregator"),
     ("https://careers.example.com/1", "unknown"), (None, "unknown")])
 def test_route_classification(url, route):
     assert ap.classify_route(url)[0] == route
@@ -113,7 +113,7 @@ def test_apply_candidates_orders_by_route_and_leaves_out_done_jobs(env):
     store, sid, ids, tools = env
     https_link(store, ids[0], "https://www.foundit.in/job/1")
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
-    https_link(store, ids[2], "https://himalayas.app/companies/a/jobs/3")
+    https_link(store, ids[2], "https://remoteok.com/remote-jobs/a-3")
     out = tools["apply_candidates"](sid)
     assert out["ok"]
     routes = [i["route"] for i in out["items"]]
@@ -128,7 +128,7 @@ def test_batch_plan_excludes_login_boards_and_orders_best_first(env):
     store, sid, ids, tools = env
     https_link(store, ids[0], "https://www.foundit.in/job/1")
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
-    https_link(store, ids[2], "https://himalayas.app/companies/a/jobs/3")
+    https_link(store, ids[2], "https://remoteok.com/remote-jobs/a-3")
     plan = tools["plan_apply_batch"](sid, 5)
     got = [i["posting_id"] for i in plan["items"]]
     assert ids[0] not in got and ids[1] in got and ids[2] in got
