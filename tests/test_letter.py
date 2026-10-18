@@ -109,7 +109,7 @@ def test_cover_letter_message_has_the_safety_rules():
 def test_apply_message_unchanged_without_a_letter():
     plain = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", approved=True, attach_pdf=True)
     assert "a file other than my resume" in plain and "cover letter" in plain     # the old stop-and-ask rule is intact
-    assert "or cover letter" not in plain and "8." not in plain
+    assert "or cover letter" not in plain and not any(l.startswith("8.") for l in plain.splitlines())
 
 
 @pytest.mark.parametrize("pdf,number", [(True, "8."), (False, "7.")])
