@@ -27,6 +27,10 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
   headless `claude -p` relay on your own Fo login with only Fo's send/poll tools. The relay is verified live.
 - **Tailored resumes, facts-only.** `tailor_resume` ranks your own bullets and skills against a job and lists the
   job terms your resume lacks. `render_resume` can only keep and reorder what your resume already says.
+- **Text Fo, JobPilot answers.** Wajo has no inbound webhook yet, but Fo's MCP can read your own conversation
+  transcripts. `python -m jobpilot.inbox --once` polls them through a headless relay, accepts a strict read-only
+  grammar (`jp matches`, `jp status`, `jp tailor <id>`) re-checked in Python, runs JobPilot locally and replies
+  through Fo. Commands never apply, email or change a job's status. Design: [docs/superpowers/specs/2026-10-18-fo-inbox-design.md](docs/superpowers/specs/2026-10-18-fo-inbox-design.md).
 - **Applications you approve.** `prepare_application` builds a text package from your resume facts and sends nothing.
 - **Real-server test.** The MCP server is started over stdio and driven like Claude would, including seeker pinning.
 
@@ -45,7 +49,7 @@ flowchart LR
 | Verified live | Built and tested, not live |
 |---|---|
 | Claude -> Fo texts and calendar create/delete | `api` transport (Wajo has not released headless keys) |
-| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released) |
+| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released; the polling inbox covers it) |
 | Real Fo permission prompt shows the exact vetted message | |
 
 More: [docs/FO-DEMO.md](docs/FO-DEMO.md) (demo and safety choices) · [docs/APPLYING.md](docs/APPLYING.md) (using it for your own search).

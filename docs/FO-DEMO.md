@@ -37,6 +37,14 @@ and your replies inside Fo do not come back to JobPilot. Replying and acting hap
 - (older note) Scheduled notifier via API key: covered by tests with a fake Fo, NOT yet run live. It needs `FO_API_KEY`, and the
   header the key goes in (`Authorization: Bearer`) is unconfirmed. A `working` (slow) reply has not been seen live.
 
+## Text Fo, JobPilot answers (polling inbox)
+
+Text Fo `jp matches`, `jp status` or `jp tailor <id>` from your phone, then run
+`python -m jobpilot.inbox --once --config <your config with [fo] enabled>` (or put it on a timer). A headless Claude on
+your own Fo login reads your recent Fo texts (it can see those threads, and only returns texts starting with `jp`), Python
+re-validates each one against the grammar, JobPilot answers locally, and Fo texts the reply. Each text is answered once;
+a failed reply is retried. Nothing here applies, emails or changes a job's status.
+
 ## Run it
 
 ```bash
