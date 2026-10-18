@@ -8,6 +8,10 @@
 # so it needs no separate credentials or launch logic of its own.
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Definition)
 $Log = Join-Path $Root "telegram-state\watchdog.log"
+# Moved to the AWS host (layaa-shared-search) on 2026-09-25. While this marker
+# exists the Windows copy stays off, so two bots never poll one token.
+# Delete telegram-state\MOVED_TO_AWS to run the bot on this PC again.
+if (Test-Path (Join-Path $Root "telegram-state\MOVED_TO_AWS")) { exit 0 }
 New-Item -ItemType Directory -Force (Join-Path $Root "telegram-state") | Out-Null
 
 $alive = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |

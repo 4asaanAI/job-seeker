@@ -97,7 +97,7 @@ def score_backlog(store: Store, seeker_id: int, profile, profile_path: Path,
             store.record_event("scoring_error", f"seeker {seeker_id}: {type(exc).__name__}: {exc}")
             results = []
         for pid, score, reason in results:
-            store.record_score(seeker_id, pid, score, reason, "claude-batch")
+            store.record_score(seeker_id, pid, score, reason, getattr(ask, "label", "claude-batch"))
         scored += len(results)
         if not results:
             failed_batches += 1
@@ -139,8 +139,13 @@ def main() -> int:
         store.migrate()
         from .config import load_config
         cfg = load_config()
-        for row in score_all(store, home, claude_scorer(model=cfg.scoring_model,
-                                                        effort=cfg.scoring_effort)):
+        if cfg.llm.provider == "bedrock":
+            from .llm import bedrock_scorer
+            ask = bedrock_scorer(model=cfg.llm.scoring_model, region=cfg.llm.region,
+                                 fallback_model=cfg.llm.fallback_model)
+        else:
+            ask = claude_scorer(model=cfg.scoring_model, effort=cfg.scoring_effort)
+        for row in score_all(store, home, ask):
             print(row)
     finally:
         store.close()

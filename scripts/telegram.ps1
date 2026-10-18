@@ -3,6 +3,10 @@
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Definition)
 $env:JOBPILOT_HOME = $Root
+# Moved to the AWS host (layaa-shared-search) on 2026-09-25. While this marker
+# exists the Windows copy stays off, so two bots never poll one token.
+# Delete telegram-state\MOVED_TO_AWS to run the bot on this PC again.
+if (Test-Path (Join-Path $Root "telegram-state\MOVED_TO_AWS")) { exit 0 }
 $env:GCM_INTERACTIVE = "Never"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $Log = Join-Path $Root "telegram-state\bot.log"

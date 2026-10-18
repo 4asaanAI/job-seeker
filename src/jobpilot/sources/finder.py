@@ -117,6 +117,14 @@ def _owner_matches(title: str, company: str) -> bool:
 
 def wigolo_search(query: str, domain: str) -> list[dict]:
     """Web search restricted to one domain; [] when Wigolo is unavailable."""
+    if os.environ.get("JOBPILOT_WIGOLO_URL"):
+        from ..web import WebError, run_wigolo
+        try:
+            data = run_wigolo(["search", query, f"--include-domains={domain}",
+                               "--max-results=8"], timeout=90)
+        except WebError:
+            return []
+        return [r for r in data.get("results", []) if r.get("url")]
     cmd = wigolo_command()
     if not cmd:
         return []
