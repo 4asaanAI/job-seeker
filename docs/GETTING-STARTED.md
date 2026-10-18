@@ -39,7 +39,8 @@ launchctl load ~/Library/LaunchAgents/com.jobpilot.daily.plist
 
 It runs `scripts/daily.sh`, which runs `jobpilot.doctor` first and stops if anything is broken. Output goes to
 `data/daily.log`. Stop it with `launchctl unload` on the same file. To try one run by hand: `JOBPILOT_HOME=$PWD bash scripts/daily.sh`.
-Delivery goes through Fo when `[fo] enabled = true` in `config.toml` (one Fo account serves one person), otherwise Telegram.
+Delivery goes through Fo when `[fo] enabled = true` (one Fo account serves one person), otherwise Telegram. Put personal settings such as
+`[fo]` in a git-ignored `config.local.toml`; it is layered over `config.toml`, so the shared file stays clean.
 
 ## 4. Web tools through a shared Wigolo (optional)
 

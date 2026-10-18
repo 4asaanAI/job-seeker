@@ -127,6 +127,13 @@ def load_config(path: Path | None = None) -> Config:
     home = jobpilot_home()
     cfg_path = Path(path) if path is not None else home / "config.toml"
     raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    local = cfg_path.with_name("config.local.toml")
+    if path is None and local.is_file():         # personal settings (git-ignored) layered over the shared file
+        for table, values in tomllib.loads(local.read_text(encoding="utf-8")).items():
+            if isinstance(values, dict) and isinstance(raw.get(table), dict):
+                raw[table] = {**raw[table], **values}
+            else:
+                raw[table] = values
 
     sites: dict[str, SiteConfig] = {}
     for name, block in raw.get("sites", {}).items():

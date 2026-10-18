@@ -90,3 +90,14 @@ def test_company_openings_prefers_title_matches_over_description_mentions(env, m
     monkeypatch.setattr(server, "ATSJsonSource", lambda cfg: NS(search=lambda kw, loc: (only_mentions, 1)))
     out = tools["company_openings"](sid, "Stripe", "product manager")
     assert [o["title"] for o in out["openings"]] == ["Field Marketing"] and "No title matches" in out["note"]
+
+
+def test_local_config_overlays_the_shared_one_without_replacing_other_tables(tmp_path, monkeypatch):
+    from jobpilot import config
+    shared = (Path(__file__).resolve().parents[1] / "config.toml").read_text(encoding="utf-8")
+    (tmp_path / "config.toml").write_text(shared, encoding="utf-8")
+    (tmp_path / "config.local.toml").write_text("[fo]\nenabled = true\nseeker_id = 3\n", encoding="utf-8")
+    monkeypatch.setattr(config, "jobpilot_home", lambda: tmp_path)
+    cfg = config.load_config()
+    assert cfg.fo_enabled is True and cfg.fo_seeker_id == 3 and cfg.sites     # sites still come from the shared file
+    assert config.load_config(tmp_path / "config.toml").fo_enabled is False   # an explicit path ignores the overlay

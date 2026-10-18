@@ -28,3 +28,6 @@ tests/fixtures/live/
 .mcp.json
 data/fo_inbox_seen.json
 .mcp.fo-demo.json
+
+# personal settings layered over config.toml
+config.local.toml
