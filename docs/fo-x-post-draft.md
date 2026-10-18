@@ -24,4 +24,4 @@ JobPilot predates the hackathon; the Fo integration is what was built for it. Wa
 - Post with hours to spare, not at 3:59pm.
 
 ## Final text (also in ~/Desktop/jobpilot-fo-post/)
-My job search runs on Claude + @wajo_ai's Fo. JobPilot scores real jobs and drafts applications from my own resume facts; Fo texts me matches and books reminders. Every Fo action asks first; Fo never sees the job post. Demo + code: https://github.com/4asaanAI/job-seeker #GSDhackathon
+My job search runs on Claude + @wajo_ai's Fo. JobPilot scores real jobs and tailors my resume from my own facts only; Fo texts me matches and books reminders. Every Fo action asks first; Fo never sees the job post. Demo + code: https://github.com/4asaanAI/job-seeker #GSDhackathon
