@@ -90,7 +90,8 @@ def make_fo_client(cfg, claude_bin: str = "claude"):
     """API key when allowed and present; otherwise the headless claude relay; None = skip."""
     key = fo_api_key()
     if cfg.fo_transport in ("api", "auto") and key:
-        return FoClient(key, cfg.fo_url)
+        # Google and form-filling tasks take minutes (a 82-row sheet, a whole application), so wait up to 15 minutes
+        return FoClient(key, cfg.fo_url, max_wait=900.0, max_polls=40)
     if cfg.fo_transport in ("claude", "auto"):
         return ClaudeFoClient(claude_bin, cfg.fo_url)
     return None

@@ -764,3 +764,11 @@ def test_fo_api_key_comes_from_env_then_a_private_file(tmp_path, monkeypatch):
     key_file.unlink()
     key_file.symlink_to(tmp_path)                          # not a regular file
     assert fo_api_key() is None
+
+
+def test_api_client_waits_long_enough_for_google_and_form_tasks(tmp_path, monkeypatch):
+    from jobpilot.scheduled import make_fo_client
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("FO_API_KEY", KEY)
+    client = make_fo_client(SimpleNamespace(fo_transport="auto", fo_url=FO_URL))
+    assert isinstance(client, FoClient) and client._max_wait >= 600 and client._max_polls >= 20
