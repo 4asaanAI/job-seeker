@@ -290,3 +290,16 @@ def test_apply_message_is_tailored_to_the_job_by_default(env):
     assert prep["ok"] and "job_terms_missing_from_resume" in prep
     explicit = tools["prepare_application"](sid, ids[0], skills=[])
     assert explicit["ok"] and explicit["job_terms_missing_from_resume"] == []     # an explicit choice is respected
+
+
+def test_auto_tailoring_keeps_every_bullet_and_handles_no_description(env):
+    store, sid, ids, tools = env
+    facts = tools["resume_facts"](sid)
+    first = facts["experience"][0]
+    https_link(store, ids[0])
+    store.conn.execute("UPDATE job_postings SET description = NULL WHERE id = ?", (ids[0],))
+    store.conn.commit()
+    out = tools["prepare_application"](sid, ids[0])
+    assert out["ok"]
+    for b in first["bullets"]:
+        assert b["text"] in out["resume_text"]

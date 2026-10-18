@@ -77,9 +77,30 @@ Jobs on login boards are listed separately for you to apply to by hand.
 
 With the inbox running (`python -m jobpilot.inbox --once`), text Fo `jp matches`, then `jp apply <id>`. JobPilot replies with
 the job, a note that your resume is tailored to it, and a one-time code. Reply `jp yes <code>` and Fo applies with the
-tailored resume. The code is random, tied to that one job, works once and expires in two hours; nothing happens without it.
-Login-gated boards are refused (apply by hand). Fo stops and texts you if the form asks for anything not in your resume.
-Counts toward the 10-a-day Fo limit. The outcome is recorded as `started`; tell Claude the result to mark it `applied`.
+tailored resume. The code is random, tied to that one job, works once and expires in two hours; at most 3 are open at a time.
+Login-gated boards are refused (apply by hand). Counts toward the 10-a-day Fo limit. The job is marked `started` the
+moment the request is built (so it can never go out twice); tell Claude the result to mark it `applied`.
+
+**Who submits.** While review mode is on (the default), Fo fills the form and asks you in its own chat before it submits.
+Only if you turned review mode off (`set_review_mode(false)`) does Fo submit straight after your `jp yes`, stopping at
+anything not in your resume. Be aware: the inbox reads your Fo transcripts through a headless model, and the code is
+texted to the same chat, so a manipulated relay could in principle echo it. Review mode on is the safe setting.
+
+## 3c. Google Sheets and Docs through Fo
+
+Fo has native Google Sheets and Docs tools on your connected Google account. JobPilot holds no Google credentials for this;
+it builds vetted requests that name one file, pass only cleaned text between random markers, and forbid sharing, email,
+calendar events and following instructions found in the data.
+
+- **Tracker sheet.** `build_fo_tracker_message` (or text `jp sync`) asks Fo to keep a sheet called "JobPilot Tracker" in your
+  Drive: one row per application and good open match (ID, job, company, status, fit score, dates), updated by ID, never
+  deleting rows. Cells are written as plain text, never formulas.
+- **Tailored resume in Google Docs.** `build_fo_resume_doc_message` (or text `jp doc <id>`) asks Fo to create a Google Doc
+  "Resume - <company> - <title> (job <id>)" in a "JobPilot Resumes" folder, containing exactly your facts-only tailored
+  text (bullets reordered for that job, nothing added). Review or edit it in Docs, and export to PDF yourself.
+- **Automatic.** Put `[google] enabled = true` in `config.local.toml` (with `[fo]` enabled). The daily run then refreshes the
+  tracker, and every `jp yes` application triggers a refresh. Nothing else is automatic.
+- Fo's own claim, confirmed by asking it on 2026-10-18; not exercised end to end here. The first run is a supervised pilot.
 
 ## 4. Calendar: only when the company writes back
 

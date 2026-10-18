@@ -9,9 +9,13 @@ grammar that is re-checked here in Python, runs JobPilot locally, and answers th
     jp tailor <id>    tailor your resume to that job (a local DOCX); texts a summary
     jp apply <id>     preview the application and text back a one-time code (applies to nothing yet)
     jp yes <code>     your yes: Fo applies to THAT job with a resume tailored to it
+    jp sync           Fo refreshes your "JobPilot Tracker" Google Sheet
+    jp doc <id>       Fo puts your resume tailored to that job into a new Google Doc
 
-Only `jp yes <code>` can cause an application. The code is random, bound to one job, single use and expires in two
-hours, so a replayed or invented command cannot apply; the other commands are read-only, so the worst a manipulated
+Only `jp yes <code>` can cause an application, and Fo still asks you in its own chat before it submits unless you
+turned review mode off. The code is random, bound to one job, single use and expires in two hours, so a guessed or
+replayed code cannot apply. The relay is an LLM reading transcripts, though, so a code it can read could be echoed:
+that is why the default keeps Fo's own confirmation; the other commands are read-only, so the worst a manipulated
 relay can cause is a harmless vetted text. The relay can see the user's own Fo threads (it runs on the user's own login); see the design doc.
 """
 from __future__ import annotations
@@ -33,16 +37,19 @@ import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import google
 from .fo import FO_HOST, FO_URL, FoError, child_env, clean, fo_sender
 from .paths import jobpilot_home
 from .server import build_tools
+from .server import MAX_DAILY_APPLY_REQUESTS
 from .store.db import Store
 
-GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6}))\s*$",
+GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9}))\s*$",
                      re.IGNORECASE)
 MAX_COMMANDS = 3
+MAX_OPEN_CODES = 3
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
-HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id>"
+HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id>"
 
 
 class ClaudeReader:
@@ -160,7 +167,19 @@ def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> st
     if built["route"] == "login":
         return (f"JobPilot: id {posting_id} is on a board that needs an account or a phone code Fo cannot receive. "
                 "Apply by hand; ask Claude for manual_apply_packet.")
-    job = tools["tailor_resume"](sid, posting_id)["job"]
+    if store.event_count_since(sid, "fo_apply_batch", 24) >= MAX_DAILY_APPLY_REQUESTS:
+        return "JobPilot: you have reached today's limit of Fo applications. Try again tomorrow."
+    posting = store.posting_view(sid, posting_id)
+    job = {"title": posting["title"], "company": posting["company_name"]}
+    used = set()
+    for detail, _ in store.recent_event_details(sid, "phone_apply_used", 3, 50):
+        try:
+            used.add(json.loads(detail).get("code"))
+        except ValueError:
+            pass
+    open_codes = [d for d, _ in store.recent_event_details(sid, "phone_apply", 2, 50) if json.loads(d).get("code") not in used]
+    if len(open_codes) >= MAX_OPEN_CODES:
+        return "JobPilot: you have several applications waiting for a yes. Reply to one (jp yes <code>) or wait two hours."
     code = secrets.token_hex(3)
     store.record_event("phone_apply", json.dumps({"code": code, "posting_id": posting_id}), sid, posting_id)
     return (f"JobPilot: ready to apply to {clean(job['title'])}, {clean(job['company'])} (id {posting_id}).\n"
@@ -170,7 +189,7 @@ def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> st
 
 
 def _pending_posting(store: Store, sid: int, code: str) -> int | None:
-    for detail, _ in store.recent_event_details(sid, "phone_apply", 2, 20):
+    for detail, _ in store.recent_event_details(sid, "phone_apply", 2, 50):
         try:
             p = json.loads(detail)
         except ValueError:
@@ -186,11 +205,18 @@ def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -
         return "JobPilot: that code is not valid or has expired. Send jp apply <id> for a new one."
     if apply_client is None:
         return "JobPilot: no Fo transport is available to apply."
+    if any(code in d for d, _ in store.recent_event_details(sid, "phone_apply_used", 3, 50)):
+        return (f"JobPilot: that code was already used for id {posting_id}, so it will not be sent again. If you did not see "
+                "the result, check your Fo chat or ask Claude 'how am I doing'.")
     tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
-    built = tools["build_fo_apply_message"](sid, posting_id, phone_code=code)   # re-checks everything; consumes the code
+    built = tools["_apply_core"](sid, posting_id, phone_code=code)   # re-checks everything; consumes the code
     if not built.get("ok"):
         return f"JobPilot: not applied: {clean(built.get('error'), 110)}."
-    result = apply_client.send(built["message"])
+    try:
+        result = apply_client.send(built["message"])
+    except FoError:
+        return (f"JobPilot: could not reach Fo for id {posting_id}. It is marked started, so it will not be sent twice; "
+                "check Fo, or apply by hand.")
     if result.status == "complete":
         return (f"JobPilot: Fo has handled your application for id {posting_id}. It stops and texts you if the form "
                 "needed anything not in your resume. Ask Claude 'how am I doing' to record the result.")
@@ -198,7 +224,28 @@ def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -
             "so it will not be sent twice. Check with Fo, or apply by hand.")
 
 
-def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=None) -> str:
+def _google(store: Store, sid: int, out_dir: Path, apply_client, *, doc: int | None) -> str:
+    """Sheet or Doc through Fo. Both only touch the user's own Drive, so they need no code."""
+    if apply_client is None:
+        return "JobPilot: no Fo transport is available."
+    if doc is None:
+        result = google.send_tracker(store, sid, apply_client)
+        if result is None:
+            return "JobPilot: nothing to record yet."
+        what = "your tracker sheet"
+    else:
+        tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
+        built = tools["build_fo_resume_doc_message"](sid, doc)
+        if not built.get("ok"):
+            return f"JobPilot: no document for id {doc}: {clean(built.get('error'), 110)}."
+        result = apply_client.send(built["message"])
+        what = f"a Google Doc for id {doc}"
+    if result.status == "complete":
+        return f"JobPilot: Fo has updated {what}. Its reply with the link is in your Fo chat."
+    return f"JobPilot: Fo did not confirm {what} ({result.status}). Try again later."
+
+
+def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=None, google_on: bool = False) -> str:
     m = GRAMMAR.match(text)
     if not m:
         return HELP
@@ -209,7 +256,17 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
     if m.group(4):
         return _apply_preview(store, sid, out_dir, int(m.group(4)))
     if m.group(5):
-        return _apply_yes(store, sid, out_dir, m.group(5).lower(), apply_client)
+        reply = _apply_yes(store, sid, out_dir, m.group(5).lower(), apply_client)
+        if google_on and reply.startswith("JobPilot: Fo has handled"):
+            try:
+                google.send_tracker(store, sid, apply_client)        # best effort: the apply already happened
+            except Exception:  # noqa: BLE001
+                pass
+        return reply
+    if m.group(6):
+        return _google(store, sid, out_dir, apply_client, doc=None)
+    if m.group(7):
+        return _google(store, sid, out_dir, apply_client, doc=int(m.group(7)))
     return _tailor(store, sid, out_dir, int(m.group(3)))
 
 
@@ -250,15 +307,15 @@ def _locked(path: Path):
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def _safe_reply(store: Store, sid: int, out_dir: Path, text: str, apply_client=None) -> str:
+def _safe_reply(store: Store, sid: int, out_dir: Path, text: str, apply_client=None, google_on: bool = False) -> str:
     try:
-        return reply_for(store, sid, out_dir, text, apply_client)
+        return reply_for(store, sid, out_dir, text, apply_client, google_on)
     except Exception as exc:  # noqa: BLE001 - one bad command must not block the inbox
         return f"JobPilot: that command failed ({type(exc).__name__})."
 
 
 def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_path: Path,
-              *, max_commands: int = MAX_COMMANDS, apply_client=None) -> int:
+              *, max_commands: int = MAX_COMMANDS, apply_client=None, google_on: bool = False) -> int:
     """Returns how many commands were answered. A command is marked handled only after ITS reply was delivered."""
     with _locked(state_path):
         seen = _load(state_path)
@@ -272,7 +329,7 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
         done, failure = 0, None
         for fp, text in todo[:max_commands]:
             try:
-                send(None, _safe_reply(store, seeker_id, out_dir, text, apply_client))   # raises unless Fo confirms
+                send(None, _safe_reply(store, seeker_id, out_dir, text, apply_client, google_on))   # raises unless Fo confirms
             except FoError as exc:
                 failure = failure or exc      # this one is retried next poll; the others still run
                 continue
@@ -310,7 +367,7 @@ def main() -> int:
             return 2
         reader = ClaudeReader(args.claude, cfg.fo_url)
         n = poll_once(store, cfg.fo_seeker_id, cfg.out_dir, reader, fo_sender(client),
-                      home / "data" / "fo_inbox_seen.json", apply_client=client)
+                      home / "data" / "fo_inbox_seen.json", apply_client=client, google_on=cfg.google_enabled)
         print(f"fo inbox: answered {n} command(s)")
         return 0
     except Exception as exc:  # noqa: BLE001 - report, exit non-zero, never traceback into a scheduler log

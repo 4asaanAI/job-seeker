@@ -88,6 +88,8 @@ class Config:
     # api = FO_API_KEY direct call; claude = headless claude session on the operator's Fo login;
     # auto = api when FO_API_KEY is set, else claude.
     fo_transport: str = "auto"
+    # Keep a Google Sheet record and Google Docs resumes through Fo (needs Fo enabled).
+    google_enabled: bool = False
     llm: "LLMConfig" = field(default_factory=lambda: LLMConfig())
 
 
@@ -269,6 +271,10 @@ def load_config(path: Path | None = None) -> Config:
         raise ValueError("[fo] transport must be auto, api or claude")
     fo_seeker_id = int(fo["seeker_id"]) if fo.get("seeker_id") is not None else None
 
+    google_enabled = raw.get("google", {}).get("enabled", False)
+    if not isinstance(google_enabled, bool):
+        raise ValueError('[google] enabled must be true or false (no quotes)')
+
     base = home
     return Config(
         home=base,
@@ -282,6 +288,7 @@ def load_config(path: Path | None = None) -> Config:
         fo_seeker_id=fo_seeker_id,
         fo_url=str(fo.get("url") or "https://mcp.api.wajo.ai/fo"),
         fo_transport=fo_transport,
+        google_enabled=google_enabled,
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,

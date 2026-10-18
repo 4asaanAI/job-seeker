@@ -264,10 +264,11 @@ def test_phone_apply_needs_a_code_and_applies_once_tailored(demo):
     assert "jp yes " in sent[-1] and fo.messages == [] and store.applications(sid) == []     # preview applies to nothing
     code = _code(sent)
     run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:01:00Z")]), sent, apply_client=fo)
-    assert len(fo.messages) == 1 and "ALREADY approved" in fo.messages[0] and "Do NOT create any calendar event" in fo.messages[0]
+    assert len(fo.messages) == 1 and "ONLY after I confirm" in fo.messages[0] and "ALREADY approved" not in fo.messages[0]   # review mode on: Fo asks first
+    assert "Do NOT create any calendar event" in fo.messages[0]
     assert [a["status"] for a in store.applications(sid)] == ["started"]
     run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:02:00Z")]), sent, apply_client=fo)   # replay
-    assert len(fo.messages) == 1 and ("not valid" in sent[-1] or "not applied" in sent[-1])
+    assert len(fo.messages) == 1 and "already used" in sent[-1]
 
 
 def test_phone_apply_rejects_guessed_code_and_login_boards(demo):
@@ -280,3 +281,59 @@ def test_phone_apply_rejects_guessed_code_and_login_boards(demo):
     store.conn.commit()
     run(demo, Reader([msg(f"jp apply {ids[0]}", at="2026-10-18T06:00:00Z")]), sent, apply_client=fo)
     assert "yes" not in sent[-1].lower().split("reply")[-1] and fo.messages == []
+
+
+def _yes(demo, fo, sent, pid, at="2026-10-18T05:00:00Z", send=None):
+    store, sid, ids, out, state = demo
+    send = send or (lambda to, t: sent.append(t))
+    inbox.poll_once(store, sid, out, Reader([msg(f"jp apply {pid}", at=at)]), send, state, apply_client=fo)
+    return _code(sent)
+
+
+def test_review_mode_off_lets_fo_submit_after_the_phone_yes(demo):
+    store, sid, ids, out, state = demo
+    _link(store, ids[0])
+    store.set_review_required(sid, False)
+    fo, sent = FakeApply(), []
+    code = _yes(demo, fo, sent, ids[0])
+    run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:01:00Z")]), sent, apply_client=fo)
+    assert "ALREADY approved" in fo.messages[0]
+
+
+def test_send_failure_is_reported_and_not_retried(demo):
+    store, sid, ids, out, state = demo
+    _link(store, ids[0])
+    sent = []
+
+    class Boom:
+        def send(self, message):
+            raise FoError("down")
+    code = _yes(demo, FakeApply(), sent, ids[0])
+    run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:01:00Z")]), sent, apply_client=Boom())
+    assert "could not reach Fo" in sent[-1] and "marked started" in sent[-1]
+    fo = FakeApply()
+    run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:02:00Z")]), sent, apply_client=fo)
+    assert fo.messages == [] and "already used" in sent[-1]
+
+
+def test_preview_refuses_at_the_daily_cap_and_caps_open_codes(demo):
+    store, sid, ids, out, state = demo
+    for pid in ids[:4]:
+        _link(store, pid)
+    sent, fo = [], FakeApply()
+    for i, pid in enumerate(ids[:4]):
+        run(demo, Reader([msg(f"jp apply {pid}", at=f"2026-10-18T05:0{i}:00Z")]), sent, apply_client=fo)
+    assert sum("ready to apply" in t for t in sent) == inbox.MAX_OPEN_CODES and "waiting for a yes" in sent[-1]
+    for _ in range(10):
+        store.record_event("fo_apply_batch", "x", sid)
+    run(demo, Reader([msg(f"jp apply {ids[0]}", at="2026-10-18T07:00:00Z")]), sent, apply_client=fo)
+    assert "limit" in sent[-1]
+
+
+def test_phone_code_is_not_an_mcp_parameter(demo):
+    store, sid, ids, out, state = demo
+    from jobpilot.server import build_tools
+    import inspect
+    tools = build_tools(store, out, pinned_seeker_id=sid, operator_mode=False)
+    assert "phone_code" not in inspect.signature(tools["build_fo_apply_message"]).parameters
+    assert "phone_code" not in (tools["build_fo_apply_message"].__doc__ or "")

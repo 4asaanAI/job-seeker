@@ -34,6 +34,7 @@ from .apply import (apply_message, classify_route, reply_check_message, safe_tit
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
+from . import google
 from .sheets import GoogleSheetsExporter, load_google_services
 from .sources.ats_json import ATSJsonSource
 from .sources.finder import find_feed, normalise
@@ -683,7 +684,7 @@ def build_tools(
     def _selection(base, posting, experience_order, skills, bullet_order):
         """The user's explicit selection, or else this job's facts-only tailoring (so no application goes out untailored)."""
         if experience_order is None and skills is None and bullet_order is None:
-            hint = suggest_tailoring(base, posting["title"] or "", posting["description"] or "")
+            hint = suggest_tailoring(base, posting["title"] or "", posting["description"] or "", max_bullets=1000)   # reorder only: never drop a fact on its own
             return (hint["experience_order"], hint["skills"], hint["bullet_order"],
                     hint["keywords_missing_from_resume"])
         return experience_order, skills, bullet_order, []
@@ -770,7 +771,7 @@ def build_tools(
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
-    def build_fo_apply_message(
+    def _apply_core(
         seeker_id: int,
         posting_id: int,
         experience_order: list[str] | None = None,
@@ -797,6 +798,7 @@ def build_tools(
         events: never create one when applying. After Fo reports the application was submitted, call
         record_application(status="applied"). Never paste job-description text into the request to Fo.
         """
+        auto_submit = False
         try:
             sid = _check(seeker_id)
             _fo_seeker_guard(sid)
@@ -834,19 +836,27 @@ def build_tools(
                     raise ValueError("use either batch_approved or phone_code, not both")
                 if classify_route(link)[0] == "login":
                     raise ValueError("this board needs an account or a code Fo cannot receive; apply by hand (manual_apply_packet)")
-                if not _phone_approval_ok(sid, int(posting_id), phone_code):
-                    raise ValueError("that approval code is not valid for this job, was already used, or has expired")
                 if store.event_count_since(sid, "fo_apply_batch", 24) >= MAX_DAILY_APPLY_REQUESTS:
                     raise ValueError("daily limit of Fo apply requests reached; try again tomorrow")
+                with store._lock:                       # check, consume and mark started as one step: one request per code
+                    if not _phone_approval_ok(sid, int(posting_id), phone_code):
+                        raise ValueError("that approval code is not valid for this job, was already used, or has expired")
+                    if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
+                           for a in store.applications(sid, 500)):
+                        raise ValueError("an application for this job is already recorded")
+                    store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
+                    store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                # Fo submits without asking again ONLY when the user has turned review mode off; otherwise Fo fills the
+                # form and asks the user in Fo's own chat before it submits.
+                auto_submit = not store.get_seeker(sid).review_required
             names = safe_title_company(posting["title"], posting["company_name"])
             if names is None:
                 raise ValueError("this posting's title or company looks unsafe; apply to it by hand")
             base = load_base_resume(_base_resume_path(sid))
+            tailored = experience_order is None and skills is None and bullet_order is None
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
-            message = apply_message(names[0], names[1], link, text, approved=batch_approved or bool(phone_code))
-            if phone_code:
-                store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
+            message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit))
             if batch_approved or phone_code:
                 store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
                 # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
@@ -855,10 +865,69 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
         route, route_note = classify_route(link)
         return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
-                "route": route, "route_note": route_note, "tailored_to_job": True,
+                "route": route, "route_note": route_note, "tailored_to_job": tailored,
                 "job_terms_missing_from_resume": gaps,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
+
+    def build_fo_apply_message(
+        seeker_id: int,
+        posting_id: int,
+        experience_order: list[str] | None = None,
+        skills: list[str] | None = None,
+        bullet_order: dict[str, list[str]] | None = None,
+        batch_approved: bool = False,
+        plan_id: str | None = None,
+    ) -> dict:
+        return _apply_core(seeker_id, posting_id, experience_order, skills, bullet_order, batch_approved, plan_id)
+
+    # The public tool is the core without the phone-approval parameter: only the text inbox may use that.
+    build_fo_apply_message.__doc__ = re.sub(r"\n        phone_code is only.*?yourself\.\n", "", _apply_core.__doc__, flags=re.S)
+
+    def build_fo_tracker_message(seeker_id: int) -> dict:
+        """Build ONE request asking Fo to update the "JobPilot Tracker" Google Sheet with every application and good
+        open match. SENDS NOTHING. Pass `message` to ask_fo unchanged (user's permission prompt applies). Fo writes
+        only that sheet, never shares it, and treats the rows as data."""
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            rows = google.tracker_rows(store.applications(sid, 500), store.best_matches(sid, 25, open_only=True))
+            if not rows:
+                return {"ok": True, "seeker_id": sid, "message": None, "note": "Nothing to record yet."}
+            return {"ok": True, "seeker_id": sid, "rows": len(rows), "message": google.tracker_message(rows),
+                    "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def build_fo_resume_doc_message(
+        seeker_id: int,
+        posting_id: int,
+        experience_order: list[str] | None = None,
+        skills: list[str] | None = None,
+        bullet_order: dict[str, list[str]] | None = None,
+    ) -> dict:
+        """Build ONE request asking Fo to put this job's facts-only tailored resume into a new Google Doc. SENDS NOTHING.
+
+        Tailored to the job automatically unless a selection is passed. Pass `message` to ask_fo unchanged. Fo creates
+        one doc in the "JobPilot Resumes" folder of the user's Drive with exactly this text and returns the link.
+        """
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            names = safe_title_company(posting["title"], posting["company_name"])
+            if names is None:
+                raise ValueError("this posting's title or company looks unsafe")
+            base = load_base_resume(_base_resume_path(sid))
+            experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
+            text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
+            return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "job_terms_missing_from_resume": gaps,
+                    "message": google.resume_doc_message(names[0], names[1], int(posting_id), text),
+                    "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
 
     def set_review_mode(seeker_id: int, review_required: bool) -> dict:
         """Choose how applying works for this seeker. ONLY when the USER says so, never on your own.
@@ -1128,6 +1197,9 @@ def build_tools(
         "apply_candidates": apply_candidates,
         "plan_apply_batch": plan_apply_batch,
         "build_fo_apply_message": build_fo_apply_message,
+        "_apply_core": _apply_core,                 # private: the text inbox uses phone_code; never registered with MCP
+        "build_fo_tracker_message": build_fo_tracker_message,
+        "build_fo_resume_doc_message": build_fo_resume_doc_message,
         "build_fo_reply_check_message": build_fo_reply_check_message,
         "build_fo_sweep_replies_message": build_fo_sweep_replies_message,
         "my_dashboard": my_dashboard,
@@ -1477,6 +1549,8 @@ def main() -> None:
                         operator_mode=pinned_id is None and not onboard,
                         onboard_telegram_id=int(onboard) if onboard else None)
     for name, fn in tools.items():
+        if name.startswith("_"):
+            continue
         mcp.tool(name=name, description=(fn.__doc__ or "").strip())(fn)
     mcp.run()
 
