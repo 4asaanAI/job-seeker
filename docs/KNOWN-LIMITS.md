@@ -33,10 +33,11 @@ for 30 minutes (a clear failure can be retried at once); `get_notifiable` now re
 untrusted-data note; and `review_required` now means something: it is on by default and blocks batch auto-submission until the
 user turns it off with `set_review_mode`.
 
+History was rewritten on Oct 18 to replace a third party's first name in every commit, tag and branch (a backup bundle was kept by the owner, not published). Old commit ids no longer exist; clone again if you had one.
+
 What remains, honestly:
 
 | Area | Limit | Why it cannot be closed here |
 |---|---|---|
 | `web_fetch` DNS rebinding (Telegram bot only) | We check the host, then Wigolo resolves it again; a malicious DNS server could change its answer in between. | Closing it needs an egress proxy that refuses private ranges, or pinning the connection inside Wigolo. Do not expose the web tools to untrusted users. |
 | `ask_fo` is not idempotent | Fo's MCP has no idempotency key, so a send that times out may still complete. The 30-minute guard makes a duplicate unlikely, not impossible. | It needs support from Fo's API. |
-| Git history | Early commits still contain a third party's first name; it was removed from the current tree. | Removing it means rewriting public history (force-push), which changes every commit id. Only done on the owner's explicit say-so. |

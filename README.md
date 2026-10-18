@@ -64,7 +64,7 @@ flowchart LR
 ## Built this weekend (Oct 17-18)
 
 JobPilot (discovery, scoring, ledger, resume engine, MCP server) predates the hackathon. Everything below is new, and you can
-diff it yourself: [all changes since the last pre-hackathon commit](https://github.com/4asaanAI/job-seeker/compare/6be3992...main).
+diff it yourself: [all changes since the last pre-hackathon commit](https://github.com/4asaanAI/job-seeker/compare/bf935c7...main).
 
 | New | Where |
 |---|---|
