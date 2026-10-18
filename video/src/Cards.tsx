@@ -59,3 +59,13 @@ export const Output: React.FC<OutputProps> = ({ title, lines, note }) => (
     </div>
   </AbsoluteFill>
 );
+
+export const Thumb: React.FC<{ line1: string; line2: string }> = ({ line1, line2 }) => (
+  <AbsoluteFill style={{ background: BG, alignItems: "center", justifyContent: "center", fontFamily: SANS }}>
+    <div style={{ textAlign: "center", width: 1600 }}>
+      <div style={{ fontSize: 138, fontWeight: 800, color: INK, lineHeight: 1.05 }}>{line1}</div>
+      <div style={{ fontSize: 64, color: BLUE, marginTop: 36 }}>{line2}</div>
+      <div style={{ fontSize: 44, color: AMBER, marginTop: 56 }}>JobPilot × Fo · GSD hackathon</div>
+    </div>
+  </AbsoluteFill>
+);

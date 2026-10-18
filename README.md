@@ -49,7 +49,7 @@ flowchart LR
 | Verified live | Built and tested, not live |
 |---|---|
 | Claude -> Fo texts and calendar create/delete | `api` transport (Wajo has not released headless keys) |
-| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released; the polling inbox covers it) |
+| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released). A polling inbox is built and tested with a fake Fo; live, Fo's transcript API did not expose my test text yet |
 | Real Fo permission prompt shows the exact vetted message | |
 
 More: [docs/FO-DEMO.md](docs/FO-DEMO.md) (demo and safety choices) · [docs/APPLYING.md](docs/APPLYING.md) (using it for your own search).
