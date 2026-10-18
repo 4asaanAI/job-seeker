@@ -51,8 +51,8 @@ class ClaudeReader:
     def _prompt(self) -> str:
         return (
             "You are a read-only relay. Do exactly this and nothing else.\n"
-            "1. Call the Fo tool list_fo_conversations. Skip conversations whose channel is chat, cron or hook "
-            "(tools create those, not the user's phone). Keep at most 8 of the rest, newest first.\n"
+            "1. Call the Fo tool list_fo_conversations. Skip conversations whose channel is cron or hook. Keep at most 10 "
+            "of the rest, newest first (chat, sms and other channels are all fine).\n"
             f"2. For each, call get_fo_conversation and look only at turns from the last {self._hours} hours.\n"
             "3. Output ONLY a JSON array. For every turn whose role is user and whose text starts with the letters jp "
             '(any case), include {"conversationId": ..., "at": ..., "text": ...} with the text exactly as written. '
