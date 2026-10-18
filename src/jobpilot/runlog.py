@@ -28,6 +28,18 @@ def record_run(kind: str, ok: bool, steps: dict, trace: list[dict] | None = None
     return entry
 
 
+def all_asks_completed(calls: list[dict]) -> bool:
+    """True when every request to Fo ended in `complete`: a request is an ask_fo call plus the get_fo_reply polls that follow it,
+    and it is the LAST status of that group that counts (a poll that says `working` is progress, not failure)."""
+    last_of_group: list[str] = []
+    for c in calls:
+        if "ask_fo" in str(c.get("tool", "")):
+            last_of_group.append(str(c.get("status", "")))
+        elif last_of_group:
+            last_of_group[-1] = str(c.get("status", ""))
+    return bool(last_of_group) and all(s == "complete" for s in last_of_group)
+
+
 def read_runs(home: Path | None = None) -> list[dict]:
     path = ledger_path(home)
     runs: list[dict] = []

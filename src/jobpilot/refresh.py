@@ -95,7 +95,8 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001 - the ledger records the failure, then it is reported
                 ok, error = False, type(exc).__name__
             calls = list(getattr(clients[0], "trace", [])) if clients and clients[0] else []
-            ok = ok and bool(calls) and all(c["status"] == "complete" for c in calls)
+            from .runlog import all_asks_completed
+            ok = ok and all_asks_completed(calls)
             record_run("refresh_deliver", ok, {
                 "sources": ", ".join(f"{s['source']}={s['found']}" for s in out.get("sources", [])) or "not searched",
                 "scored": out["scoring"].get("scored", 0), "apply_ready": len(items),

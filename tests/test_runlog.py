@@ -66,3 +66,12 @@ def test_the_relay_client_traces_its_sends_too():
     client = ClaudeFoClient("claude", runner=runner)
     assert client.send("hi there").status == "complete"
     assert client.trace[0]["status"] == "complete" and client.trace[0]["chars"] == 8 and "relay" in client.trace[0]["tool"]
+
+
+def test_a_working_poll_is_progress_not_failure():
+    ask = lambda status: {"tool": "mcp__fo__ask_fo", "status": status}
+    poll = lambda status: {"tool": "mcp__fo__get_fo_reply", "status": status}
+    assert runlog.all_asks_completed([ask("complete"), ask("working"), poll("working"), poll("complete")]) is True
+    assert runlog.all_asks_completed([ask("complete"), ask("working"), poll("working")]) is False      # never finished
+    assert runlog.all_asks_completed([ask("complete"), ask("failed")]) is False
+    assert runlog.all_asks_completed([]) is False
