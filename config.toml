@@ -203,6 +203,37 @@ company_name = "Anthropic"
 endpoint = "https://boards-api.greenhouse.io/v1/boards/anthropic/jobs?content=true"
 enabled = true
 
+# India-based employers that take applications on their own Greenhouse or Lever form (no account, no phone code).
+[ats_sources.turing]
+vendor = "greenhouse"
+company_name = "Turing"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/turing/jobs?content=true"
+enabled = true
+
+[ats_sources.zeta]
+vendor = "lever"
+company_name = "Zeta"
+endpoint = "https://api.lever.co/v0/postings/zeta?mode=json"
+enabled = true
+
+[ats_sources.meesho]
+vendor = "lever"
+company_name = "Meesho"
+endpoint = "https://api.lever.co/v0/postings/meesho?mode=json"
+enabled = true
+
+[ats_sources.paytm]
+vendor = "lever"
+company_name = "Paytm"
+endpoint = "https://api.lever.co/v0/postings/paytm?mode=json"
+enabled = true
+
+[ats_sources.mindtickle]
+vendor = "lever"
+company_name = "Mindtickle"
+endpoint = "https://api.lever.co/v0/postings/mindtickle?mode=json"
+enabled = true
+
 [ats_sources.databricks]
 vendor = "greenhouse"
 company_name = "Databricks"

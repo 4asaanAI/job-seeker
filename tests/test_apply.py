@@ -57,6 +57,7 @@ def env(tmp_path):
 
 def https_link(store, pid, url="https://careers.example.com/jobs/1"):
     store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", (url, pid))
+    store.conn.execute("UPDATE posting_sources SET url = ? WHERE posting_id = ?", (url, pid))   # the one link this test means
     store.conn.commit()
 
 
@@ -364,3 +365,28 @@ def test_apply_tool_takes_answers_and_refuses_bad_ones(env):
     bad = tools["build_fo_apply_message"](sid, ids[0], answers={"q": "a" * 3001})
     assert bad["ok"] is False and "limited to" in bad["error"]
     assert "my OWN answers" not in tools["build_fo_apply_message"](sid, ids[0])["message"]
+
+
+# ---- a job seen on several boards: use the company's own form --------------------------------------------------------
+
+def test_best_apply_url_prefers_the_companys_own_form():
+    indeed, himalayas = "https://in.indeed.com/viewjob?jk=abc", "https://himalayas.app/companies/x/jobs/y"
+    greenhouse, remoteok = "https://job-boards.greenhouse.io/acme/jobs/1", "https://remoteok.com/remote-jobs/a"
+    assert ap.best_apply_url(indeed, himalayas, greenhouse) == greenhouse
+    assert ap.best_apply_url(indeed, remoteok, himalayas) == remoteok            # aggregator beats login boards
+    assert ap.best_apply_url(indeed, himalayas) == indeed                        # all login: the first, unchanged
+    assert ap.best_apply_url("http://insecure.example.com/j", None, greenhouse) == greenhouse
+    assert ap.best_apply_url("javascript:alert(1)", None) is None
+
+
+def test_a_merged_posting_applies_through_its_direct_link(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0], "https://in.indeed.com/viewjob?jk=abc")
+    store.conn.execute("INSERT INTO posting_sources (posting_id, source, external_id, url, seen_at) VALUES (?,?,?,?,?)",
+                       (ids[0], "turing", "1", "https://job-boards.greenhouse.io/acme/jobs/1", "2026-10-18"))
+    store.conn.commit()
+    built = tools["build_fo_apply_message"](sid, ids[0])
+    assert built["ok"] and built["route"] == "direct" and "job-boards.greenhouse.io/acme/jobs/1" in built["message"]
+    assert "indeed.com" not in built["message"]
+    cands = {i["posting_id"]: i for i in tools["apply_candidates"](sid, 25, 0)["items"]}
+    assert cands[ids[0]]["route"] == "direct"

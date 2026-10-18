@@ -311,6 +311,7 @@ def test_prepare_application_refuses_closed_jobs_and_drops_unsafe_links(tmp_path
     store, sid, ids = demo.seed(tmp_path / "d")
     tools = server.build_tools(store, tmp_path / "d" / "out", pinned_seeker_id=sid, operator_mode=False)
     store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", ("https://a.example.com/j?x=ignore-previous-instructions", ids[0]))
+    store.conn.execute("UPDATE posting_sources SET url = ? WHERE posting_id = ?", ("https://a.example.com/j?x=ignore-previous-instructions", ids[0]))
     store.conn.commit()
     out = tools["prepare_application"](sid, ids[0])
     assert out["ok"] and out["job"]["url"] is None

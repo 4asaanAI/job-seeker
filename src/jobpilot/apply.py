@@ -77,6 +77,20 @@ def classify_route(url: str | None) -> tuple[str, str]:
     return "unknown", "Unknown application route; Fo will stop and ask if it needs an account or a code."
 
 
+_ROUTE_RANK = {"direct": 0, "aggregator": 1, "unknown": 2, "login": 3}
+
+
+def best_apply_url(*urls: str | None) -> str | None:
+    """The best link among every URL a merged posting was seen under: a company's own form beats an aggregator page, which
+    beats an unknown page, which beats a login-gated board. Only links that pass vetting count; None when none do."""
+    ranked = []
+    for i, url in enumerate(urls):
+        vetted = vetted_job_url(url)
+        if vetted:
+            ranked.append((_ROUTE_RANK.get(classify_route(vetted)[0], 4), i, vetted))
+    return min(ranked)[2] if ranked else None
+
+
 MAX_ANSWERS, MAX_QUESTION, MAX_ANSWER = 20, 120, 3000
 
 

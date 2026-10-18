@@ -29,8 +29,8 @@ from .resume import (
     render_text,
     unverified_facts,
 )
-from .apply import (apply_message, classify_route, reply_check_message, safe_title_company, sweep_message,
-                    vet_answers, vetted_job_url)
+from .apply import (apply_message, best_apply_url, classify_route, reply_check_message, safe_title_company, sweep_message,
+                    vet_answers)
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.letter import build_letter
 from .resume.tailor import matching_skills, top_bullets
@@ -728,7 +728,7 @@ def build_tools(
                     continue
                 if m["fit_score"] is None or m["fit_score"] < min_score:
                     continue
-                link = vetted_job_url(m["url"])
+                link = best_apply_url(m["url"], *store.source_urls(m["posting_id"]))
                 route, note = classify_route(link) if link else ("blocked", "Link failed the safety check; apply by hand.")
                 items.append({"posting_id": m["posting_id"], "title": m["title"], "company": m["company_name"],
                               "score": m["fit_score"], "route": route, "route_note": note})
@@ -842,7 +842,7 @@ def build_tools(
                     (int(posting_id),)).fetchone()
             if closed:
                 raise ValueError("the closing date for this job has passed")
-            link = vetted_job_url(posting["url"])
+            link = best_apply_url(posting["url"], *store.source_urls(posting["id"]))
             if link is None:
                 raise ValueError("this posting's link failed the safety check; apply to it by hand")
             if batch_approved:
@@ -1103,7 +1103,7 @@ def build_tools(
             posting = store.posting_view(sid, int(posting_id))
             if posting is None:
                 raise ValueError("posting is not linked to this seeker")
-            link = vetted_job_url(posting["url"])
+            link = best_apply_url(posting["url"], *store.source_urls(posting["id"]))
             if link is None:
                 raise ValueError("this posting's link failed the safety check; open it from the board yourself")
             base = load_base_resume(_base_resume_path(sid))
@@ -1169,7 +1169,7 @@ def build_tools(
                         "SELECT 1 FROM job_postings WHERE id = ? AND valid_through IS NOT NULL AND valid_through < date('now')",
                         (int(posting_id),)).fetchone():
                     raise ValueError("the closing date for this job has passed")
-            posting = {**posting, "url": vetted_job_url(posting["url"])}      # an unsafe link is dropped, never passed on
+            posting = {**posting, "url": best_apply_url(posting["url"], *store.source_urls(posting["id"]))}   # unsafe links are dropped
             base = load_base_resume(_base_resume_path(sid))
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills,

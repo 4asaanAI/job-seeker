@@ -1087,6 +1087,14 @@ class Store:
                 "AND a.posting_id = seeker_jobs.posting_id AND a.status IN ('applied','interview','offer'))")
             return cur.rowcount
 
+    def source_urls(self, posting_id: int) -> list[str]:
+        """Every URL a (merged) posting was seen under, oldest first: the same job can sit on a login board and on the
+        company's own form, and the caller picks the best one."""
+        with self._lock:
+            rows = self.conn.execute("SELECT url FROM posting_sources WHERE posting_id = ? AND url IS NOT NULL "
+                                     "ORDER BY seen_at", (int(posting_id),)).fetchall()
+        return [r["url"] for r in rows]
+
     def posting_view(self, seeker_id: int, posting_id: int) -> dict | None:
         """Return a posting only if it is linked to this seeker."""
         with self._lock:

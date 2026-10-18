@@ -248,6 +248,7 @@ class FakeApply:
 
 def _link(store, pid):
     store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", ("https://careers.example.com/j/1", pid))
+    store.conn.execute("UPDATE posting_sources SET url = ? WHERE posting_id = ?", ("https://careers.example.com/j/1", pid))
     store.conn.commit()
 
 
@@ -278,6 +279,7 @@ def test_phone_apply_rejects_guessed_code_and_login_boards(demo):
     run(demo, Reader([msg("jp yes abcdef")]), sent, apply_client=fo)
     assert fo.messages == [] and "not valid" in sent[-1]
     store.conn.execute("UPDATE job_postings SET canonical_url = ? WHERE id = ?", ("https://www.naukri.com/j/1", ids[0]))
+    store.conn.execute("UPDATE posting_sources SET url = ? WHERE posting_id = ?", ("https://www.naukri.com/j/1", ids[0]))
     store.conn.commit()
     run(demo, Reader([msg(f"jp apply {ids[0]}", at="2026-10-18T06:00:00Z")]), sent, apply_client=fo)
     assert "yes" not in sent[-1].lower().split("reply")[-1] and fo.messages == []
