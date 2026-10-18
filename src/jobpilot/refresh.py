@@ -81,10 +81,27 @@ def main() -> int:
             if not cfg.fo_enabled or cfg.fo_seeker_id != sid:
                 print("deliver: needs [fo] enabled with this seeker_id")
                 return 2
+            from .runlog import record_run
             from .scheduled import deliver, make_fo_client
-            deliver(store, cfg, home, bot_factory=lambda: None, fo_factory=lambda: make_fo_client(cfg, args.claude),
-                    tracker_text_me=True)          # you asked for this run, so Fo also texts you the update and the link
+            clients: list = []
+
+            def factory():
+                clients.append(make_fo_client(cfg, args.claude))
+                return clients[-1]
+            ok, error = True, ""
+            try:
+                deliver(store, cfg, home, bot_factory=lambda: None, fo_factory=factory,
+                        tracker_text_me=True)      # you asked for this run, so Fo also texts you the update and the link
+            except Exception as exc:  # noqa: BLE001 - the ledger records the failure, then it is reported
+                ok, error = False, type(exc).__name__
+            calls = list(getattr(clients[0], "trace", [])) if clients and clients[0] else []
+            ok = ok and bool(calls) and all(c["status"] == "complete" for c in calls)
+            record_run("refresh_deliver", ok, {
+                "sources": ", ".join(f"{s['source']}={s['found']}" for s in out.get("sources", [])) or "not searched",
+                "scored": out["scoring"].get("scored", 0), "apply_ready": len(items),
+                "fo_calls": len(calls), "error": error or "none"}, calls, home)
             print(f"tracker link: {store.tracker_link(sid) or 'none yet'}")
+            print(f"run recorded: {'succeeded' if ok else 'FAILED'} ({len(calls)} Fo call(s)); see: python -m jobpilot.runlog")
         return 0
     finally:
         store.close()

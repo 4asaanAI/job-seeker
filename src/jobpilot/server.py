@@ -30,7 +30,7 @@ from .resume import (
     unverified_facts,
 )
 from .apply import (apply_message, classify_route, reply_check_message, safe_title_company, sweep_message,
-                    vetted_job_url)
+                    vet_answers, vetted_job_url)
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.letter import build_letter
 from .resume.tailor import matching_skills, top_bullets
@@ -802,8 +802,14 @@ def build_tools(
         batch_approved: bool = False,
         plan_id: str | None = None,
         phone_code: str | None = None,
+        answers: dict[str, str] | None = None,
     ) -> dict:
         """Build the request that asks Fo to apply to ONE job. SENDS NOTHING.
+
+        answers: the user's OWN typed answers to questions the form asks that are not in their resume (an essay, visa
+        sponsorship, relocation, a consent). Pass only text the user wrote in this conversation, as {question: answer};
+        never invent, shorten or "improve" one. Fo uses them exactly, shows what it filled in and waits for the user's
+        confirmation before submitting. At most 20 answers, 3000 characters each.
 
         phone_code is only for the text inbox (`jp apply` then `jp yes <code>`): the user approved this exact job
         from their phone. Never invent or pass it yourself.
@@ -868,6 +874,7 @@ def build_tools(
             names = safe_title_company(posting["title"], posting["company_name"])
             if names is None:
                 raise ValueError("this posting's title or company looks unsafe; apply to it by hand")
+            vetted_answers = vet_answers(answers)
             base = load_base_resume(_base_resume_path(sid))
             tailored = experience_order is None and skills is None and bullet_order is None
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
@@ -879,7 +886,8 @@ def build_tools(
                 except ValueError:
                     letter = None                         # no letter is better than an unsafe one; the application still works
             message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit),
-                                    attach_pdf=_google_on(), letter_text=letter, posting_id=int(posting_id))
+                                    attach_pdf=_google_on(), letter_text=letter, posting_id=int(posting_id),
+                                    answers=vetted_answers or None)
             if phone_code:
                 with store._lock:                       # only now, with the message built: check, consume and mark started as one step
                     if not _phone_approval_ok(sid, int(posting_id), phone_code):
@@ -912,8 +920,10 @@ def build_tools(
         bullet_order: dict[str, list[str]] | None = None,
         batch_approved: bool = False,
         plan_id: str | None = None,
+        answers: dict[str, str] | None = None,
     ) -> dict:
-        return _apply_core(seeker_id, posting_id, experience_order, skills, bullet_order, batch_approved, plan_id)
+        return _apply_core(seeker_id, posting_id, experience_order, skills, bullet_order, batch_approved, plan_id,
+                           answers=answers)
 
     # The public tool is the core without the phone-approval parameter: only the text inbox may use that.
     build_fo_apply_message.__doc__ = re.sub(r"\n        phone_code is only.*?yourself\.\n", "", _apply_core.__doc__, flags=re.S)

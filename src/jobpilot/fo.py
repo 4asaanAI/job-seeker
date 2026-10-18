@@ -61,11 +61,27 @@ class FoClient:
         self._open = (opener or urllib.request.build_opener(_NoRedirect)).open
         self._clock, self._sleep = clock, sleep
         self._max_wait, self._max_polls = max_wait, max_polls
+        self.trace: list[dict] = []          # one entry per tool call, for the run trace (never the key)
 
     def _mask(self, text: str) -> str:
         return str(text).replace(self._key, "***")[:200]
 
     def _call(self, tool: str, arguments: dict) -> dict:
+        started = time.monotonic()
+        entry = {"tool": f"mcp__fo__{tool}", "message_head": str(arguments.get("message", ""))[:160],
+                 "chars": len(str(arguments.get("message", "")))}
+        try:
+            reply = self._call_untraced(tool, arguments)
+        except Exception as exc:
+            entry.update(status=f"error: {type(exc).__name__}", seconds=round(time.monotonic() - started, 1))
+            self.trace.append(entry)
+            raise
+        entry.update(status=str(reply.get("status", "")), seconds=round(time.monotonic() - started, 1),
+                     reply_head=str(reply.get("response") or reply.get("progress") or "")[:160])
+        self.trace.append(entry)
+        return reply
+
+    def _call_untraced(self, tool: str, arguments: dict) -> dict:
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                            "params": {"name": tool, "arguments": arguments}}).encode()
         req = urllib.request.Request(self._url, data=body, method="POST", headers={
