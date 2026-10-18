@@ -164,3 +164,9 @@ def test_phone_letter_and_duplicate_guard(env):
     assert len(fo.messages) == 1 and "cover letter" in fo.messages[0]
     assert "cover letter" in sent[0] and "already requested" in sent[1]
     assert inbox.GRAMMAR.match("jp letter 12") and not inbox.GRAMMAR.match("jp letter")
+
+
+def test_two_letter_skills_can_match(env):
+    store, sid, ids, tools, base, *_ = env
+    short = base.__class__(**{**base.__dict__, "skills": ("Go", "R", "Cooking")})
+    assert matching_skills(short, "Backend engineer", "We write Go and R services") == ["Go", "R"]

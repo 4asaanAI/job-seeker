@@ -84,4 +84,6 @@ def matching_skills(base: BaseResume, title: str, description: str, n: int = 6,
                     only: list[str] | None = None) -> list[str]:
     """The seeker's own skills that the job mentions, in resume order (limited to `only` when the application chose skills)."""
     keywords = job_keywords(title, description)
-    return [s for s in base.skills if _score(s, keywords) > 0 and (only is None or s in only)][:n]
+    words = set(re.findall(r"[a-z0-9+#.]+", f"{title} {description}".lower()))      # short skills (Go, R, UX) are real words too
+    return [s for s in base.skills if (_score(s, keywords) > 0 or s.lower().strip(".") in words)
+            and (only is None or s in only)][:n]
