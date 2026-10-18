@@ -4,8 +4,8 @@ Read the SAY lines out loud. Do the DO lines on screen. Slow down: it always fee
 right when people watch.
 
 ## Set up first (not on camera)
-1. `python scripts/fo_demo.py` and run ALL the `export` lines it prints (one of them is JOBPILOT_PYTHON: without it the JobPilot server will not start).
-2. `cp .mcp.fo-demo.json.example .mcp.json`, then start Claude Code in the repo and check `/mcp` shows jobpilot and fo connected.
+1. Run `JOBPILOT_PYTHON=/path/to/python scripts/interactive_demo.sh` in a clean Terminal (big font). It seeds the fictional data and starts Claude Code with ONLY JobPilot and Fo loaded, in default permission mode, so the real Fo permission prompt appears. Check the bottom bar says manual/default mode, not auto mode.
+2. Start the screen recording (Cmd+Shift+5, record the Terminal window only), then type the prompts below yourself.
 3. Use the fictional seeker only. Close email, Slack and anything with real names. Turn on Do Not Disturb.
 4. Phone: your iMessage thread with Fo has real history. Record the phone separately, or start a fresh chat, and only show the new messages.
 5. Rehearse once. Record twice. Keep the better take.
