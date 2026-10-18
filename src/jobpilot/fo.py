@@ -177,6 +177,7 @@ class ClaudeFoClient:
             raise ValueError(f"Fo url must be https://{FO_HOST}/...")
         self._claude, self._url, self._run = claude_bin, url, runner
         self._model, self._budget, self._timeout = model, max_budget_usd, timeout
+        self.trace: list[dict] = []          # one entry per relayed message, same shape as FoClient.trace
 
     def _prompt(self, message: str) -> str:
         edge = secrets.token_hex(6)
@@ -193,6 +194,14 @@ class ClaudeFoClient:
             f"{edge}\n{message}\n{edge}\n")
 
     def send(self, message: str) -> FoResult:
+        started = time.monotonic()
+        result = self._send(message)
+        self.trace.append({"tool": "mcp__fo__ask_fo (headless claude relay)", "status": result.status,
+                           "seconds": round(time.monotonic() - started, 1), "chars": len(message),
+                           "message_head": message[:160], "reply_head": (result.reply or "")[:160]})
+        return result
+
+    def _send(self, message: str) -> FoResult:
         config = json.dumps({"mcpServers": {"fo": {"type": "http", "url": self._url}}})
         command = [self._claude, "-p", "--no-session-persistence", "--strict-mcp-config",
                    "--mcp-config", config, "--tools", "", "--disable-slash-commands",

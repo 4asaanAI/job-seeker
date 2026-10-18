@@ -53,3 +53,16 @@ def test_record_from_the_command_line(tmp_path, monkeypatch):
     assert runlog.main(["record", "apply_demo", "maybe"]) == 2
     runs = runlog.read_runs(tmp_path)
     assert runlog.run_count(runs) == {"apply_demo": {"runs": 2, "succeeded": 1}} and runs[0]["steps"]["job"] == "1"
+
+
+def test_the_relay_client_traces_its_sends_too():
+    from types import SimpleNamespace
+    from jobpilot.fo import ClaudeFoClient
+    stream = "\n".join([
+        json.dumps({"message": {"content": [{"type": "tool_use", "id": "1", "name": "mcp__fo__ask_fo", "input": {"message": "hi there"}}]}}),
+        json.dumps({"message": {"content": [{"type": "tool_result", "tool_use_id": "1",
+                                              "content": json.dumps({"status": "complete", "response": "Sent."})}]}})])
+    runner = lambda cmd, **kw: SimpleNamespace(returncode=0, stdout=stream, stderr="")
+    client = ClaudeFoClient("claude", runner=runner)
+    assert client.send("hi there").status == "complete"
+    assert client.trace[0]["status"] == "complete" and client.trace[0]["chars"] == 8 and "relay" in client.trace[0]["tool"]
