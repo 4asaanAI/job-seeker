@@ -35,6 +35,8 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
   transcripts. `python -m jobpilot.inbox --once` polls them through a headless relay, accepts a strict read-only
   grammar (`jp matches`, `jp status`, `jp tailor <id>`) re-checked in Python, runs JobPilot locally and replies
   through Fo. Commands never apply, email or change a job's status. Design: [docs/superpowers/specs/2026-10-18-fo-inbox-design.md](docs/superpowers/specs/2026-10-18-fo-inbox-design.md).
+- **"Apply to all my new jobs".** `plan_apply_batch` lists the jobs Fo can plausibly complete; you give one yes; each
+  application is a vetted request that stops at anything not in your resume. Max 10 a day.
 - **Applying through Fo, on your yes.** `build_fo_apply_message` builds one vetted request per job (safe link, your resume text,
   "ask me before submitting", **no calendar event**). A calendar entry appears only when the company itself sends an invitation
   (`build_fo_reply_check_message`). Nothing is sent by JobPilot; every `ask_fo` passes Claude Code's permission prompt.

@@ -26,6 +26,17 @@ Indeed, LinkedIn, Workday: an account and often a phone code Fo cannot always re
 foundit's phone verification never delivered a code, so Fo could not get in, and nothing was submitted. Start with
 direct and aggregator jobs, and apply by hand where a board needs a code only your phone gets.
 
+## Apply to all my new jobs (whenever you ask)
+
+Say "apply to my new jobs". Claude runs `plan_apply_batch` and shows you the list (at most 10, best first, no login-gated
+boards, nothing already applied, started or skipped). You give ONE yes for that exact list. Then, one job at a time, Claude
+builds `build_fo_apply_message(..., batch_approved=True)` and passes it to `ask_fo` unchanged (you still see Claude Code's
+permission prompt for each Fo call). With the batch approved, Fo submits without a second confirmation, but it STOPS and tells
+you if a form asks for anything not in your resume (salary, notice period, a question, a file) or needs an account or a code.
+Claude records each result: `applied` when Fo says it submitted, `started` with a note when it stopped, so a blocked job is not
+retried blindly. No calendar events are created. Limits: 10 approved requests per day, only jobs on the approved list.
+Jobs on login boards are listed separately for you to apply to by hand.
+
 ## 3. Apply with Fo (one job at a time, only with your yes)
 
 1. "Prepare my application for job 12" -> `prepare_application` shows your facts-only resume text and the job's title,

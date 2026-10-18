@@ -123,3 +123,45 @@ def test_apply_candidates_orders_by_route_and_leaves_out_done_jobs(env):
     store.record_application(sid, ids[1], "applied")
     assert ids[1] not in [i["posting_id"] for i in tools["apply_candidates"](sid)["items"]]
     assert tools["build_fo_apply_message"](sid, ids[0])["route"] == "login"
+
+
+def test_batch_plan_excludes_login_boards_and_orders_best_first(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0], "https://www.foundit.in/job/1")
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    https_link(store, ids[2], "https://himalayas.app/companies/a/jobs/3")
+    plan = tools["plan_apply_batch"](sid, 5)
+    got = [i["posting_id"] for i in plan["items"]]
+    assert ids[0] not in got and ids[1] in got and ids[2] in got
+    assert any(i["posting_id"] == ids[0] for i in plan["skipped_login_boards"])
+    assert got[0] == ids[1]                                                      # direct before aggregator
+
+
+def test_approved_batch_message_submits_without_second_confirmation_but_stops_on_unknowns(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    m = tools["build_fo_apply_message"](sid, ids[1], batch_approved=True)
+    assert m["ok"] and "ALREADY approved applying to this exact job" in m["message"]
+    for must in ("do NOT guess", "Do NOT create any calendar event", "one-time code that only my phone could receive, STOP"):
+        assert must in m["message"]
+
+
+def test_approved_batch_refuses_jobs_not_on_the_list(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0], "https://www.foundit.in/job/1")              # login board
+    assert "not on the approved apply list" in tools["build_fo_apply_message"](sid, ids[0], batch_approved=True)["error"]
+    https_link(store, ids[3], "https://boards.greenhouse.io/acme/jobs/9")  # score below threshold (55)
+    assert "not on the approved apply list" in tools["build_fo_apply_message"](sid, ids[3], batch_approved=True)["error"]
+
+
+def test_attempted_jobs_are_not_retried_and_daily_cap_holds(env, monkeypatch):
+    from jobpilot import server
+    store, sid, ids, tools = env
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    store.record_application(sid, ids[1], "started", "blocked: needs a code")
+    assert ids[1] not in [i["posting_id"] for i in tools["plan_apply_batch"](sid)["items"]]
+    monkeypatch.setattr(server, "MAX_DAILY_APPLY_REQUESTS", 1)
+    https_link(store, ids[2], "https://boards.greenhouse.io/acme/jobs/3")
+    https_link(store, ids[0], "https://boards.greenhouse.io/acme/jobs/4")
+    assert tools["build_fo_apply_message"](sid, ids[2], batch_approved=True)["ok"]
+    assert "daily limit" in tools["build_fo_apply_message"](sid, ids[0], batch_approved=True)["error"]
