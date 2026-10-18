@@ -22,7 +22,7 @@ Two ways in, one ledger:
   notifications ledger with `channel = fo`, so a job is never announced twice.
 
 What Fo cannot do (so we do not pretend): `ask_fo` takes text only, so it cannot attach the resume,
-and your replies inside Fo do not come back to JobPilot. Replying and acting happens in the Claude session.
+and your replies inside Fo do not reach JobPilot reliably (the polling inbox is experimental and not verified live). Replying and acting happens in the Claude session.
 
 ## What is verified live
 
@@ -34,7 +34,6 @@ and your replies inside Fo do not come back to JobPilot. Replying and acting hap
 - Scheduled notifier (B), transport `claude`: verified live. A headless `claude -p` relay with only the Fo send/poll
   tools delivered a vetted message, and Fo's own transcript shows the exact text. An LLM is in this path, so delivery
   counts only when the relay prints a fixed status line. Transport `api` (FO_API_KEY): tested with a fake Fo only.
-- (older note) Scheduled notifier via API key: covered by tests with a fake Fo, NOT yet run live. It needs `FO_API_KEY`, and the
   header the key goes in (`Authorization: Bearer`) is unconfirmed. A `working` (slow) reply has not been seen live.
 
 ## Text Fo, JobPilot answers (polling inbox) - EXPERIMENTAL

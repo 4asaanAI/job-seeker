@@ -26,7 +26,8 @@ from .resume import (
     render_text,
     unverified_facts,
 )
-from .apply import apply_message, classify_route, reply_check_message, safe_title_company, vetted_job_url
+from .apply import (apply_message, classify_route, reply_check_message, safe_title_company, sweep_message,
+                    vetted_job_url)
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
@@ -754,6 +755,91 @@ def build_tools(
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
 
+    def my_dashboard(seeker_id: int) -> dict:
+        """One-call answer to "what is going on with my job search". READ ONLY.
+
+        Counts of new matches, applications by status, follow-ups due, applications waiting 7+ days for a reply,
+        and a plain-English summary line. Titles and companies are untrusted text.
+        """
+        try:
+            sid = _check(seeker_id)
+            apps = store.applications(sid, 500)
+            by_status: dict[str, int] = {}
+            for a in apps:
+                by_status[a["status"]] = by_status.get(a["status"], 0) + 1
+            from datetime import datetime, timedelta, timezone
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            waiting = [{"posting_id": a["posting_id"], "title": a["title"], "company": a["company_name"],
+                        "applied_at": a["applied_at"]}
+                       for a in apps if a["status"] == "applied" and a["applied_at"] and a["applied_at"] <= cutoff][:10]
+            new = [m for m in store.best_matches(sid, 25)
+                   if m["status"] not in ("skipped", "applied", "expired") and (m["fit_score"] or 0) >= 70]
+            followups = store.pending_followups(sid, 10)
+            summary = (f"{len(new)} good new match(es); applications: "
+                       + (", ".join(f"{n} {k}" for k, n in sorted(by_status.items())) or "none yet")
+                       + f"; {len(followups)} follow-up(s) due; {len(waiting)} application(s) waiting a week or more.")
+            return {"ok": True, "seeker_id": sid, "summary": summary, "new_matches": len(new),
+                    "applications_by_status": by_status, "follow_ups_due": len(followups),
+                    "waiting_for_reply": waiting, "note": UNTRUSTED}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def build_fo_sweep_replies_message(seeker_id: int) -> dict:
+        """Build ONE request asking Fo to check email for replies to all your submitted applications. SENDS NOTHING.
+
+        Pass `message` to ask_fo unchanged. For each reply Fo reports, call record_application with status
+        "interview" or "rejected". Fo may add a calendar event only for an invitation the company itself sent.
+        """
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            pairs = []
+            for a in store.applications(sid, 500):
+                if a["status"] in ("applied", "interview"):
+                    names = safe_title_company(a["title"], a["company_name"])
+                    if names:
+                        pairs.append(names)
+            if not pairs:
+                return {"ok": True, "seeker_id": sid, "message": None, "note": "No submitted applications to check."}
+            return {"ok": True, "seeker_id": sid, "count": len(pairs[:10]), "message": sweep_message(pairs[:10]),
+                    "note": "Nothing was sent. Pass the message to ask_fo unchanged, with the user's approval."}
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def manual_apply_packet(
+        seeker_id: int,
+        posting_id: int,
+        experience_order: list[str] | None = None,
+        skills: list[str] | None = None,
+        bullet_order: dict[str, list[str]] | None = None,
+    ) -> dict:
+        """Everything the user needs to apply BY HAND (for login-gated boards Fo cannot complete). SENDS NOTHING.
+
+        Returns the safe link, why Fo cannot do it, the facts-only resume text to paste, and a checklist.
+        After the user says they submitted it, call record_application(status="applied").
+        """
+        try:
+            sid = _check(seeker_id)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            link = vetted_job_url(posting["url"])
+            if link is None:
+                raise ValueError("this posting's link failed the safety check; open it from the board yourself")
+            base = load_base_resume(_base_resume_path(sid))
+            text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
+            route, note = classify_route(link)
+            return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id),
+                    "job": {"title": posting["title"], "company": posting["company_name"]}, "link": link,
+                    "route": route, "route_note": note, "resume_text": text,
+                    "checklist": ["Open the link and sign in (or register) yourself.",
+                                  "Paste or upload the resume text above; check every line is true.",
+                                  "Answer salary, notice period and screening questions yourself.",
+                                  "After you submit, tell me, and I will record it as applied."],
+                    "note": UNTRUSTED + " Nothing was sent."}
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
     def build_fo_reply_check_message(seeker_id: int, posting_id: int) -> dict:
         """Build the request that asks Fo to look for the company's reply. SENDS NOTHING.
 
@@ -917,6 +1003,9 @@ def build_tools(
         "plan_apply_batch": plan_apply_batch,
         "build_fo_apply_message": build_fo_apply_message,
         "build_fo_reply_check_message": build_fo_reply_check_message,
+        "build_fo_sweep_replies_message": build_fo_sweep_replies_message,
+        "my_dashboard": my_dashboard,
+        "manual_apply_packet": manual_apply_packet,
         "investigate_posting": investigate_posting,
         "verify_still_open": verify_still_open,
         "check_company_careers": check_company_careers,

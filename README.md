@@ -10,12 +10,18 @@
 strangers' job posts steer it.
 
 **Claude finds and judges the jobs. [Fo](https://wajo.ai) (Wajo's assistant, over MCP) does the real-world part: it texts me the matches,
-applies when I say yes, and adds an interview to my calendar only when the company sends the invite.** One Claude session holds both MCP servers; you just ask in plain English.
+can apply when I say yes (verified on the request side; the one live attempt stopped at a phone-code login), and adds an interview to my calendar only when the company sends the invite.** One Claude session holds both MCP servers; you just ask in plain English.
 Built for the GSD hackathon. JobPilot already existed; the Fo link, the safety layer, tailored resumes and the
 unattended digest are what was built for it.
 
 > Fo can email, call and buy, and job posts are written by strangers. So Fo never sees a job post: it receives only an id,
 > a score and a vetted title, and every Fo action asks for permission first.
+
+## Using it with Claude Code (macOS or Linux)
+
+Copy `.mcp.fo-demo.json.example` to `.mcp.json` (the older `.mcp.json.example` is the Windows layout), set `JOBPILOT_PYTHON`,
+`JOBPILOT_DB`, `JOBPILOT_OUT` and `JOBPILOT_SEEKER_ID`, start Claude Code, and log in to Fo with `/mcp`. New to it? Ask Claude:
+"start with my resume" and use `docs/APPLYING.md`. One-call status: `my_dashboard`. Login-gated jobs: `manual_apply_packet`.
 
 ## Try it in three minutes (no accounts, nothing is sent)
 

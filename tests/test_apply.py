@@ -173,3 +173,38 @@ def test_apply_refuses_a_job_whose_deadline_has_passed(env):
     store.set_valid_through(ids[1], "2020-01-01")
     assert "closing date" in tools["build_fo_apply_message"](sid, ids[1])["error"]
     assert ids[1] not in [i["posting_id"] for i in tools["plan_apply_batch"](sid)["items"]]
+
+
+# ---- dashboard, reply sweep, manual packet --------------------------------
+
+def test_dashboard_summarizes_in_one_call(env):
+    store, sid, ids, tools = env
+    out = tools["my_dashboard"](sid)
+    assert out["ok"] and out["new_matches"] >= 1 and "good new match" in out["summary"]
+    store.record_application(sid, ids[0], "applied")
+    store.conn.execute("UPDATE applications SET applied_at = '2020-01-01T00:00:00+00:00'")
+    store.conn.commit()
+    out = tools["my_dashboard"](sid)
+    assert out["applications_by_status"] == {"applied": 1} and len(out["waiting_for_reply"]) == 1
+    assert tools["my_dashboard"](sid + 5)["ok"] is False
+
+
+def test_sweep_replies_needs_applications_and_forbids_replying(env):
+    store, sid, ids, tools = env
+    assert tools["build_fo_sweep_replies_message"](sid)["message"] is None
+    store.record_application(sid, ids[0], "applied")
+    out = tools["build_fo_sweep_replies_message"](sid)
+    assert out["ok"] and out["count"] == 1
+    for must in ("untrusted data", "Never reply to anyone", "ONLY if the company itself sent an interview invitation"):
+        assert must in out["message"]
+    assert "http" not in out["message"]                       # no job links or scraped text go to Fo
+
+
+def test_manual_packet_has_link_resume_and_checklist_and_sends_nothing(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0], "https://www.foundit.in/job/1")
+    out = tools["manual_apply_packet"](sid, ids[0])
+    assert out["ok"] and out["route"] == "login" and "Avery Demo" in out["resume_text"]
+    assert len(out["checklist"]) == 4 and store.applications(sid) == []
+    https_link(store, ids[1], "http://plain.example.com/j")
+    assert tools["manual_apply_packet"](sid, ids[1])["ok"] is False

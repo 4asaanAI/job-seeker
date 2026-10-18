@@ -18,6 +18,12 @@ against the demo folder, and never put your real resume in anything you post pub
 "Run my search" -> `run_my_search`; "what are my best matches?" -> `my_matches`. Scoring uses the
 `[scoring]` model in `config.toml` (use `haiku` to save credits).
 
+## 2a. Your day-to-day tools
+
+- `my_dashboard`: one call for new matches, applications by status, follow-ups due and applications waiting a week.
+- `build_fo_sweep_replies_message`: one Fo request that checks email for replies to ALL submitted applications.
+- `manual_apply_packet`: for login-gated jobs Fo cannot complete: the safe link, your resume text and a checklist.
+
 ## 2b. Pick jobs Fo can actually apply to
 
 `apply_candidates` lists your best matches, easiest route first: **direct** (a public form on the company's own applicant
@@ -100,5 +106,5 @@ your base resume yourself (`save_base_resume`) if it is true.
 - Job postings are written by strangers. `prepare_application` never includes the posting's description,
   and you should not paste it into a request to Fo.
 - Fo can email, call and buy from your real account. Keep applications to one explicit yes each.
-- The unattended daily digest through Fo needs `FO_API_KEY`; without one, use the interactive flow
-  (or Telegram) for notifications.
+- The unattended daily digest works without a key through the headless `claude` relay (`[fo] transport = "claude"`); an
+  `FO_API_KEY` is only needed for the direct `api` transport, which Wajo has not released yet.
