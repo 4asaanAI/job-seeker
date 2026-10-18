@@ -983,11 +983,16 @@ def build_tools(
             seekers = [s for s in seekers if s.id in wanted]
 
         targets, feeds_added = [], {}
-        budget = [MAX_DAILY_FEED_LOOKUPS]  # shared across seekers: engines throttle
+        # A real daily cap: lookups already spent in the last 24 hours (any seeker) come off the budget.
+        spent = sum(store.event_count_since(sk.id, "feed_lookup", 24) for sk in store.list_seekers())
+        budget = [max(0, MAX_DAILY_FEED_LOOKUPS - spent)]  # shared across seekers: engines throttle
         skipped = {}
         for seeker in seekers:
             try:
+                before = budget[0]
                 added = _heal_feeds(seeker.id, budget)
+                for _ in range(max(0, before - budget[0])):
+                    store.record_event("feed_lookup", "employer feed search", seeker_id=seeker.id)
                 if added:
                     feeds_added[seeker.id] = added
                 _, _, profile = _profile_for(seeker.id)

@@ -7,7 +7,7 @@ explicit deny list); "delivered" through the headless relay now needs a real Fo 
 transcript; stricter `clean()` (domains, long numbers, payment and credential words, dotted spellings); the polling inbox
 now locks, prunes by age, answers each command once, and no longer echoes job-description keywords.
 
-Also fixed later: one broken profile no longer stops discovery for everyone (reported as `skipped_seekers`), and profile YAML is written atomically.
+Also fixed later: the employer-feed lookup cap is now a real 24-hour cap (counted from stored events); tailoring keywords skip generic posting words; one broken profile no longer stops discovery for everyone (reported as `skipped_seekers`), and profile YAML is written atomically.
 
 Not fixed, with the honest impact:
 
@@ -16,7 +16,6 @@ Not fixed, with the honest impact:
 | `web_fetch` (Telegram bot only) | Host is checked once; the fetcher resolves it again (DNS rebinding), and a JS-rendering retry can run page scripts that reach private addresses. | Needs an egress proxy that refuses private ranges. Do not expose the web tools to untrusted users. |
 | Shared employer feeds | Feeds found for one seeker are stored globally and listed to all seekers. | Reveals which employers someone targets; stored names are seeker-supplied. |
 | Profile folders | Two profiles in one folder share resume, rubric and uploads. | Operator error only; the bot creates one folder per seeker. |
-| Feed lookups | The daily cap resets per `discover` call. | A stranger could trigger many web searches. |
 | Source health | A single-seeker search records counts used for the "degraded" median. | Can mislabel a source as degraded. |
 | Schema migration | `migrate()` re-parses postings on every server start. | Slower starts with a large database. |
 | `ask_fo` is not idempotent | A send that times out may still complete; the next run can duplicate a text. | A duplicate text, never a lost digest. |

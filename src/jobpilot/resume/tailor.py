@@ -13,7 +13,7 @@ from had has have having he her his how i if in into is it its may more most mus
 should so such than that the their them then there these they this those to up us was we were what when which who
 will with within would you your able across including per plus etc experience experienced years year work working
 role roles team teams job position candidate company strong ability responsibilities requirements preferred
-required skills knowledge looking join opportunity benefits employer equal opportunity""".split())
+required skills knowledge looking join opportunity benefits employer equal opportunity posting apply applicant demo fictional hire hiring location remote office based full time part""".split())
 _WORD = re.compile(r"[a-z][a-z0-9+#.\-]{1,}")
 
 

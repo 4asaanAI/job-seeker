@@ -80,3 +80,21 @@ def test_one_broken_profile_does_not_stop_discovery_for_others(tmp_path, monkeyp
     out = tools["discover"]()
     assert out["ok"] is True and 2 in out["skipped_seekers"] and 1 not in out["skipped_seekers"]
     store.close()
+
+
+def test_feed_lookup_budget_is_a_real_daily_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    store = Store(tmp_path / "j.db")
+    store.migrate()
+    sid = store.add_seeker("A", None, "x.yaml", 20)
+    for _ in range(server.MAX_DAILY_FEED_LOOKUPS):
+        store.record_event("feed_lookup", "x", seeker_id=sid)
+    spent = sum(store.event_count_since(s.id, "feed_lookup", 24) for s in store.list_seekers())
+    assert max(0, server.MAX_DAILY_FEED_LOOKUPS - spent) == 0
+    store.close()
+
+
+def test_tailor_keywords_skip_generic_posting_words():
+    from jobpilot.resume.tailor import job_keywords
+    kws = job_keywords("Product Manager", "This demo fictional posting asks you to apply. SQL and Kubernetes required.")
+    assert "demo" not in kws and "posting" not in kws and "apply" not in kws and "sql" in kws
