@@ -413,3 +413,8 @@ def test_every_apply_request_forbids_the_enter_key_that_submitted_a_form_early()
     for kwargs in ({}, {"approved": True}, {"attach_pdf": True}, {"letter_text": "L"}, {"answers": [("q", "a")]}):
         m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME", **kwargs)
         assert "never press the Enter key inside a field or a dropdown" in m and "click the submit button only after I have confirmed" in m
+
+
+def test_apply_requests_ask_fo_not_to_repeat_contact_details_in_its_report():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME")
+    assert "never repeat my email, phone number or home address" in m

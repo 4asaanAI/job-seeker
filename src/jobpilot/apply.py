@@ -183,7 +183,8 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         "and tell me; do not create accounts, do not retry more than once, and do not use any other email or number.\n"
         "6. Afterwards tell me exactly what you submitted and where. While filling a form, never press the Enter key inside a "
         "field or a dropdown (it can submit the form early): choose with the mouse or Tab, and click the submit button only "
-        "after I have confirmed.\n"
+        "after I have confirmed. When you report back, never repeat my email, phone number or home address; say only that my contact "
+        "details were filled in.\n"
         f"{file_rule}{paste_rule}{letter_rule}{answers_rule}{marker}\n{body}\n{marker}{letter_block}{answers_block}")
 
 
