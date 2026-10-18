@@ -28,13 +28,34 @@ explicit one-page browser-investigation handoffs.
 
 JobPilot finds and scores jobs; [Fo](https://wajo.ai) (Wajo's assistant, reached over MCP) does the
 real-world part: it texts you the matches, nudges you to follow up, and books the follow-up on your
-calendar. Claude holds both MCP servers, so you can ask in plain English, and an unattended run can
-deliver the daily digest through Fo instead of Telegram.
+calendar. Claude holds both MCP servers, so you ask in plain English.
 
-See [docs/FO-DEMO.md](docs/FO-DEMO.md) for the architecture, the 60-second demo, and the safety
-choices (Fo can email, call and buy, so scraped job text never reaches it unfiltered). Try it with
-fictional data: `python scripts/fo_demo.py` (dry run) or `--send` with `FO_API_KEY` set.
-Status: the interactive Claude + Fo path is verified live; the unattended digest is tested with a fake Fo but not yet run against the real one.
+```mermaid
+flowchart LR
+  boards[Job boards and employer ATS] --> JP[JobPilot MCP server]
+  JP -->|scored matches, ledger| Claude
+  you([You]) <-->|plain English| Claude
+  Claude -->|ask_fo, with your approval| Fo[Fo MCP: text, email, calendar]
+  Fo --> phone([Your phone and calendar])
+  JP -.->|scheduled digest, minimal text only| Fo
+```
+
+What makes it more than glue:
+
+- **Safe by design.** Fo can email, call and buy, and job posts are written by strangers. Fo only ever
+  receives an id, a score and a vetted title/company, never reasoning or links. The host is pinned, the key
+  never follows a redirect, and each application needs your explicit yes.
+- **Never told twice.** A notification ledger records every delivery by channel; a failed send is retried,
+  never counted as sent.
+- **Facts-only applications.** `prepare_application` builds your application from your own saved resume
+  facts. It cannot invent experience.
+- **Tested.** 490+ offline tests, plus a test that starts the real MCP server and drives it like Claude.
+
+Try it in two minutes with fictional data: `python scripts/fo_demo.py` (dry run, sends nothing). See
+[docs/FO-DEMO.md](docs/FO-DEMO.md) for the demo script and safety choices, and
+[docs/APPLYING.md](docs/APPLYING.md) to use it for your own search.
+Status: the interactive Claude + Fo path is verified live; the unattended digest is tested with a fake Fo
+but not yet run against the real one.
 
 ## macOS development
 
