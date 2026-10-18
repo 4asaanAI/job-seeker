@@ -26,6 +26,7 @@ class Posting:
     description: str | None
     url: str | None
     posted_at: str | None
+    valid_through: str | None = None   # closing date (YYYY-MM-DD) when the source states one
 
 
 @dataclass(frozen=True)

@@ -43,6 +43,7 @@ def job_rows(store: Store, seeker_id: int, days: int = MAX_AGE_DAYS) -> list[dic
             LEFT JOIN scores s ON s.seeker_id = sj.seeker_id AND s.posting_id = p.id
             LEFT JOIN applications a ON a.seeker_id = sj.seeker_id AND a.posting_id = p.id
             WHERE sj.seeker_id = ? AND p.last_seen_at >= ?
+              AND (p.valid_through IS NULL OR p.valid_through >= date('now'))
             ORDER BY s.fit_score IS NULL, s.fit_score DESC, sj.first_seen_at DESC
             """,
             (seeker_id, since),

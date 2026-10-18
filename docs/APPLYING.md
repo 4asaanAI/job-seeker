@@ -26,6 +26,13 @@ Indeed, LinkedIn, Workday: an account and often a phone code Fo cannot always re
 foundit's phone verification never delivered a code, so Fo could not get in, and nothing was submitted. Start with
 direct and aggregator jobs, and apply by hand where a board needs a code only your phone gets.
 
+## Deadlines
+
+When a source states a closing date (job-board feeds with an expiry, `validThrough` on careers pages), JobPilot stores it. A job
+disappears from matches, digests, follow-ups, the job list and the apply plan the day after its last open day, with no sweep
+needed, and each search also marks it `expired` (never a job you already applied to). Many boards state no date; those stay until
+they stop appearing in searches or you skip them.
+
 ## Find the best new jobs (whenever you ask)
 
 Say "find me new jobs". Claude runs `run_my_search` (3 a day) to discover from your enabled boards, scores what is new with the

@@ -98,3 +98,80 @@ def test_tailor_keywords_skip_generic_posting_words():
     from jobpilot.resume.tailor import job_keywords
     kws = job_keywords("Product Manager", "This demo fictional posting asks you to apply. SQL and Kubernetes required.")
     assert "demo" not in kws and "posting" not in kws and "apply" not in kws and "sql" in kws
+
+
+def test_two_seekers_cannot_share_a_profile_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    store = Store(tmp_path / "j.db")
+    store.migrate()
+    tools = server.build_tools(store, tmp_path / "out", operator_mode=True)
+    assert tools["add_seeker"]("A", 1, "data/seekers/a/profile.yaml")["ok"] is True
+    clash = tools["add_seeker"]("B", 2, "data/seekers/a/profile.yaml")
+    assert clash["ok"] is False and "already belongs" in clash["error"]
+    assert tools["add_seeker"]("B", 2, "data/seekers/b/profile.yaml")["ok"] is True
+    store.close()
+
+
+# ---- job deadlines -------------------------------------------------------
+
+def _deadline_store(tmp_path, valid_through):
+    store = Store(tmp_path / "d.db")
+    store.migrate()
+    profile = tmp_path / "p" / "profile.yaml"
+    profile.parent.mkdir()
+    profile.write_text("name: A\nheadline: M\nlocation: X\nsources: [s]\nsearch_terms: [m]\n", encoding="utf-8")
+    sid = store.add_seeker("A", None, str(profile), 20)
+    pid = store.upsert_posting(Posting(company_name="Acme", source="s", external_id="1", title="PM", location="X",
+                                       description="d", url="https://a.example.com/1", posted_at="2026-10-01"))
+    store.link_posting(sid, pid)
+    store.record_score(sid, pid, 90, "ok", "t")
+    if valid_through:
+        store.set_valid_through(pid, valid_through)
+    return store, sid, pid
+
+
+def test_jobs_past_their_deadline_leave_every_list_immediately(tmp_path):
+    store, sid, pid = _deadline_store(tmp_path, "2020-01-01")
+    assert store.best_matches(sid, 5) == []
+    assert store.notifiable_postings(sid, 70.0, 5) == []
+    out = tmp_path / "x.xlsx"
+    from jobpilot.joblist import write_job_list
+    assert write_job_list(store, sid, out, min_score=60)[0] == 0
+    store.close()
+
+
+def test_open_and_undated_jobs_stay_and_the_last_day_is_still_open(tmp_path):
+    from datetime import date
+    for value in (None, date.today().isoformat(), "2099-12-31"):
+        sub = tmp_path / str(value)
+        sub.mkdir()
+        store, sid, pid = _deadline_store(sub, value)
+        assert [m["posting_id"] for m in store.best_matches(sid, 5)] == [pid], value
+        store.close()
+
+
+def test_sweep_marks_expired_but_never_an_application_in_progress(tmp_path):
+    store, sid, pid = _deadline_store(tmp_path, "2020-01-01")
+    store.record_application(sid, pid, "applied")
+    assert store.expire_past_deadlines() == 0                 # applied jobs keep their status
+    store2, sid2, pid2 = _deadline_store(tmp_path / "b" if (tmp_path / "b").mkdir() is None else tmp_path, "2020-01-01")
+    assert store2.expire_past_deadlines() == 1
+    assert store2.conn.execute("SELECT status FROM seeker_jobs").fetchone()[0] == "expired"
+    store.close(); store2.close()
+
+
+def test_deadline_parsers_read_epoch_and_iso_and_ignore_junk():
+    from jobpilot.sources.ats_json import _closing_date
+    assert _closing_date({"expiryDate": 1893456000}) == "2030-01-01"
+    assert _closing_date({"expiresAt": 1893456000000}) == "2030-01-01"
+    assert _closing_date({"validThrough": "2030-05-06T00:00:00Z"}) == "2030-05-06"
+    assert _closing_date({"expiryDate": "soon"}) is None and _closing_date({}) is None
+
+
+def test_jsonld_valid_through_is_captured():
+    html = ('<script type="application/ld+json">{"@type":"JobPosting","identifier":{"value":"J1"},"title":"PM",'
+            '"url":"https://c.example.com/1","hiringOrganization":{"name":"Acme"},"validThrough":"2030-02-03T00:00",'
+            '"jobLocation":{"address":{"addressLocality":"X"}},"description":"d"}</script>')
+    cfg = StructuredConfig(name="a", company_name="Acme", endpoint="https://c.example.com", enabled=True, canary_min_results=1)
+    found, _ = JsonLdSource(cfg, fetcher=lambda u, t: html).search("pm", None)
+    assert found[0].valid_through == "2030-02-03T00:00"

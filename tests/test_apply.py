@@ -165,3 +165,11 @@ def test_attempted_jobs_are_not_retried_and_daily_cap_holds(env, monkeypatch):
     https_link(store, ids[0], "https://boards.greenhouse.io/acme/jobs/4")
     assert tools["build_fo_apply_message"](sid, ids[2], batch_approved=True)["ok"]
     assert "daily limit" in tools["build_fo_apply_message"](sid, ids[0], batch_approved=True)["error"]
+
+
+def test_apply_refuses_a_job_whose_deadline_has_passed(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
+    store.set_valid_through(ids[1], "2020-01-01")
+    assert "closing date" in tools["build_fo_apply_message"](sid, ids[1])["error"]
+    assert ids[1] not in [i["posting_id"] for i in tools["plan_apply_batch"](sid)["items"]]

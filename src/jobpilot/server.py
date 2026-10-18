@@ -723,6 +723,11 @@ def build_tools(
             if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
                    for a in store.applications(sid, 500)):
                 raise ValueError("an application for this job is already recorded")
+            closed = store.conn.execute(
+                "SELECT 1 FROM job_postings WHERE id = ? AND valid_through IS NOT NULL AND valid_through < date('now')",
+                (int(posting_id),)).fetchone()
+            if closed:
+                raise ValueError("the closing date for this job has passed")
             link = vetted_job_url(posting["url"])
             if link is None:
                 raise ValueError("this posting's link failed the safety check; apply to it by hand")
@@ -953,6 +958,11 @@ def build_tools(
         ):
             return {"ok": False,
                     "error": "profile_path must be relative to JOBPILOT_HOME"}
+        folder = Path(ntpath.normpath(profile_path).replace("\\", "/")).parent
+        for other in store.list_seekers():
+            if Path(ntpath.normpath(other.profile_path).replace("\\", "/")).parent == folder:
+                # Resume, rubric and uploads are found from the profile's folder: sharing one would share files.
+                return {"ok": False, "error": "that profile folder already belongs to another seeker; use a new folder"}
         sid = store.add_seeker(name, telegram_user_id, profile_path, daily_cap)
         return {"ok": True, "seeker_id": sid}
 
@@ -1021,8 +1031,10 @@ def build_tools(
             if wcfg.enabled
         )
         results = run_discovery(store, sources, targets)
+        expired_now = store.expire_past_deadlines()
         return {
             "ok": True,
+            "expired_past_deadline": expired_now,
             "feeds_added": feeds_added,
             "skipped_seekers": skipped,
             "sites": [

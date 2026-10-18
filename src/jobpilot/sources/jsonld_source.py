@@ -149,6 +149,7 @@ def _to_posting(item: dict[str, Any], cfg: StructuredConfig) -> Posting | None:
         description=_text(item.get("description"))[:MAX_DESCRIPTION_CHARS] or None,
         url=url,
         posted_at=_text(item.get("dateModified") or item.get("datePosted")) or None,
+        valid_through=_text(item.get("validThrough")) or None,
     )
 
 

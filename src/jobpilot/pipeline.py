@@ -130,6 +130,8 @@ def _persist(
             key = (p.source, p.external_id)
             if key not in posting_ids:
                 posting_id = store.upsert_posting(p)
+                if p.valid_through:
+                    store.set_valid_through(posting_id, p.valid_through)
                 company_id = store.match_company(p.company_name)
                 if company_id is not None:
                     store.attach_company(posting_id, company_id)

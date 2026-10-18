@@ -269,7 +269,20 @@ def _to_posting(item: dict, cfg: ATSConfig) -> Posting | None:
         description=description,
         url=safe_url(_text(url)),
         posted_at=_text(posted_at) or None,
+        valid_through=_closing_date(item),
     )
+
+
+def _closing_date(item: dict) -> str | None:
+    """A closing date when the feed states one: epoch seconds/ms or an ISO date. Anything unparseable is ignored."""
+    for key in ("expiryDate", "expiresAt", "expiration_date", "validThrough", "closingDate", "applicationDeadline"):
+        value = item.get(key) if isinstance(item, dict) else None
+        if isinstance(value, (int, float)) and value > 0:
+            seconds = value / 1000 if value > 10_000_000_000 else value
+            return time.strftime("%Y-%m-%d", time.gmtime(seconds))
+        if isinstance(value, str) and len(value) >= 10 and value[:4].isdigit() and value[4] == "-":
+            return value[:10]
+    return None
 
 
 class ATSJsonSource:

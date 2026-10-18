@@ -97,6 +97,7 @@ class Store:
             self.conn.executescript(SCHEMA.read_text(encoding="utf-8"))
             self._migrate_location_columns()
             self._add_missing_columns("seekers", {"review_required": "INTEGER NOT NULL DEFAULT 1"})
+            self._add_missing_columns("job_postings", {"valid_through": "TEXT"})
 
     def _add_missing_columns(self, table: str, columns: dict[str, str]) -> list[str]:
         """Add any of `columns` (name -> SQL type/default) missing from `table`.
@@ -273,7 +274,8 @@ class Store:
                 "FROM scores s JOIN seeker_jobs sj "
                 "  ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
                 "JOIN job_postings jp ON jp.id = s.posting_id "
-                "WHERE s.seeker_id = ? ORDER BY s.fit_score DESC, s.scored_at DESC LIMIT ?",
+                "WHERE s.seeker_id = ? AND (jp.valid_through IS NULL OR jp.valid_through >= date('now')) "
+                "ORDER BY s.fit_score DESC, s.scored_at DESC LIMIT ?",
                 (seeker_id, int(limit))).fetchall()
         return [dict(r) for r in rows]
 
@@ -761,6 +763,7 @@ class Store:
                 WHERE sj.seeker_id = ?
                   AND s.fit_score >= ?
                   AND sj.status NOT IN ('skipped', 'applied', 'expired')
+                  AND (jp.valid_through IS NULL OR jp.valid_through >= date('now'))
                   AND NOT EXISTS (
                         SELECT 1 FROM notifications n
                         WHERE n.seeker_id = sj.seeker_id
@@ -999,6 +1002,25 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def set_valid_through(self, posting_id: int, value: str | None) -> None:
+        """Record a closing date (any ISO date or datetime; stored as YYYY-MM-DD, the last open day)."""
+        day = (value or "")[:10]
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            return
+        with self._lock, self.conn:
+            self.conn.execute("UPDATE job_postings SET valid_through = ? WHERE id = ?", (day, posting_id))
+
+    def expire_past_deadlines(self) -> int:
+        """Mark every seeker's job expired once its closing date has passed (never a job already applied to)."""
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "UPDATE seeker_jobs SET status = 'expired' WHERE status NOT IN ('expired', 'applied', 'skipped') "
+                "AND posting_id IN (SELECT id FROM job_postings WHERE valid_through IS NOT NULL "
+                "AND valid_through < date('now')) "
+                "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.seeker_id = seeker_jobs.seeker_id "
+                "AND a.posting_id = seeker_jobs.posting_id AND a.status IN ('applied','interview','offer'))")
+            return cur.rowcount
+
     def posting_view(self, seeker_id: int, posting_id: int) -> dict | None:
         """Return a posting only if it is linked to this seeker."""
         with self._lock:
@@ -1216,6 +1238,7 @@ class Store:
                 "WHERE n.seeker_id = ? AND n.kind = 'first' "
                 "  AND n.delivered_at <= ? "
                 "  AND sj.status NOT IN ('skipped', 'applied', 'expired') "
+                "  AND (jp.valid_through IS NULL OR jp.valid_through >= date('now')) "
                 "  AND NOT EXISTS (SELECT 1 FROM notifications later "
                 "                  WHERE later.seeker_id = n.seeker_id "
                 "                    AND later.posting_id = n.posting_id "
