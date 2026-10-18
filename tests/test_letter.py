@@ -112,7 +112,7 @@ def test_apply_message_unchanged_without_a_letter():
     assert "or cover letter" not in plain and not any(l.startswith("8.") for l in plain.splitlines())
 
 
-@pytest.mark.parametrize("pdf,number", [(True, "8."), (False, "7.")])
+@pytest.mark.parametrize("pdf,number", [(True, "8."), (False, "8.")])        # rule 7 is the file or paste rule
 def test_apply_message_with_letter(pdf, number):
     m = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", approved=True, attach_pdf=pdf,
                          letter_text="Dear Hiring Team,\n\nHello.", posting_id=5)

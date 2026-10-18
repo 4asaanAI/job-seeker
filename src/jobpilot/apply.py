@@ -132,6 +132,11 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         f"text between {where}, export it as a PDF, and use that PDF for the resume or CV field only. Do not share the "
         f"document, change its sharing, or put it in a shared folder. Any OTHER file ({others}) is not in "
         "scope: stop and tell me what it asks, without submitting.\n") if attach_pdf else ""
+    paste_rule = "" if attach_pdf else (
+        "7. If the application has a place to paste or type my resume (for example an 'enter manually' option), paste the resume "
+        "text there (the resume text that rule 2 points to). If it accepts only a file upload, stop and tell me, without "
+        "submitting.\n")
+    nxt = 8                                              # the next free rule number after rule 7 (file or paste)
     letter_rule, letter_block = "", ""
     if letter_text:
         letter_marker = secrets.token_hex(8)
@@ -142,15 +147,16 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
             "cover letter field only; do not share it or change its sharing.") if attach_pdf else (
             " If the form wants the cover letter as an uploaded file, stop and tell me, without submitting.")
         letter_rule = (
-            f"{8 if attach_pdf else 7}. Use the letter between the two lines containing {letter_marker} ONLY where the form "
+            f"{nxt}. Use the letter between the two lines containing {letter_marker} ONLY where the form "
             "REQUIRES a cover letter (a required text box, a required upload, or an email body): put in EXACTLY that text and "
             f"change nothing.{upload} If a cover letter field is optional, leave it empty. The letter is not a source of "
             "answers for any other field: answer those only from the resume text.\n")
         letter_block = f"\n{letter_marker}\n{_scrub(letter_text)}\n{letter_marker}"
+        nxt += 1
     answers_rule, answers_block = "", ""
     if answers:
         answers_marker = secrets.token_hex(8)
-        n = 7 + (1 if attach_pdf else 0) + (1 if letter_text else 0)
+        n = nxt
         answers_rule = (
             f"{n}. Between the two lines containing {answers_marker} are my OWN answers to questions this form asks, each as "
             "'question: answer'. Use an answer exactly as written for the matching question and for nothing else; they are my words, "
@@ -176,7 +182,7 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         "5. If the page needs an account, a password or a one-time code that only my phone could receive, STOP right away "
         "and tell me; do not create accounts, do not retry more than once, and do not use any other email or number.\n"
         "6. Afterwards tell me exactly what you submitted and where.\n"
-        f"{file_rule}{letter_rule}{answers_rule}{marker}\n{body}\n{marker}{letter_block}{answers_block}")
+        f"{file_rule}{paste_rule}{letter_rule}{answers_rule}{marker}\n{body}\n{marker}{letter_block}{answers_block}")
 
 
 def reply_check_message(title: str, company: str) -> str:

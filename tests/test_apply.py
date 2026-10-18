@@ -390,3 +390,20 @@ def test_a_merged_posting_applies_through_its_direct_link(env):
     assert "indeed.com" not in built["message"]
     cands = {i["posting_id"]: i for i in tools["apply_candidates"](sid, 25, 0)["items"]}
     assert cands[ids[0]]["route"] == "direct"
+
+
+# ---- paste the resume instead of making a PDF --------------------------------------------------------------------
+
+def test_without_a_pdf_the_resume_is_pasted_where_the_form_allows_it():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME", attach_pdf=False)
+    assert "paste or type my resume" in m and "accepts only a file upload, stop and tell me" in m
+    assert "paste or type my resume" not in ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME", attach_pdf=True)
+
+
+def test_apply_tool_lets_the_caller_choose_pdf_or_paste(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0])
+    off = tools["build_fo_apply_message"](sid, ids[0], resume_file=False)
+    assert off["ok"] and "paste or type my resume" in off["message"] and off["resume_pdf_via_google_docs"] is False
+    on = tools["build_fo_apply_message"](sid, ids[0], resume_file=True)
+    assert on["ok"] and "export it as a PDF" in on["message"] and on["resume_pdf_via_google_docs"] is True

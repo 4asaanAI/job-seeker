@@ -803,8 +803,13 @@ def build_tools(
         plan_id: str | None = None,
         phone_code: str | None = None,
         answers: dict[str, str] | None = None,
+        resume_file: bool | None = None,
     ) -> dict:
         """Build the request that asks Fo to apply to ONE job. SENDS NOTHING.
+
+        resume_file: True = Fo makes a PDF of the resume through a Google Doc and uploads it (slow, several minutes);
+        False = Fo pastes the resume text where the form allows it and stops if only a file is accepted; None (default)
+        follows the [google] setting.
 
         answers: the user's OWN typed answers to questions the form asks that are not in their resume (an essay, visa
         sponsorship, relocation, a consent). Pass only text the user wrote in this conversation, as {question: answer};
@@ -886,7 +891,8 @@ def build_tools(
                 except ValueError:
                     letter = None                         # no letter is better than an unsafe one; the application still works
             message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit),
-                                    attach_pdf=_google_on(), letter_text=letter, posting_id=int(posting_id),
+                                    attach_pdf=(_google_on() if resume_file is None else bool(resume_file)), letter_text=letter,
+                                    posting_id=int(posting_id),
                                     answers=vetted_answers or None)
             if phone_code:
                 with store._lock:                       # only now, with the message built: check, consume and mark started as one step
@@ -906,7 +912,7 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
         route, route_note = classify_route(link)
         return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
-                "route": route, "route_note": route_note, "tailored_to_job": tailored, "resume_pdf_via_google_docs": _google_on(),
+                "route": route, "route_note": route_note, "tailored_to_job": tailored, "resume_pdf_via_google_docs": (_google_on() if resume_file is None else bool(resume_file)),
                 "cover_letter_if_required": letter is not None,
                 "job_terms_missing_from_resume": gaps,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
@@ -921,9 +927,10 @@ def build_tools(
         batch_approved: bool = False,
         plan_id: str | None = None,
         answers: dict[str, str] | None = None,
+        resume_file: bool | None = None,
     ) -> dict:
         return _apply_core(seeker_id, posting_id, experience_order, skills, bullet_order, batch_approved, plan_id,
-                           answers=answers)
+                           answers=answers, resume_file=resume_file)
 
     # The public tool is the core without the phone-approval parameter: only the text inbox may use that.
     build_fo_apply_message.__doc__ = re.sub(r"\n        phone_code is only.*?yourself\.\n", "", _apply_core.__doc__, flags=re.S)
