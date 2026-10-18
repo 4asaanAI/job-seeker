@@ -1,5 +1,9 @@
 # JobPilot × Fo
 
+> **New here?** *Fo* is [Wajo's](https://wajo.ai) AI assistant, which can act in the real world (text, email, calendar) and is
+> reachable over MCP (the Model Context Protocol, the standard way to give Claude tools). *GSD* is the weekend hackathon this
+> was built for. *JobPilot* is the job-search engine underneath (it existed before the hackathon).
+
 [![tests](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml/badge.svg)](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml)
 
 **Claude finds and judges the jobs. [Fo](https://wajo.ai) (Wajo's assistant, over MCP) does the real-world part: it texts me the matches,
@@ -107,7 +111,7 @@ removes roster and discovery tools and refuses other seeker IDs.
 
 ## Windows deployment
 
-The intended project path is `E:\Github\Aasaan AI\jobpilot\`, not `C:`.
+Pick a project folder outside the system drive, for example `D:\jobpilot\` (the examples below call it `<project>`).
 
 ```powershell
 & "C:\Users\Desktop\AppData\Local\Programs\Python\Python312\python.exe" -m venv .venv
@@ -129,8 +133,8 @@ is not returned as a new first notification. A source with a failed canary is
 reported as blocked/error rather than as a quiet job market.
 
 Do not commit `data/seekers/`, databases, generated output, Telegram tokens,
-or other personal data. The repository is private on GitHub, but privacy still
-depends on keeping those paths untracked.
+or other personal data. This repository is public, so privacy depends
+entirely on keeping those paths untracked (they are in `.gitignore`).
 
 The optional Google Sheets exporter is one-way: SQLite remains authoritative,
 and the exporter grants only a direct reader permission to the seeker's email.
