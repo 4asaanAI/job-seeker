@@ -35,9 +35,18 @@ user turns it off with `set_review_mode`.
 
 History was rewritten on Oct 18 to replace a third party's first name in every commit, tag and branch (a backup bundle was kept by the owner, not published). Old commit ids no longer exist; clone again if you had one.
 
+Fixed after the phone-apply and Google review rounds: auto-tailoring keeps every bullet; the phone approval parameter is not an MCP
+parameter; Fo asks before submitting unless review mode is off; a phone code is checked, consumed and marked started as one step
+and only after the request is built; send failures, lost confirmations and duplicate `jp doc` requests are handled; Google
+requests use only files you own, treat Drive content as data, never share, and keep job titles out of file names.
+
 What remains, honestly:
 
 | Area | Limit | Why it cannot be closed here |
 |---|---|---|
 | `web_fetch` DNS rebinding (Telegram bot only) | We check the host, then Wigolo resolves it again; a malicious DNS server could change its answer in between. | Closing it needs an egress proxy that refuses private ranges, or pinning the connection inside Wigolo. Do not expose the web tools to untrusted users. |
 | `ask_fo` is not idempotent | Fo's MCP has no idempotency key, so a send that times out may still complete. The 30-minute guard makes a duplicate unlikely, not impossible. | It needs support from Fo's API. |
+| Text approval (`jp yes`) | The inbox reads your Fo transcripts through a headless model, and the one-time code is texted into the same chat, so a manipulated relay could echo it. | Fo's own confirmation is the default defence (review mode on). With review mode off, the code is the only gate. Closing it needs an inbound channel the relay cannot read, or Fo's webhook. |
+| Google files found by name | Fo finds "JobPilot Tracker" and "JobPilot Resumes" by name; requests say to use only files you own, but nothing in code checks it, and "do not share" is a request to Fo. | JobPilot cannot see your Drive. Pinning to a file id needs Fo to return one that the headless relay passes back. Check the sheet once after the first run. |
+| Google and attachment steps untested live | Fo says it can create Docs and Sheets, export a PDF and upload it to a form. This was asked, not exercised end to end. | The first real run is a supervised pilot. |
+| Tracker rows are never removed | A match that later drops below the threshold stays on the sheet. | Requests forbid deleting rows on purpose. |
