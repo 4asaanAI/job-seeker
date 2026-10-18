@@ -407,3 +407,9 @@ def test_apply_tool_lets_the_caller_choose_pdf_or_paste(env):
     assert off["ok"] and "paste or type my resume" in off["message"] and off["resume_pdf_via_google_docs"] is False
     on = tools["build_fo_apply_message"](sid, ids[0], resume_file=True)
     assert on["ok"] and "export it as a PDF" in on["message"] and on["resume_pdf_via_google_docs"] is True
+
+
+def test_every_apply_request_forbids_the_enter_key_that_submitted_a_form_early():
+    for kwargs in ({}, {"approved": True}, {"attach_pdf": True}, {"letter_text": "L"}, {"answers": [("q", "a")]}):
+        m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME", **kwargs)
+        assert "never press the Enter key inside a field or a dropdown" in m and "click the submit button only after I have confirmed" in m
