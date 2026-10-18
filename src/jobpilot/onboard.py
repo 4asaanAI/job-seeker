@@ -31,12 +31,13 @@ def slug(name: str) -> str:
 
 
 def onboard(store: Store, home: Path, *, name: str, resume: Path, role: str, location: str, terms: list[str],
-            sources: list[str], notes: list[str] | None = None, min_score: float = 70.0) -> dict:
+            sources: list[str], notes: list[str] | None = None, min_score: float = 70.0,
+            min_text: int = MIN_TEXT) -> dict:
     resume = Path(resume).expanduser()
     if not resume.is_file():
         raise ValueError(f"resume file not found: {resume}")
     text = extract_source_text(resume).strip()
-    if len(text) < MIN_TEXT:
+    if len(text) < min_text:
         raise ValueError("the text of that file could not be read (a scanned image?). Use a PDF or Word file with selectable text.")
     rel = Path("data") / "seekers" / slug(name)
     folder = home / rel
