@@ -2,8 +2,8 @@
 
 [![tests](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml/badge.svg)](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml)
 
-**Claude finds and judges the jobs. [Fo](https://wajo.ai) (Wajo's assistant, over MCP) does the real-world part: it texts me the matches
-and books the reminders.** One Claude session holds both MCP servers; you just ask in plain English.
+**Claude finds and judges the jobs. [Fo](https://wajo.ai) (Wajo's assistant, over MCP) does the real-world part: it texts me the matches,
+applies when I say yes, and adds an interview to my calendar only when the company sends the invite.** One Claude session holds both MCP servers; you just ask in plain English.
 Built for the GSD hackathon. JobPilot already existed; the Fo link, the safety layer, tailored resumes and the
 unattended digest are what was built for it.
 
@@ -31,7 +31,9 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
   transcripts. `python -m jobpilot.inbox --once` polls them through a headless relay, accepts a strict read-only
   grammar (`jp matches`, `jp status`, `jp tailor <id>`) re-checked in Python, runs JobPilot locally and replies
   through Fo. Commands never apply, email or change a job's status. Design: [docs/superpowers/specs/2026-10-18-fo-inbox-design.md](docs/superpowers/specs/2026-10-18-fo-inbox-design.md).
-- **Applications you approve.** `prepare_application` builds a text package from your resume facts and sends nothing.
+- **Applying through Fo, on your yes.** `build_fo_apply_message` builds one vetted request per job (safe link, your resume text,
+  "ask me before submitting", **no calendar event**). A calendar entry appears only when the company itself sends an invitation
+  (`build_fo_reply_check_message`). Nothing is sent by JobPilot; every `ask_fo` passes Claude Code's permission prompt.
 - **Real-server test.** The MCP server is started over stdio and driven like Claude would, including seeker pinning.
 
 ```mermaid

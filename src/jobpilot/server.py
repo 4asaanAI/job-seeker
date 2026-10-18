@@ -26,6 +26,7 @@ from .resume import (
     render_text,
     unverified_facts,
 )
+from .apply import apply_message, reply_check_message, safe_title_company, vetted_job_url
 from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
@@ -337,6 +338,16 @@ def build_tools(
         return {"ok": True, "seeker_id": sid, "text": digest.text,
                 "posting_ids": list(digest.posting_ids), "recorded": digest.recorded}
 
+    def _fo_seeker_guard(sid: int) -> None:
+        """One Fo account serves one person: an unpinned operator session must not build another seeker's message."""
+        if pinned_seeker_id is None:
+            try:
+                configured = load_config().fo_seeker_id
+            except (OSError, ValueError, KeyError):
+                configured = None
+            if configured is not None and sid != configured:
+                raise PermissionError("Fo is linked to a different seeker; refusing to build this message")
+
     def build_fo_message(
         seeker_id: int, kind: str = "digest", min_score: float = 70.0, limit: int = 5,
     ) -> dict:
@@ -351,14 +362,7 @@ def build_tools(
         """
         try:
             sid = _check(seeker_id)
-            if pinned_seeker_id is None:
-                # One Fo account serves one person: an unpinned operator session must not build another seeker's message.
-                try:
-                    configured = load_config().fo_seeker_id
-                except (OSError, ValueError, KeyError):
-                    configured = None
-                if configured is not None and sid != configured:
-                    raise PermissionError("Fo is linked to a different seeker; refusing to build this message")
+            _fo_seeker_guard(sid)
             if kind == "digest":
                 digest = render_fo_digest(store, sid, min_score, limit)
                 text = digest.text
@@ -631,6 +635,68 @@ def build_tools(
                     "bullets and skills. Do not add wording, numbers or experience that is not in resume_facts.",
         }
 
+    def build_fo_apply_message(
+        seeker_id: int,
+        posting_id: int,
+        experience_order: list[str] | None = None,
+        skills: list[str] | None = None,
+        bullet_order: dict[str, list[str]] | None = None,
+    ) -> dict:
+        """Build the request that asks Fo to apply to ONE job. SENDS NOTHING.
+
+        Only after the user explicitly says yes to applying to THIS job, pass `message` to ask_fo word for word.
+        Fo opens the posting (untrusted) and must ask the user before submitting. The message forbids calendar
+        events: never create one when applying. After Fo reports the application was submitted, call
+        record_application(status="applied"). Never paste job-description text into the request to Fo.
+        """
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
+                   for a in store.applications(sid, 500)):
+                raise ValueError("an application for this job is already recorded")
+            link = vetted_job_url(posting["url"])
+            if link is None:
+                raise ValueError("this posting's link failed the safety check; apply to it by hand")
+            names = safe_title_company(posting["title"], posting["company_name"])
+            if names is None:
+                raise ValueError("this posting's title or company looks unsafe; apply to it by hand")
+            base = load_base_resume(_base_resume_path(sid))
+            text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
+            message = apply_message(names[0], names[1], link, text)
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
+                "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
+                        "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
+
+    def build_fo_reply_check_message(seeker_id: int, posting_id: int) -> dict:
+        """Build the request that asks Fo to look for the company's reply. SENDS NOTHING.
+
+        Pass `message` to ask_fo word for word. Fo may add a calendar entry ONLY if the company itself sent an
+        interview invitation. If Fo reports that it did, call record_application(status="interview").
+        """
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            posting = store.posting_view(sid, int(posting_id))
+            if posting is None:
+                raise ValueError("posting is not linked to this seeker")
+            if not any(a["posting_id"] == int(posting_id) and a["status"] in ("applied", "interview")
+                       for a in store.applications(sid, 500)):
+                raise ValueError("no submitted application is recorded for this job")
+            names = safe_title_company(posting["title"], posting["company_name"])
+            if names is None:
+                raise ValueError("this posting's title or company looks unsafe")
+        except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id),
+                "message": reply_check_message(*names),
+                "note": "Nothing was sent. Pass the message to ask_fo unchanged, with the user's approval."}
+
     def prepare_application(
         seeker_id: int,
         posting_id: int,
@@ -766,6 +832,8 @@ def build_tools(
         "build_digest": build_digest,
         "build_plain_digest": build_plain_digest,
         "build_fo_message": build_fo_message,
+        "build_fo_apply_message": build_fo_apply_message,
+        "build_fo_reply_check_message": build_fo_reply_check_message,
         "investigate_posting": investigate_posting,
         "verify_still_open": verify_still_open,
         "check_company_careers": check_company_careers,
