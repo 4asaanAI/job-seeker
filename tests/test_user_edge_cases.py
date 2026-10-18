@@ -76,3 +76,17 @@ def test_refresh_cli_with_an_unknown_seeker_explains_instead_of_a_traceback(tmp_
     run = subprocess.run([sys.executable, "-m", "jobpilot.refresh", "--seeker", "99"], env=env,
                          capture_output=True, text=True, timeout=60)
     assert run.returncode == 2 and "no seeker with id 99" in run.stdout and "Traceback" not in run.stderr
+
+
+def test_company_openings_prefers_title_matches_over_description_mentions(env, monkeypatch):
+    from types import SimpleNamespace as NS
+    tools, _, sid, _ = env
+    rows = [NS(title="Field Marketing", location="SF", url="u1", description="works with product managers"),
+            NS(title="Senior Product Manager", location="BLR", url="u2", description="")]
+    monkeypatch.setattr(server, "ATSJsonSource", lambda cfg: NS(search=lambda kw, loc: (rows, len(rows))))
+    out = tools["company_openings"](sid, "Stripe", "product manager")
+    assert out["ok"] and [o["title"] for o in out["openings"]] == ["Senior Product Manager"]
+    only_mentions = [rows[0]]
+    monkeypatch.setattr(server, "ATSJsonSource", lambda cfg: NS(search=lambda kw, loc: (only_mentions, 1)))
+    out = tools["company_openings"](sid, "Stripe", "product manager")
+    assert [o["title"] for o in out["openings"]] == ["Field Marketing"] and "No title matches" in out["note"]

@@ -21,7 +21,7 @@ unattended digest are what was built for it.
 ## Using it with Claude Code (macOS or Linux)
 
 Copy `.mcp.fo-demo.json.example` to `.mcp.json` (the older `.mcp.json.example` is the Windows layout), set `JOBPILOT_PYTHON`,
-`JOBPILOT_DB`, `JOBPILOT_OUT` and `JOBPILOT_SEEKER_ID`, start Claude Code, and log in to Fo with `/mcp`. New to it? Run `python -m jobpilot.onboard --help`, then `python -m jobpilot.doctor`; steps are in `docs/APPLYING.md`. One-call status: `my_dashboard`. Login-gated jobs: `manual_apply_packet`.
+`JOBPILOT_DB`, `JOBPILOT_OUT` and `JOBPILOT_SEEKER_ID`, start Claude Code, and log in to Fo with `/mcp`. New to it? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md), or run `python -m jobpilot.onboard --help`, then `python -m jobpilot.doctor`; steps are in `docs/APPLYING.md`. One-call status: `my_dashboard`. Login-gated jobs: `manual_apply_packet`.
 
 ## Try it in three minutes (no accounts, nothing is sent)
 

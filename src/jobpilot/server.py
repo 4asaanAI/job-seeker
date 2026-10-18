@@ -1320,7 +1320,11 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
 
     def web_search(seeker_id: int, query: str, site: str | None = None) -> dict:
-        """Search the web. site limits results to one domain (e.g. "myworkdayjobs.com")."""
+        """Search the web. site limits results to one domain (e.g. "myworkdayjobs.com").
+
+        General web search is weak for job hunting. For one employer use company_openings;
+        for a job board pass site=; always open a result with web_fetch before trusting it.
+        """
         return _web(seeker_id, lambda w: w.search(query, site))
 
     def web_fetch(seeker_id: int, url: str) -> dict:
@@ -1369,9 +1373,15 @@ def build_tools(
             for name, acfg in _ats_configs(cfg).items():
                 if acfg.enabled and normalise(acfg.company_name) == wanted:
                     postings, _ = ATSJsonSource(acfg).search(keywords, None)
-                    return {"company": company, "via": f"{acfg.company_name} job feed",
-                            "openings": [{"title": p.title, "location": p.location, "url": p.url}
-                                         for p in postings[:15]]}
+                    words = [w for w in str(keywords or "").casefold().split() if w]
+                    in_title = [p for p in postings if words and all(w in p.title.casefold() for w in words)]
+                    shown = in_title or postings                      # a title match beats a passing mention
+                    out = {"company": company, "via": f"{acfg.company_name} job feed",
+                           "openings": [{"title": p.title, "location": p.location, "url": p.url}
+                                        for p in shown[:15]]}
+                    if words and not in_title and postings:
+                        out["note"] = "No title matches; these only mention the keywords in the description."
+                    return out
             site = find_careers_site(company)
             if site is None:
                 return {"company": company, "via": "none", "openings": [],

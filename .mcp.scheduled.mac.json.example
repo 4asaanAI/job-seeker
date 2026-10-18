@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jobpilot": {
+      "command": "/path/to/jobpilot/.venv/bin/python",
+      "args": ["-m", "jobpilot.server"],
+      "env": {
+        "JOBPILOT_HOME": "/path/to/jobpilot",
+        "JOBPILOT_DB": "/path/to/jobpilot/data/jobpilot.db",
+        "JOBPILOT_OUT": "/path/to/jobpilot/out"
+      }
+    }
+  }
+}
