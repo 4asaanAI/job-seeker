@@ -1006,7 +1006,7 @@ class Store:
                        limit: int = 20) -> list[dict]:
         """Return notification history for one seeker, newest first."""
         limit = max(0, min(int(limit), 100))
-        needle = f"%{query.strip()}%"
+        needle = "%" + query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         with self._lock:
             self.get_seeker(seeker_id)
             rows = self.conn.execute(
@@ -1015,8 +1015,8 @@ class Store:
                 "       GROUP_CONCAT(DISTINCT ps.source) AS sources "
                 "FROM notifications n JOIN job_postings jp ON jp.id = n.posting_id "
                 "LEFT JOIN posting_sources ps ON ps.posting_id = jp.id "
-                "WHERE n.seeker_id = ? AND (? = '' OR jp.title LIKE ? "
-                "   OR jp.company_name LIKE ? OR ps.source LIKE ?) "
+                "WHERE n.seeker_id = ? AND (? = '' OR jp.title LIKE ? ESCAPE '\\' "
+                "   OR jp.company_name LIKE ? ESCAPE '\\' OR ps.source LIKE ? ESCAPE '\\') "
                 "GROUP BY n.id ORDER BY n.delivered_at DESC, n.id DESC LIMIT ?",
                 (seeker_id, query.strip(), needle, needle, needle, limit),
             ).fetchall()

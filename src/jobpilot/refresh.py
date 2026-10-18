@@ -55,6 +55,11 @@ def main() -> int:
     store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
     try:
         store.migrate()
+        try:
+            store.get_seeker(sid)
+        except ValueError as exc:
+            print(f"refresh: {exc}. Create one with: python -m jobpilot.onboard --help")
+            return 2
         tools = build_tools(store, cfg.out_dir, operator_mode=True)
         out = refresh(store, home, sid, discover=lambda s: tools["discover"]([s]),
                       ask=claude_scorer(args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort),

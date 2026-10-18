@@ -177,7 +177,13 @@ def build_tools(
         return sources, report
 
     def _clean(items, limit, width):
-        return [str(i).strip()[:width] for i in (items or []) if str(i).strip()][:limit]
+        seen, out = set(), []
+        for i in items or []:
+            text = str(i).strip()[:width]
+            if text and text.lower() not in seen:
+                seen.add(text.lower())
+                out.append(text)
+        return out[:limit]
 
     def _search_location(raw: str) -> str:
         """Job boards need one searchable place: keep text before any slash."""
@@ -254,6 +260,7 @@ def build_tools(
                 f"this process is pinned to seeker {pinned_seeker_id}; "
                 f"refusing a request for seeker {sid}"
             )
+        store.get_seeker(sid)                       # unknown ids fail here with a clear message, not a database error
         return sid
 
     def _profile_for(seeker_id: int):
@@ -335,6 +342,8 @@ def build_tools(
         """Record a delivery so the same posting is not shown twice."""
         try:
             sid = _check(seeker_id)
+            if not re.fullmatch(r"[a-z_]{1,20}", channel or ""):
+                raise ValueError("channel must be a short lowercase word such as telegram, fo or digest")
             store.record_notification(sid, int(posting_id), channel, kind)
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -1156,12 +1165,13 @@ def build_tools(
         seekers = store.list_seekers()
         if seeker_ids:
             wanted = {int(s) for s in seeker_ids}
+            unknown = {w: "no such seeker" for w in sorted(wanted - {s.id for s in seekers})}
             seekers = [s for s in seekers if s.id in wanted]
 
         targets, feeds_added = [], {}
         # A real daily cap: lookups already spent in the last 24 hours (any seeker) come off the budget.
         budget = [max(0, MAX_DAILY_FEED_LOOKUPS - store.event_total_since("feed_lookup", 24))]  # engines throttle
-        skipped = {}
+        skipped = dict(unknown) if seeker_ids else {}
         for seeker in seekers:
             try:
                 added = _heal_feeds(seeker.id, budget)
@@ -1348,6 +1358,9 @@ def build_tools(
         """
         from .sources.finder import find_careers_site, normalise, searxng_search
         from . import web
+
+        if not str(company or "").strip():
+            return {"ok": False, "error": "company must not be empty"}
 
         def action(_web):
             cfg = load_config()
