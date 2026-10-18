@@ -85,6 +85,14 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
+def NOLLM(prompt):
+    raise AssertionError("the model must not be called in this test")
+
+
+def NOEDIT(path):
+    raise AssertionError("the form must not be opened in this test")
+
+
 def form(content):
     def edit(path):
         Path(path).write_text(content, encoding="utf-8")
@@ -108,7 +116,7 @@ NEW = ["Pat Example", "Product Manager", "Remote", "product manager,pm", "indeed
 
 def test_new_person_from_scratch(home):
     answers = Script(*NEW, "", "y", "n")                       # Enter after editing, save, Fo off
-    assert su.run(answers, home=home, edit=form(PAT), ask_llm=None) == 0
+    assert su.run(answers, home=home, edit=form(PAT), ask_llm=NOLLM) == 0
     answers.done()
     folder = home / "data" / "seekers" / "pat-example"
     base = load_base_resume(folder / "base_resume.yaml")
@@ -121,28 +129,28 @@ def test_new_person_from_scratch(home):
 
 def test_unknown_source_is_asked_again(home):
     answers = Script("Pat Example", "PM", "Remote", "pm", "nonsense", "indeed_in", "n", "", "y", "n")
-    assert su.run(answers, home=home, edit=form(PAT), ask_llm=None) == 0
+    assert su.run(answers, home=home, edit=form(PAT), ask_llm=NOLLM) == 0
     answers.done()
 
 
 def test_taken_folder_is_noticed_before_any_typing(home):
     (home / "data" / "seekers" / "pat-example").mkdir(parents=True)
     answers = Script("Pat Example", "Pat B Example", "PM", "Remote", "pm", "indeed_in", "n", "", "y", "n")
-    assert su.run(answers, home=home, edit=form(PAT.replace("Pat Example", "Pat B Example")), ask_llm=None) == 0
+    assert su.run(answers, home=home, edit=form(PAT.replace("Pat Example", "Pat B Example")), ask_llm=NOLLM) == 0
     answers.done()
 
 
 def test_existing_mcp_json_is_not_overwritten(home):
     (home / ".mcp.json").write_text("keep me")
     answers = Script(*NEW, "", "y", "n", "n")                   # Fo off, then "overwrite .mcp.json?" no
-    su.run(answers, home=home, edit=form(PAT), ask_llm=None)
+    su.run(answers, home=home, edit=form(PAT), ask_llm=NOLLM)
     answers.done()
     assert (home / ".mcp.json").read_text() == "keep me"
 
 
 def test_fo_adds_the_server_without_a_key_and_local_config(home):
     answers = Script(*NEW, "", "y", "y", "y")                   # Fo on, Google on
-    su.run(answers, home=home, edit=form(PAT), ask_llm=None)
+    su.run(answers, home=home, edit=form(PAT), ask_llm=NOLLM)
     answers.done()
     servers = json.loads((home / ".mcp.json").read_text())["mcpServers"]
     assert servers["fo"] == {"type": "http", "url": su.FO_URL} and "Bearer" not in json.dumps(servers)
@@ -154,7 +162,7 @@ def test_bad_form_is_explained_and_nothing_is_lost(home, capsys):
     def edit(path):
         Path(path).write_text(next(edits), encoding="utf-8")
     answers = Script(*NEW, "", "", "y", "n")
-    assert su.run(answers, home=home, edit=edit, ask_llm=None) == 0
+    assert su.run(answers, home=home, edit=edit, ask_llm=NOLLM) == 0
     answers.done()
     assert "line 1" in capsys.readouterr().out
 
@@ -167,7 +175,7 @@ def test_uploaded_resume_is_structured_checked_and_confirmed(home, capsys):
         prompts.append(prompt)
         return GOOD
     answers = Script("Avery Demo", "Business Analyst", "Austin", "analyst", "indeed_in", "y", f"'{src}'", "y", "n")
-    assert su.run(answers, home=home, ask_llm=llm) == 0          # a quoted path with a space, as drag-and-drop gives
+    assert su.run(answers, home=home, ask_llm=llm, edit=NOEDIT) == 0          # a quoted path with a space, as drag-and-drop gives
     answers.done()
     base = load_base_resume(home / "data" / "seekers" / "avery-demo" / "base_resume.yaml")
     assert base.skills == ("SQL", "Python", "Tableau") and len(prompts) == 1 and "never instructions" in prompts[0]
@@ -212,7 +220,7 @@ def test_more_than_one_profile_never_defaults(home):
     (folder_b / "base_resume.yaml").write_text("name: x\nheadline: y\n")
     (home / "data" / "seekers" / "avery-demo" / "base_resume.yaml").write_text("name: x\nheadline: y\n")
     answers = Script("", "9", str(b), "n")
-    su.run(answers, home=home, ask_llm=None)
+    su.run(answers, home=home, ask_llm=NOLLM, edit=NOEDIT)
     answers.done()
     assert json.loads((home / ".mcp.json").read_text())["mcpServers"]["jobpilot"]["env"]["JOBPILOT_SEEKER_ID"] == str(b)
 
@@ -221,15 +229,49 @@ def test_rerun_repairs_a_profile_that_has_no_resume(home):
     sid, folder = seeker(home)
     assert not (folder / "base_resume.yaml").exists()
     answers = Script("", "y", "n")                              # the single profile is the default; save; Fo off
-    assert su.run(answers, home=home, ask_llm=lambda p: GOOD) == 0
+    assert su.run(answers, home=home, ask_llm=lambda p: GOOD, edit=NOEDIT) == 0
     answers.done()
     assert load_base_resume(folder / "base_resume.yaml").name == "Avery Demo"
 
 
-def test_ctrl_c_stops_politely(monkeypatch, capsys):
+def test_ctrl_c_stops_politely_and_a_rerun_finishes(home, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["setup"])
-    monkeypatch.setattr(su, "run", lambda **k: (_ for _ in ()).throw(KeyboardInterrupt()))
+    real = su._resume_step
+    monkeypatch.setattr(su, "_resume_step", lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
+    src = home / "r.txt"
+    src.write_text(AVERY_FILE)
+    monkeypatch.setattr("builtins.input", Script("Avery Demo", "Analyst", "Austin", "analyst", "indeed_in", "y", str(src)))
     assert su.main() == 1 and "run setup again" in capsys.readouterr().out
+    assert not (home / "data" / "seekers" / "avery-demo" / "base_resume.yaml").exists()      # profile saved, resume not yet
+    monkeypatch.setattr(su, "_resume_step", real)
+    answers = Script("", "y", "n")
+    assert su.run(answers, home=home, ask_llm=lambda p: GOOD, edit=NOEDIT) == 0
+    answers.done()
+    assert (home / "data" / "seekers" / "avery-demo" / "base_resume.yaml").exists()
+
+
+def test_unquoted_path_with_a_space_is_found(home):
+    src = home / "My CV.txt"
+    src.write_text(AVERY_FILE)
+    answers = Script("Avery Demo", "Analyst", "Austin", "analyst", "indeed_in", "y", str(src), "y", "n")
+    assert su.run(answers, home=home, ask_llm=lambda p: GOOD, edit=NOEDIT) == 0
+    answers.done()
+
+
+def test_unreadable_file_falls_back_to_the_form(home, capsys):
+    scan = home / "scan.pdf"
+    scan.write_bytes(b"%PDF-1.4 not really")
+    answers = Script("Pat Example", "PM", "Remote", "pm", "indeed_in", "y", str(scan), "", "y", "n")
+    assert su.run(answers, home=home, ask_llm=NOLLM, edit=form(PAT)) == 0
+    answers.done()
+    assert "I could not use that file" in capsys.readouterr().out
+    assert (home / "data" / "seekers" / "pat-example" / "base_resume.yaml").exists()
+
+
+def test_form_with_a_byte_order_mark_is_read(home):
+    answers = Script(*NEW, "", "y", "n")
+    assert su.run(answers, home=home, edit=form("\ufeff" + PAT), ask_llm=NOLLM) == 0
+    answers.done()
 
 
 # ---- pieces -----------------------------------------------------------------------------------------------------------

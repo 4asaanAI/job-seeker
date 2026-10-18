@@ -55,6 +55,16 @@ def test_parse_errors_name_the_line(text, message):
         parse_template(text)
 
 
+def test_a_bullet_after_an_education_line_is_not_pinned_to_the_last_job():
+    with pytest.raises(ValueError, match="line 3"):
+        parse_template("JOB: Acme | PM | 2020\nEDUCATION: Uni | BTech | 2012\n- Dean list\n")
+
+
+def test_pasted_bullet_characters_are_accepted():
+    a = parse_template("JOB: Acme | PM | 2020\n– one\n▪ two\n● three\n")
+    assert a["jobs"][0]["bullets"] == ["one", "two", "three"]
+
+
 def test_fresh_graduate_needs_no_job():
     a = parse_template("NAME: Sam\nHEADLINE: Data analyst\nEDUCATION: Uni | BSc Stats | 2021 - 2024\nSKILLS: SQL\n")
     assert build_resume(a)["education"][0]["institution"] == "Uni"

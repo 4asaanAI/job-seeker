@@ -196,7 +196,7 @@ def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> st
     return (f"JobPilot: ready to apply to {clean(job['title'])}, {clean(job['company'])} (id {posting_id}).\n"
             f"Resume tailored to this job; it lacks {len(built['job_terms_missing_from_resume'])} of its terms (none added).\n"
             f"Fo will stop and text you if the form asks for anything not in your resume.\n"
-            + ("A cover letter from your own resume is used only if the form requires one (see it with jp letter).\n"
+            + ("A cover letter from your own resume is used only if the form requires one.\n"
                if built.get("cover_letter_if_required") else "") +
             f"To apply, reply: jp yes {code}\nValid for 2 hours. Ignore this to do nothing.")
 
@@ -242,7 +242,7 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
             kind: str = "doc") -> str:
     """Sheet or Doc through Fo. Both only touch the user's own Drive, so they need no code."""
     if not google_on:
-        return "JobPilot: Google is off. Set [google] enabled = true to use jp sync and jp doc."
+        return "JobPilot: Google is off. Set [google] enabled = true to use jp sync, jp doc and jp letter."
     if apply_client is None:
         return "JobPilot: no Fo transport is available."
     if store.event_count_since(sid, "phone_google", 24) >= MAX_DAILY_GOOGLE:

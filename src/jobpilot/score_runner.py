@@ -66,7 +66,8 @@ def parse_scores(text: str, wanted: set[int]) -> list[tuple[int, float, str]]:
 def claude_scorer(claude_bin: str = "claude", model: str | None = None,
                   effort: str | None = None, runner=subprocess.run, neutral: bool = False):
     """neutral=True also runs in an empty directory with only user settings, so a project's own settings, hooks and
-    CLAUDE.md cannot sit next to untrusted text (same hardening as the inbox reader)."""
+    CLAUDE.md cannot sit next to untrusted text (same hardening as the inbox reader). User-level settings still load,
+    so the output is noise-prone, which is why callers verify it."""
     def ask(prompt: str) -> str:
         command = [claude_bin, "--print", "--no-session-persistence", "--strict-mcp-config",
                    "--tools", "", "--disable-slash-commands"]

@@ -37,7 +37,7 @@ EDUCATION:
 SKILLS:
 """
 _KEYS = ("NAME", "HEADLINE", "CONTACT", "SUMMARY", "JOB", "EDUCATION", "SKILLS")
-_BULLETS = ("-", "•", "*")
+_BULLETS = ("-", "•", "*", "–", "▪", "●", "·")
 _KNOWN = ("name", "headline", "contact", "summary", "experience", "education", "skills")
 
 
@@ -73,6 +73,8 @@ def parse_template(text: str) -> dict:
         key, value = key.strip().upper(), value.strip()
         if not sep or key not in _KEYS:
             raise ValueError(f'line {n}: I do not understand "{line[:40]}". Start lines with one of: ' + ", ".join(_KEYS))
+        if key != "JOB":
+            job = None                                   # a bullet after any other line has no job to belong to
         if key == "JOB":
             parts = _parts(n, key, value, "employer | job title | dates")
             job = {"employer": parts[0], "title": parts[1], "dates": parts[2], "bullets": []} if parts else None
@@ -150,7 +152,9 @@ def verify_structured(resume: object, source_text: str) -> list[str]:
 def flagged_lines(resume: dict) -> list[str]:
     """Values that read like an instruction to an assistant (for a resume a model laid out: shown to the user, not blocked)."""
     base = _load(resume)
-    values = [base.headline, base.summary or "", *base.skills]
+    values = [base.name, base.headline, base.summary or "", *base.skills]
     for e in base.experience:
         values += [e.employer, e.title, *(t for _, t in e.bullets)]
+    for e in base.education:
+        values += [e.institution, e.degree]
     return [v for v in values if v and _instruction_like(v)]

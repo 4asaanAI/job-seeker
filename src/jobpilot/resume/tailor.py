@@ -80,7 +80,8 @@ def top_bullets(base: BaseResume, title: str, description: str, n: int = 2,
     return [item for _, item in ranked], any(_score(item[1], keywords) > 0 for _, item in ranked)
 
 
-def matching_skills(base: BaseResume, title: str, description: str, n: int = 6) -> list[str]:
-    """The seeker's own skills that the job mentions, in resume order."""
+def matching_skills(base: BaseResume, title: str, description: str, n: int = 6,
+                    only: list[str] | None = None) -> list[str]:
+    """The seeker's own skills that the job mentions, in resume order (limited to `only` when the application chose skills)."""
     keywords = job_keywords(title, description)
-    return [s for s in base.skills if _score(s, keywords) > 0][:n]
+    return [s for s in base.skills if _score(s, keywords) > 0 and (only is None or s in only)][:n]

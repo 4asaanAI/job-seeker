@@ -64,7 +64,7 @@ def _fill_template(say, edit, source_text: str | None = None) -> dict | None:
             if say("Press Enter when you have filled in and saved the file (or type q to stop): ").strip().lower() == "q":
                 return None
             try:
-                resume = build_resume(parse_template(Path(path).read_text(encoding="utf-8")))
+                resume = build_resume(parse_template(Path(path).read_text(encoding="utf-8-sig")))
                 text = resume_text(resume)
                 problems = verify_structured(resume, source_text) if source_text is not None else []
                 if problems:
@@ -156,12 +156,14 @@ def _ask_resume_file(say) -> Path | None:
         typed = _ask(say, "Drag the file here or type its path (blank to fill in a form instead)")
         if not typed:
             return None
+        candidates = [Path(typed).expanduser()]
         try:
-            candidate = Path(shlex.split(typed)[0]).expanduser()
+            candidates.append(Path(shlex.split(typed)[0]).expanduser())      # drag-and-drop escapes and quotes
         except (ValueError, IndexError):
-            candidate = Path(typed).expanduser()
-        if candidate.is_file():
-            return candidate
+            pass
+        found = next((c for c in candidates if c.is_file()), None)
+        if found:
+            return found
         print("I could not find that file.")
 
 
@@ -171,7 +173,8 @@ def _new_profile(store: Store, home: Path, say, ask_llm, edit) -> int | None:
         if not name:
             continue
         if (home / "data" / "seekers" / slug(name)).exists():
-            print("A profile folder with that name already exists. Use a different spelling, for example add a middle initial.")
+            print("A profile with that name already exists here. To finish or change it, run setup again and pick its number; "
+                  "otherwise use a different spelling.")
             continue
         break
     role, location = _ask(say, "Target role"), _ask(say, "Location")
@@ -186,23 +189,28 @@ def _new_profile(store: Store, home: Path, say, ask_llm, edit) -> int | None:
         print(("Not available: " + ", ".join(unknown)) if unknown else "Pick at least one source.")
     built = None
     resume_path = _ask_resume_file(say)
-    if resume_path is None:
+    out = None
+    if resume_path is not None:
+        try:
+            out = onboard(store, home, name=name, resume=resume_path, role=role, location=location, terms=terms,
+                          sources=sources)
+        except ValueError as exc:
+            print(f"I could not use that file ({exc}). Let's fill in a form instead.")
+    if out is None:
         built = _fill_template(say, edit)
         if built is None:
             return None
         fd, tmp = tempfile.mkstemp(prefix="jobpilot-resume-", suffix=".txt")
         with open(fd, "w", encoding="utf-8") as fh:
             fh.write(resume_text(built))
-        resume_path = Path(tmp)
-    try:
-        out = onboard(store, home, name=name, resume=resume_path, role=role, location=location, terms=terms,
-                      sources=sources, min_text=0 if built else 200)
-    except ValueError as exc:
-        print(f"Cannot create your profile: {exc}")
-        return None
-    finally:
-        if built:
-            resume_path.unlink(missing_ok=True)
+        try:
+            out = onboard(store, home, name=name, resume=Path(tmp), role=role, location=location, terms=terms,
+                          sources=sources, min_text=0)
+        except ValueError as exc:
+            print(f"Cannot create your profile: {exc}")
+            return None
+        finally:
+            Path(tmp).unlink(missing_ok=True)
     folder = home / out["folder"]
     sid = out["seeker_id"]
     if built:
@@ -279,9 +287,9 @@ def main() -> int:
     parser.add_argument("--claude", default="claude")
     args = parser.parse_args()
     try:
-        return run(claude=args.claude)
+        return run(say=input, claude=args.claude)
     except (KeyboardInterrupt, EOFError):
-        print("\nStopped. Nothing half-finished is kept; run setup again and it picks up where it left off.")
+        print("\nStopped. Anything already saved is kept; run setup again, pick your profile's number, and it finishes the rest.")
         return 1
 
 

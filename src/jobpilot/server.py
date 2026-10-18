@@ -697,13 +697,13 @@ def build_tools(
                     hint["keywords_missing_from_resume"])
         return experience_order, skills, bullet_order, []
 
-    def _letter_for(base, posting, company, experience_order=None, bullet_order=None) -> str:
+    def _letter_for(base, posting, company, experience_order=None, bullet_order=None, skills=None) -> str:
         """Facts-only letter: the job post only ranks the seeker's own text, none of it is copied. Raises ValueError."""
         if len(str(posting["company_name"] or "")) > 80:
             raise ValueError("the company name is too long to use safely in a letter")
         title, desc = posting["title"] or "", posting["description"] or ""
         bullets, matched = top_bullets(base, title, desc, 2, experience_order, bullet_order)
-        return build_letter(base, company, bullets, matched, matching_skills(base, title, desc))
+        return build_letter(base, company, bullets, matched, matching_skills(base, title, desc, only=skills))
 
     def _letters_on() -> bool:
         try:
@@ -875,7 +875,7 @@ def build_tools(
             letter = None
             if _letters_on():
                 try:
-                    letter = _letter_for(base, posting, names[1], experience_order, bullet_order)
+                    letter = _letter_for(base, posting, names[1], experience_order, bullet_order, skills)
                 except ValueError:
                     letter = None                         # no letter is better than an unsafe one; the application still works
             message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit),

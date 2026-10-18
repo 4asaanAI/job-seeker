@@ -36,7 +36,12 @@ def onboard(store: Store, home: Path, *, name: str, resume: Path, role: str, loc
     resume = Path(resume).expanduser()
     if not resume.is_file():
         raise ValueError(f"resume file not found: {resume}")
-    text = extract_source_text(resume).strip()
+    try:
+        text = extract_source_text(resume).strip()
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - a damaged PDF or Word file raises library errors; say it plainly
+        raise ValueError("that file could not be opened (damaged, or not a PDF, Word or text file)") from None
     if len(text) < min_text:
         raise ValueError("the text of that file could not be read (a scanned image?). Use a PDF or Word file with selectable text.")
     rel = Path("data") / "seekers" / slug(name)

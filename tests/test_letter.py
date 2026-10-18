@@ -22,7 +22,10 @@ SPEC.loader.exec_module(fo_demo)
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    import shutil
+    shutil.copy(Path(__file__).resolve().parents[1] / "config.toml", tmp_path / "config.toml")
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))                 # never read the real config.local.toml
     store, sid, ids = fo_demo.seed(tmp_path / "d")
     tools = build_tools(store, tmp_path / "d" / "out", pinned_seeker_id=sid, operator_mode=False)
     base = load_base_resume(tmp_path / "d" / "seekers" / "avery" / "base_resume.yaml")
@@ -119,6 +122,24 @@ def test_apply_message_with_letter(pdf, number):
     assert ("JobPilot cover letter - job 5" in m) == pdf
     assert (("never reuse" in m) == pdf) and (("stop and tell me" in rule[0]) == (not pdf))
     assert m.count("Dear Hiring Team,") == 1
+
+
+def test_approved_application_with_a_letter_does_not_contradict_itself():
+    m = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", approved=True, attach_pdf=False,
+                         letter_text="Dear Hiring Team,\n\nHello.")
+    rule3 = [l for l in m.splitlines() if l.startswith("3.")][0]
+    assert "required cover letter field takes the letter text" in rule3
+    unapproved = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", letter_text="Dear Hiring Team,\n\nHi.")
+    assert "Do not submit anything until I confirm" in unapproved and "REQUIRES a cover letter" in unapproved
+    pdf = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", attach_pdf=True, letter_text="L")
+    marker = re.search(r"between the two lines containing ([0-9a-f]{16}), export it as a PDF", pdf)
+    assert marker and pdf.count(marker.group(1)) == 4              # rule 2, rule 7, and the two fence lines
+
+
+def test_letter_lists_only_skills_the_application_chose(env):
+    store, sid, ids, tools, base, *_ = env
+    assert matching_skills(base, "SQL Python analyst", "tableau forecasting") == ["SQL", "Python", "Tableau", "Forecasting"]
+    assert matching_skills(base, "SQL Python analyst", "tableau forecasting", only=["Python"]) == ["Python"]
 
 
 def test_applications_carry_the_letter_only_when_switched_on(env, monkeypatch):
