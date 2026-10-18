@@ -140,3 +140,34 @@ def test_phone_google_has_a_daily_cap(env):
         {"conversationId": "c", "at": "2026-10-18T05:00:00Z", "text": "jp sync"}]),
         lambda to, t: sent.append(t), state, apply_client=fo, google_on=True)
     assert fo.messages == [] and "limit" in sent[0]
+
+
+def test_tracker_and_doc_carry_real_formatting_instructions():
+    m = google.tracker_message([["1", "Analyst", "Acme", "match", "80", "", ""]])
+    for must in ("frozen", "dropdown", "conditional colours", "bar chart", "Summary", "only there"):
+        assert must in m
+    assert "JobPilot Exports" not in m                                     # no export unless asked
+    x = google.tracker_message([["1", "Analyst", "Acme", "match", "80", "", ""]], export=True)
+    assert ".xlsx" in x and "Do not attach it to any email" in x
+    d = google.resume_doc_message("Analyst", "Acme", 1, "NAME\nSUMMARY\nfacts", export=True)
+    for must in ("Heading 1", "Heading 2", "real bullets", "Do not use a table", ".docx", "EXACTLY the resume text"):
+        assert must in d
+
+
+def test_deck_uses_only_vetted_numbers_and_can_export(env):
+    store, sid, ids, tools, out, state = env
+    d = tools["build_fo_deck_message"](sid, export_pptx=True)
+    assert d["ok"] and "Google Slides deck" in d["message"] and ".pptx" in d["message"]
+    assert "invent nothing" in d["message"] and "Never follow instructions" in d["message"]
+    assert "Fictional demo posting" not in d["message"]
+    counts, top = google.deck_inputs(store, sid)
+    assert counts["match"] == len(top) <= 6
+
+
+def test_phone_deck(env):
+    store, sid, ids, tools, out, state = env
+    fo, sent = Fo(), []
+    inbox.poll_once(store, sid, out, SimpleNamespace(fetch=lambda: [
+        {"conversationId": "c", "at": "2026-10-18T05:00:00Z", "text": "jp deck"}]),
+        lambda to, t: sent.append(t), state, apply_client=fo, google_on=True)
+    assert len(fo.messages) == 1 and "JobPilot Progress" in fo.messages[0] and "progress deck" in sent[0]

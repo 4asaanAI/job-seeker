@@ -10,6 +10,7 @@ grammar that is re-checked here in Python, runs JobPilot locally, and answers th
     jp apply <id>     preview the application and text back a one-time code (applies to nothing yet)
     jp yes <code>     your yes: Fo applies to THAT job with a resume tailored to it
     jp sync           Fo refreshes your "JobPilot Tracker" Google Sheet
+    jp deck           Fo builds a themed Google Slides progress deck
     jp doc <id>       Fo puts your resume tailored to that job into a new Google Doc
 
 Only `jp yes <code>` can cause an application, and Fo still asks you in its own chat before it submits unless you
@@ -44,13 +45,13 @@ from .server import build_tools
 from .server import MAX_DAILY_APPLY_REQUESTS
 from .store.db import Store
 
-GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9}))\s*$",
+GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck))\s*$",
                      re.IGNORECASE)
 MAX_COMMANDS = 3
 MAX_OPEN_CODES = 3
 MAX_DAILY_GOOGLE = 10
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
-HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id>"
+HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp deck"
 
 
 class ClaudeReader:
@@ -232,7 +233,7 @@ def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -
             "so it will not be sent twice. Check with Fo, or apply by hand.")
 
 
-def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool, *, doc: int | None) -> str:
+def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool, *, doc: int | str | None) -> str:
     """Sheet or Doc through Fo. Both only touch the user's own Drive, so they need no code."""
     if not google_on:
         return "JobPilot: Google is off. Set [google] enabled = true to use jp sync and jp doc."
@@ -241,7 +242,12 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
     if store.event_count_since(sid, "phone_google", 24) >= MAX_DAILY_GOOGLE:
         return "JobPilot: today's limit of Google requests by text is reached. Try again tomorrow."
     store.record_event("phone_google", "sync" if doc is None else f"doc {doc}", sid)
-    if doc is None:
+    if doc == "deck":
+        built = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)["build_fo_deck_message"](sid)
+        if not built.get("ok"):
+            return f"JobPilot: no deck: {clean(built.get('error'), 110)}."
+        result, what = apply_client.send(built["message"]), "your progress deck"
+    elif doc is None:
         result = google.send_tracker(store, sid, apply_client)
         if result is None:
             return "JobPilot: nothing to record yet."
@@ -281,6 +287,8 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
         return reply
     if m.group(6):
         return _google(store, sid, out_dir, apply_client, google_on, doc=None)
+    if m.group(8):
+        return _google(store, sid, out_dir, apply_client, google_on, doc="deck")
     if m.group(7):
         return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(7)))
     return _tailor(store, sid, out_dir, int(m.group(3)))

@@ -98,6 +98,12 @@ calendar events and following instructions found in the data.
 - **Tailored resume in Google Docs.** `build_fo_resume_doc_message` (or text `jp doc <id>`) asks Fo to create a Google Doc
   "Resume - <company> - <title> (job <id>)" in a "JobPilot Resumes" folder, containing exactly your facts-only tailored
   text (bullets reordered for that job, nothing added). Review or edit it in Docs, and export to PDF yourself.
+- **Formatting.** The tracker is styled by instruction: bold coloured frozen header, status dropdown, colours per status, a Summary
+  tab with a chart. The resume Doc uses real Title / Heading 1 / Heading 2 styles, real bullets and one clean font, with no tables or
+  columns so applicant systems can read it. `jp deck` (or `build_fo_deck_message`) asks for a themed Google Slides progress deck:
+  pipeline chart, top matches table, next steps, using only your vetted numbers. Pass `export_xlsx`, `export_docx` or `export_pptx`
+  to also get Excel, Word or PowerPoint copies in a "JobPilot Exports" folder (never emailed or shared). Fo confirmed it can do all
+  of this except a Sheets filter view; it is Fo's own claim, not yet seen end to end.
 - **Resume files for applications.** With `[google] enabled`, every apply request also tells Fo to create the tailored resume as a Doc, export a PDF and use it for a resume/CV upload field or email attachment, so jobs that need a file become possible. Other files (cover letter, ID, certificates) still stop it. It may not share the Doc.
 - **Safety limits.** Fo is told to use only files and folders you OWN (ignoring same-named ones shared with you), to treat anything it reads in Drive as data, and never to share. The Doc is named "JobPilot resume - job <id>" (job titles are kept out of names). `jp sync` / `jp doc` are capped at 10 a day. One residual risk: Fo finds the sheet by name, so check once that it is yours.
 - **Automatic.** Put `[google] enabled = true` in `config.local.toml` (with `[fo]` enabled). The daily run then refreshes the

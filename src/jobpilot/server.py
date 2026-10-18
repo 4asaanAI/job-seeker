@@ -895,7 +895,7 @@ def build_tools(
     # The public tool is the core without the phone-approval parameter: only the text inbox may use that.
     build_fo_apply_message.__doc__ = re.sub(r"\n        phone_code is only.*?yourself\.\n", "", _apply_core.__doc__, flags=re.S)
 
-    def build_fo_tracker_message(seeker_id: int) -> dict:
+    def build_fo_tracker_message(seeker_id: int, export_xlsx: bool = False) -> dict:
         """Build ONE request asking Fo to update the "JobPilot Tracker" Google Sheet with every application and good
         open match. SENDS NOTHING. Pass `message` to ask_fo unchanged (user's permission prompt applies). Fo writes
         only that sheet, never shares it, and treats the rows as data."""
@@ -905,7 +905,7 @@ def build_tools(
             rows = google.tracker_rows(store.applications(sid, 500), store.best_matches(sid, 25, open_only=True))
             if not rows:
                 return {"ok": True, "seeker_id": sid, "message": None, "note": "Nothing to record yet."}
-            return {"ok": True, "seeker_id": sid, "rows": len(rows), "message": google.tracker_message(rows),
+            return {"ok": True, "seeker_id": sid, "rows": len(rows), "message": google.tracker_message(rows, export_xlsx),
                     "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -916,6 +916,7 @@ def build_tools(
         experience_order: list[str] | None = None,
         skills: list[str] | None = None,
         bullet_order: dict[str, list[str]] | None = None,
+        export_docx: bool = False,
     ) -> dict:
         """Build ONE request asking Fo to put this job's facts-only tailored resume into a new Google Doc. SENDS NOTHING.
 
@@ -935,9 +936,21 @@ def build_tools(
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
             return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "job_terms_missing_from_resume": gaps,
-                    "message": google.resume_doc_message(names[0], names[1], int(posting_id), text),
+                    "message": google.resume_doc_message(names[0], names[1], int(posting_id), text, export_docx),
                     "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
         except (OSError, PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def build_fo_deck_message(seeker_id: int, export_pptx: bool = False) -> dict:
+        """Build ONE request asking Fo for a themed Google Slides progress deck (pipeline chart, top matches, next steps),
+        optionally also exported as .pptx. SENDS NOTHING. Pass `message` to ask_fo unchanged. Numbers and rows are vetted."""
+        try:
+            sid = _check(seeker_id)
+            _fo_seeker_guard(sid)
+            counts, top = google.deck_inputs(store, sid)
+            return {"ok": True, "seeker_id": sid, "message": google.deck_message(counts, top, export_pptx),
+                    "note": "Nothing was sent. Pass the message to ask_fo unchanged."}
+        except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
     def set_review_mode(seeker_id: int, review_required: bool) -> dict:
@@ -1210,6 +1223,7 @@ def build_tools(
         "build_fo_apply_message": build_fo_apply_message,
         "_apply_core": _apply_core,                 # private: the text inbox uses phone_code; never registered with MCP
         "build_fo_tracker_message": build_fo_tracker_message,
+        "build_fo_deck_message": build_fo_deck_message,
         "build_fo_resume_doc_message": build_fo_resume_doc_message,
         "build_fo_reply_check_message": build_fo_reply_check_message,
         "build_fo_sweep_replies_message": build_fo_sweep_replies_message,
