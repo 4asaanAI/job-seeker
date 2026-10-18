@@ -16,6 +16,9 @@ https://github.com/4asaanAI/job-seeker @wajo_ai
 -> Claude shows the permission prompt before calling Fo (keep it on screen) -> calendar entry appears.
 Use the fictional seeker (python scripts/fo_demo.py --send). No real resume or contacts on screen.
 
+## Honesty note
+JobPilot predates the hackathon; the Fo integration is what was built for it. Wajo's organizers OK'd a pre-built app that uses the Fo MCP. Say "extended JobPilot with Fo" rather than "built from scratch".
+
 ## Before posting
 - Repo is public; link filled in above.
 - Post with hours to spare, not at 3:59pm.

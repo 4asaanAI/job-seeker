@@ -51,6 +51,11 @@ What makes it more than glue:
   facts. It cannot invent experience.
 - **Tested.** 490+ offline tests, plus a test that starts the real MCP server and drives it like Claude.
 
+**Hackathon scope.** JobPilot (discovery, scoring, ledger, resume engine, MCP server) existed before the
+hackathon; Wajo's organizers confirmed a pre-built app is fine as long as it uses the Fo MCP. Built during the
+hackathon (commits from Oct 17): the Fo client and delivery channel, the minimal-digest safety layer, follow-ups
+through Fo, `prepare_application`, the fictional-data demo, and the real-server MCP test.
+
 Try it in two minutes with fictional data: `python scripts/fo_demo.py` (dry run, sends nothing). See
 [docs/FO-DEMO.md](docs/FO-DEMO.md) for the demo script and safety choices, and
 [docs/APPLYING.md](docs/APPLYING.md) to use it for your own search.
