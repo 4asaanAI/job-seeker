@@ -365,3 +365,19 @@ def test_prepare_application_refuses_unlinked_posting_and_other_seekers(tmp_path
     pinned = build_tools(store, tmp_path / "out", pinned_seeker_id=sid, operator_mode=False)
     assert pinned["prepare_application"](sid + 1, pid)["ok"] is False
     store.close()
+
+
+def test_build_fo_message_is_vetted_wrapped_and_sends_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    tools, store = _tools(tmp_path)
+    sid, pid = _seeker_with_resume(tmp_path, store)
+    store.record_score(sid, pid, 91.0, "SECRET http://evil.example reasoning", "claude")
+    out = tools["build_fo_message"](sid)
+    assert out["ok"] and out["record_after"] == [{"posting_id": pid, "kind": "first"}]
+    msg = out["message"]
+    assert "SECRET" not in msg and "evil.example" not in msg and "http" not in msg
+    assert "take no other action" in msg and f"id {pid}" in msg and "91/100" in msg
+    assert store.notifiable_postings(sid, 70.0, 5)  # nothing was recorded as sent
+    assert tools["build_fo_message"](sid, "followups")["message"] is None
+    assert tools["build_fo_message"](sid, "bogus")["ok"] is False
+    store.close()

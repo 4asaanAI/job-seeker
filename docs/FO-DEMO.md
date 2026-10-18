@@ -40,8 +40,8 @@ export FO_API_KEY=...                # from the hackathon early-access email (ne
 python scripts/fo_demo.py --send     # really sends through your Fo account (asks you to type: yes)
 ```
 
-The script prints three `export` lines (`JOBPILOT_DB`, `JOBPILOT_SEEKER_ID`, `JOBPILOT_OUT`).
-Run them, copy `.mcp.fo-demo.json.example` to `.mcp.json`, start Claude Code in the repo, and
+The script prints the `export` lines (`JOBPILOT_DB`, `JOBPILOT_PYTHON`, `JOBPILOT_SEEKER_ID`, `JOBPILOT_OUT`).
+Run them all, copy `.mcp.fo-demo.json.example` to `.mcp.json`, start Claude Code in the repo, and
 authenticate Fo with `/mcp` (or set `FO_API_KEY`).
 
 ## Demo script (60-90 seconds)
@@ -51,6 +51,8 @@ Start from the Claude session, never by texting Fo "use JobPilot": Fo cannot see
 1. `python scripts/fo_demo.py --send`: the phone buzzes with three matches.
 2. In Claude Code: "What new matches do I have?" (JobPilot answers).
 3. "Tailor my resume for the Fabrikam role." (JobPilot writes a DOCX; show the path).
+3b. To text yourself matches from the session, Claude calls `build_fo_message` (a vetted, wrapped message)
+   and passes it to `ask_fo` unchanged, so Fo never gets free-form job text.
 4. "I applied. Remind me to follow up on Friday." Claude records the application, then asks to call
    Fo. Approve the permission prompt on camera: that prompt is the safety gate.
 5. The calendar entry appears.

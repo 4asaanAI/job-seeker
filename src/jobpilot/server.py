@@ -26,6 +26,7 @@ from .resume import (
     render_text,
     unverified_facts,
 )
+from .fo import render_fo_digest, render_fo_followups, wrap
 from .scoring import build_scoring_batch
 from .sheets import GoogleSheetsExporter, load_google_services
 from .sources.ats_json import ATSJsonSource
@@ -334,6 +335,39 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "seeker_id": sid, "text": digest.text,
                 "posting_ids": list(digest.posting_ids), "recorded": digest.recorded}
+
+    def build_fo_message(
+        seeker_id: int, kind: str = "digest", min_score: float = 70.0, limit: int = 5,
+    ) -> dict:
+        """Build the exact, vetted message to send through Fo. SENDS NOTHING.
+
+        kind is "digest" (new matches) or "followups". Pass the returned
+        `message` to ask_fo WORD FOR WORD: never rewrite it, add job text or
+        links, because Fo can email, call and buy and job posts are written by
+        strangers. After Fo reports the send is complete, call
+        record_notification(seeker_id, posting_id, "fo", kind) for each item in
+        `record_after`.
+        """
+        try:
+            sid = _check(seeker_id)
+            if kind == "digest":
+                digest = render_fo_digest(store, sid, min_score, limit)
+                text = digest.text
+                record_after = [{"posting_id": p, "kind": "first"} for p in digest.posting_ids]
+            elif kind == "followups":
+                items = store.pending_followups(sid, max(1, min(int(limit), 25)))
+                text = render_fo_followups(items) if items else ""
+                record_after = [{"posting_id": i["posting_id"], "kind": i["kind"]} for i in items]
+            else:
+                raise ValueError('kind must be "digest" or "followups"')
+        except (PermissionError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        if not record_after:
+            return {"ok": True, "seeker_id": sid, "message": None,
+                    "note": "Nothing new to send."}
+        return {"ok": True, "seeker_id": sid, "message": wrap(text),
+                "record_after": record_after,
+                "note": "Pass message to ask_fo unchanged, with the user's approval."}
 
     def investigate_posting(seeker_id: int, posting_id: int) -> dict:
         """Return one linked posting as a browser-investigation handoff.
@@ -676,6 +710,7 @@ def build_tools(
         "record_notification": record_notification,
         "build_digest": build_digest,
         "build_plain_digest": build_plain_digest,
+        "build_fo_message": build_fo_message,
         "investigate_posting": investigate_posting,
         "verify_still_open": verify_still_open,
         "check_company_careers": check_company_careers,

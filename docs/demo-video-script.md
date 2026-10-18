@@ -4,7 +4,7 @@ Read the SAY lines out loud. Do the DO lines on screen. Slow down: it always fee
 right when people watch.
 
 ## Set up first (not on camera)
-1. `python scripts/fo_demo.py` and run the three `export` lines it prints.
+1. `python scripts/fo_demo.py` and run ALL the `export` lines it prints (one of them is JOBPILOT_PYTHON: without it the JobPilot server will not start).
 2. `cp .mcp.fo-demo.json.example .mcp.json`, then start Claude Code in the repo and check `/mcp` shows jobpilot and fo connected.
 3. Use the fictional seeker only. Close email, Slack and anything with real names. Turn on Do Not Disturb.
 4. Phone: your iMessage thread with Fo has real history. Record the phone separately, or start a fresh chat, and only show the new messages.
@@ -27,7 +27,7 @@ SAY: "JobPilot builds the application from my own saved resume facts. It can reo
 And nothing is sent yet."
 
 **0:48 The safety moment** (terminal, keep the prompt on screen)
-DO: type `Looks good. Text me the three matches through Fo.`
+DO: type `Looks good. Send me my new matches through Fo.` Claude should first call JobPilot's `build_fo_message`, then `ask_fo` with that message unchanged. Point at it.
 DO: when Claude Code asks permission to call Fo, pause on the prompt for two seconds, then approve.
 SAY: "Fo can email, call and buy for me, and job posts are written by strangers. So Claude has to ask me first, and
 Fo only ever gets an id, a score and a vetted title. Never the job post itself."

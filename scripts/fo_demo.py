@@ -155,6 +155,7 @@ def main(argv=None, *, input_fn=input, client_factory=None) -> int:
         else:
             print("\nDry run: nothing was sent to Fo.")
         print(f"\nPoint a Claude session at this data:\n  export JOBPILOT_DB='{args.dir / 'jobpilot.db'}'"
+              f"\n  export JOBPILOT_PYTHON='{sys.executable}'"
               f"\n  export JOBPILOT_SEEKER_ID={sid}\n  export JOBPILOT_OUT='{args.dir / 'out'}'")
         return 0
     finally:
