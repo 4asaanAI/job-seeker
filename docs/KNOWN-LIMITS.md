@@ -7,6 +7,8 @@ explicit deny list); "delivered" through the headless relay now needs a real Fo 
 transcript; stricter `clean()` (domains, long numbers, payment and credential words, dotted spellings); the polling inbox
 now locks, prunes by age, answers each command once, and no longer echoes job-description keywords.
 
+Also fixed later: one broken profile no longer stops discovery for everyone (reported as `skipped_seekers`), and profile YAML is written atomically.
+
 Not fixed, with the honest impact:
 
 | Area | Limit | Impact |

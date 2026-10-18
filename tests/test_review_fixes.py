@@ -54,3 +54,29 @@ def test_empty_onboarding_variable_refuses_to_open_the_operator_tools(monkeypatc
     monkeypatch.setenv("JOBPILOT_ONBOARD_TELEGRAM_ID", "")
     with pytest.raises(SystemExit, match="empty"):
         server.main()
+
+
+def test_profile_writes_are_atomic_and_leave_no_temp_files(tmp_path):
+    f = tmp_path / "profile.yaml"
+    f.write_text("old", encoding="utf-8")
+    server._atomic_write(f, "new: 1\n")
+    assert f.read_text() == "new: 1\n" and not list(tmp_path.glob("*.tmp"))
+
+
+def test_one_broken_profile_does_not_stop_discovery_for_others(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        '[paths]\ndata_dir="data"\nout_dir="out"\n[limits]\nscore_batch=40\nmin_request_gap_seconds=4.0\n', encoding="utf-8")
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "companies.csv").write_text("name,tier,ats_vendor,careers_url,region,enabled\n", encoding="utf-8")
+    store = Store(tmp_path / "j.db")
+    store.migrate()
+    good = tmp_path / "data" / "seekers" / "g"
+    good.mkdir(parents=True)
+    (good / "profile.yaml").write_text("name: G\nheadline: PM\nlocation: X\nsources: [none]\nsearch_terms: [pm]\n", encoding="utf-8")
+    store.add_seeker("Good", 1, "data/seekers/g/profile.yaml", 20)
+    store.add_seeker("Broken", 2, "data/seekers/missing/profile.yaml", 20)
+    tools = server.build_tools(store, tmp_path / "out", operator_mode=True)
+    out = tools["discover"]()
+    assert out["ok"] is True and 2 in out["skipped_seekers"] and 1 not in out["skipped_seekers"]
+    store.close()
