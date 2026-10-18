@@ -32,3 +32,5 @@ data/fo_inbox_seen.json
 # personal settings layered over config.toml
 config.local.toml
 data/daily.log
+data/inbox.log
+data/fo_inbox_seen.*

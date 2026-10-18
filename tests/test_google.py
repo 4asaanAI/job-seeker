@@ -205,3 +205,10 @@ def test_phone_replies_sweeps_only_submitted(env):
 def test_tracker_marks_dropped_matches_stale_not_deleted():
     m = google.tracker_message([["1", "A", "B", "match", "80", "", ""]])
     assert "stale" in m and "do not delete" in m and "Never delete" in m
+
+
+def test_deck_count_is_true_count_and_empty_deck_not_sent(env, tmp_path):
+    store, sid, ids, *_ = env
+    counts, top = google.deck_inputs(store, sid)
+    assert counts["match"] >= len(top) and len(top) <= 6
+    assert "offer" in google.STATUSES and "never shorten" in google.resume_doc_message("a", "b", 1, "x")

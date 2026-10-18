@@ -13,7 +13,7 @@
   <dict>
     <key>JOBPILOT_HOME</key><string>/path/to/jobpilot</string>
     <key>JOBPILOT_CLAUDE</key><string>/path/to/claude</string>
-    <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
   <key>StartInterval</key><integer>600</integer>
   <key>RunAtLoad</key><false/>

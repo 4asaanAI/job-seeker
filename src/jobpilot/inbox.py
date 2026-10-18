@@ -243,13 +243,16 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
         return "JobPilot: no Fo transport is available."
     if store.event_count_since(sid, "phone_google", 24) >= MAX_DAILY_GOOGLE:
         return "JobPilot: today's limit of Google requests by text is reached. Try again tomorrow."
-    store.record_event("phone_google", "sync" if doc is None else f"doc {doc}", sid)
     if doc == "deck":
         built = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)["build_fo_deck_message"](sid)
         if not built.get("ok"):
             return f"JobPilot: no deck: {clean(built.get('error'), 110)}."
+        if not any(google.deck_inputs(store, sid)[0].values()):
+            return "JobPilot: nothing to put in a deck yet."
+        store.record_event("phone_google", "deck", sid)
         result, what = apply_client.send(built["message"]), "your progress deck"
     elif doc is None:
+        store.record_event("phone_google", "sync", sid)
         result = google.send_tracker(store, sid, apply_client)
         if result is None:
             return "JobPilot: nothing to record yet."
@@ -261,6 +264,7 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
             return f"JobPilot: no document for id {doc}: {clean(built.get('error'), 110)}."
         if any(d == str(doc) for d, _ in store.recent_event_details(sid, "phone_doc", 3, 50)):
             return f"JobPilot: a Google Doc for id {doc} was already requested in the last 3 hours; check your Drive."
+        store.record_event("phone_google", f"doc {doc}", sid)
         store.record_event("phone_doc", str(doc), sid, doc)         # before sending: a lost reply must not make a second Doc
         result = apply_client.send(built["message"])
         what = f"a Google Doc for id {doc}"

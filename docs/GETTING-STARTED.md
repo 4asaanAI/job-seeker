@@ -47,7 +47,7 @@ Delivery goes through Fo when `[fo] enabled = true` (one Fo account serves one p
 A second launchd job polls your Fo texts every 10 minutes so `jp matches`, `jp apply <id>`, `jp sync`, `jp deck`, `jp replies` (Fo checks your email for replies), `jp interview|rejected|applied|withdrawn <id>` (you record the outcome) and the rest get answered.
 
 ```bash
-sed -e "s#/path/to/jobpilot#$PWD#g" -e "s#/path/to/claude#$(which claude)#" scripts/com.jobpilot.inbox.plist.example > ~/Library/LaunchAgents/com.jobpilot.inbox.plist
+sed -e "s#/path/to/jobpilot#$PWD#g" -e "s#/path/to/claude#$(command -v claude)#" scripts/com.jobpilot.inbox.plist.example > ~/Library/LaunchAgents/com.jobpilot.inbox.plist
 launchctl load ~/Library/LaunchAgents/com.jobpilot.inbox.plist     # stop with launchctl unload
 ```
 
