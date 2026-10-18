@@ -6,6 +6,8 @@ requests discovery data, scores it, and asks the server to persist the result.
 from __future__ import annotations
 
 import os
+import time
+import secrets
 import re
 import ntpath
 from concurrent.futures import ThreadPoolExecutor
@@ -43,9 +45,16 @@ def _atomic_write(path: Path, text: str, encoding: str = "utf-8") -> None:
     """Write via a temp file in the same folder, then replace: a crash or a second writer never leaves half a file."""
     import tempfile
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding=encoding) as fh:
-        fh.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 UNTRUSTED = (
@@ -658,7 +667,7 @@ def build_tools(
             done = {a["posting_id"] for a in store.applications(sid, 500) if a["status"] != "withdrawn"}  # incl. started/blocked
             order = {"direct": 0, "aggregator": 1, "unknown": 2, "login": 3}
             items = []
-            for m in store.best_matches(sid, 25):
+            for m in store.best_matches(sid, 100, open_only=True):
                 if m["posting_id"] in done or m["status"] in ("skipped", "applied", "expired"):
                     continue
                 if m["fit_score"] is None or m["fit_score"] < min_score:
@@ -671,6 +680,8 @@ def build_tools(
             return {"ok": True, "seeker_id": sid, "items": items[:max(1, min(int(limit), 25))], "note": UNTRUSTED}
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
+
+    _plans: dict[str, dict] = {}   # plan_id -> approved list (in this server process only)
 
     def _eligible_for_batch(sid: int, limit: int, min_score: float = 70.0) -> list[dict]:
         out = apply_candidates(sid, limit=25, min_score=min_score)
@@ -689,7 +700,10 @@ def build_tools(
             sid = _check(seeker_id)
             _fo_seeker_guard(sid)
             items = _eligible_for_batch(sid, max(1, min(int(limit), 10)), float(min_score))
-            return {"ok": True, "seeker_id": sid, "items": items,
+            plan_id = secrets.token_hex(6)
+            _plans[plan_id] = {"sid": sid, "ids": {i["posting_id"] for i in items}, "min_score": float(min_score),
+                               "expires": time.time() + 2 * 3600}
+            return {"ok": True, "seeker_id": sid, "items": items, "plan_id": plan_id,
                     "skipped_login_boards": [i for i in apply_candidates(sid, 25, float(min_score)).get("items", [])
                                              if i["route"] in ("login", "blocked")][:10],
                     "note": UNTRUSTED + " Show this list and get one explicit yes before applying to anything."}
@@ -703,8 +717,12 @@ def build_tools(
         skills: list[str] | None = None,
         bullet_order: dict[str, list[str]] | None = None,
         batch_approved: bool = False,
+        plan_id: str | None = None,
     ) -> dict:
         """Build the request that asks Fo to apply to ONE job. SENDS NOTHING.
+
+        With batch_approved=True you must also pass the `plan_id` that plan_apply_batch returned (and the user
+        approved): it ties the approval to that exact list and expires after two hours.
 
         batch_approved=True is for "apply to all my new jobs": pass it ONLY after the user said yes to the exact list
         from plan_apply_batch. The job must be on that list (no login-gated boards), and at most 10 such requests
@@ -733,7 +751,11 @@ def build_tools(
             if link is None:
                 raise ValueError("this posting's link failed the safety check; apply to it by hand")
             if batch_approved:
-                eligible = {i["posting_id"] for i in _eligible_for_batch(sid, 25)}
+                plan = _plans.get(plan_id or "")
+                if not plan or plan["sid"] != sid or plan["expires"] < time.time():
+                    raise ValueError("batch approval needs a current plan_id from plan_apply_batch for this seeker")
+                eligible = {i["posting_id"] for i in _eligible_for_batch(sid, 25, plan["min_score"])
+                            if i["posting_id"] in plan["ids"]}
                 if int(posting_id) not in eligible:
                     raise ValueError("this job is not on the approved apply list (login-gated, below the score "
                                      "threshold, already attempted or skipped)")
@@ -1047,9 +1069,9 @@ def build_tools(
         ):
             return {"ok": False,
                     "error": "profile_path must be relative to JOBPILOT_HOME"}
-        folder = Path(ntpath.normpath(profile_path).replace("\\", "/")).parent
+        folder = str(Path(ntpath.normpath(profile_path).replace("\\", "/")).parent).lower()
         for other in store.list_seekers():
-            if Path(ntpath.normpath(other.profile_path).replace("\\", "/")).parent == folder:
+            if str(Path(ntpath.normpath(other.profile_path).replace("\\", "/")).parent).lower() == folder:
                 # Resume, rubric and uploads are found from the profile's folder: sharing one would share files.
                 return {"ok": False, "error": "that profile folder already belongs to another seeker; use a new folder"}
         sid = store.add_seeker(name, telegram_user_id, profile_path, daily_cap)

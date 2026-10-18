@@ -12,11 +12,16 @@ import re
 import secrets
 from urllib.parse import urlsplit, urlunsplit
 
-from .fo import clean
+from .fo import _INSTRUCTION, clean
 
 MAX_URL = 200
 _BAD_URL_CHARS = re.compile(r"[\s\"'<>\\`]")
 _SHORTENERS = ("bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly", "rb.gy", "cutt.ly")
+
+
+def _instruction_like(text: str) -> bool:
+    flat = re.sub(r"[-_.+=&/,%]", " ", text)
+    return bool(_INSTRUCTION.search(flat))
 
 
 def vetted_job_url(url: str | None) -> str | None:
@@ -37,10 +42,15 @@ def vetted_job_url(url: str | None) -> str | None:
         pass
     if "xn--" in host or host in _SHORTENERS or any(host.endswith("." + s) for s in _SHORTENERS):
         return None
+    from urllib.parse import unquote
+    tail = unquote(parts.path + " " + parts.query)
+    # a link is data: no addresses, no words that read like instructions, and only plain URL characters
+    if "@" in tail or re.search(r"[^A-Za-z0-9 ._~:/=&,+%#-]", tail) or _instruction_like(tail):
+        return None
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
 
-_DIRECT = ("boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com",
+_DIRECT = ("greenhouse.io", "lever.co", "jobs.ashbyhq.com",
            "apply.workable.com", "jobs.smartrecruiters.com", "bamboohr.com", "breezy.hr")
 _LOGIN = ("foundit.in", "naukri.com", "indeed.com", "linkedin.com", "glassdoor.com", "monster.com",
           "myworkdayjobs.com", "shine.com", "ziprecruiter.com")

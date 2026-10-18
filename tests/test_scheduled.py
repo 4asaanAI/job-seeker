@@ -27,7 +27,7 @@ def test_scheduled_runner_is_bounded_and_records_machine_run(tmp_path):
     assert "--strict-mcp-config" in command
     assert "--no-session-persistence" in command
     assert "--tools" in command and command[command.index("--tools") + 1] == ""
-    assert "mcp__jobpilot__*" in command
+    assert "mcp__jobpilot__list_seekers,mcp__jobpilot__discover" in command
     assert kwargs["cwd"] == str(Path(__file__).resolve().parents[1])
 
     store = Store(db)

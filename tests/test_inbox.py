@@ -176,8 +176,7 @@ def test_each_command_is_marked_only_after_its_own_reply(demo):
         if len(calls) == 2:
             raise FoError("down")
     batch = [msg("jp status", at="2026-10-18T05:00:00Z"), msg("jp matches", at="2026-10-18T05:01:00Z")]
-    with pytest.raises(FoError):
-        inbox.poll_once(store, sid, out, Reader(batch), flaky, state)
+    assert inbox.poll_once(store, sid, out, Reader(batch), flaky, state) == 1   # one failed, one landed, no crash
     seen = inbox._load(state)
     assert len(seen) == 1                                   # the first reply landed, the second will retry
     sent = []
@@ -222,3 +221,16 @@ def test_polls_are_serialized_by_a_lock_and_temp_files_are_unique(demo, tmp_path
     [t.start() for t in ts]; [t.join() for t in ts]
     assert order == ["start", "end", "start", "end"] and len(sent) == 1   # second poll saw the first one's result
     assert not list(tmp_path.glob("seen.json*.tmp"))
+
+
+def test_a_failing_command_does_not_block_the_ones_behind_it(demo):
+    store, sid, ids, out, state = demo
+    sent = []
+
+    def first_fails(to, text):
+        if "status" in text:
+            raise FoError("down")
+        sent.append(text)
+    batch = [msg("jp status", at="2026-10-18T05:00:00Z"), msg("jp matches", at="2026-10-18T05:01:00Z")]
+    assert inbox.poll_once(store, sid, out, Reader(batch), first_fails, state) == 1
+    assert sent and "top matches" in sent[0]

@@ -50,7 +50,7 @@ def run_once(
     command = [
         claude_bin, "--print", "--no-session-persistence",
         "--strict-mcp-config", "--mcp-config", str(mcp_config),
-        "--tools", "", "--allowedTools", "mcp__jobpilot__*",
+        "--tools", "", "--allowedTools", "mcp__jobpilot__list_seekers,mcp__jobpilot__discover",
         "--max-budget-usd", str(max_budget_usd), PROMPT,
     ]
     try:

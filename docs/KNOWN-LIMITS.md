@@ -9,6 +9,13 @@ now locks, prunes by age, answers each command once, and no longer echoes job-de
 
 Also fixed later: the employer-feed lookup cap is now a real 24-hour cap (counted from stored events); tailoring keywords skip generic posting words; one broken profile no longer stops discovery for everyone (reported as `skipped_seekers`), and profile YAML is written atomically.
 
+Fixed after a Sonnet 5.5 audit: instruction text hidden in apply links (links now allow only plain URL characters and no
+instruction-like words); the unattended routine now holds only `list_seekers` and `discover`; closed or finished jobs no longer
+reach scoring; the 7-day expiry now fires after a nudge; `clean()` keeps real titles such as "Systems Engineer" or "Node.js
+Developer" and cuts long ones instead of withholding them; batch approval is bound to a server-issued `plan_id`; the headless
+relay must have sent exactly the vetted message; one failing inbox command no longer blocks the others; and apply candidates
+exclude finished jobs before the top-N cut.
+
 Not fixed, with the honest impact:
 
 | Area | Limit | Impact |
@@ -18,6 +25,7 @@ Not fixed, with the honest impact:
 | Profile folders | Two profiles in one folder share resume, rubric and uploads. | Operator error only; the bot creates one folder per seeker. |
 | Source health | A single-seeker search records counts used for the "degraded" median. | Can mislabel a source as degraded. |
 | Schema migration | `migrate()` re-checks every posting on each start by design, so a half-finished upgrade repairs itself. | Slower starts with a large database. |
+| Plan ids live in the server process | A restarted MCP server forgets plan ids; ask for a new plan. | A minor inconvenience, and the safe default. |
 | `ask_fo` is not idempotent | A send that times out may still complete; the next run can duplicate a text. | A duplicate text, never a lost digest. |
 | Untrusted-data notes | `get_notifiable` returns a bare list, so it cannot carry the note. | The model is told scraped text is untrusted by the other tools and the system prompt. |
 

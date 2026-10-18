@@ -192,7 +192,7 @@ class ClaudeFoClient:
             return FoResult("working", "headless relay timed out")
         except OSError as exc:
             raise FoError(f"cannot start claude: {type(exc).__name__}") from None
-        if done.returncode == 0 and fo_confirmed_complete(done.stdout or ""):
+        if done.returncode == 0 and fo_confirmed_complete(done.stdout or "", expect=message):
             return FoResult("complete", "headless claude relay")
         return FoResult("failed", f"headless relay did not confirm (exit {done.returncode})")
 
@@ -204,7 +204,7 @@ def _tool_text(block: dict) -> str:
     return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict))
 
 
-def fo_confirmed_complete(stream_json: str) -> bool:
+def fo_confirmed_complete(stream_json: str, expect: str | None = None) -> bool:
     """True only if the session's own transcript shows ask_fo was called and the LAST Fo tool result says
     status complete. The model's closing words are never trusted: it could print success without calling Fo."""
     names: dict[str, str] = {}
@@ -220,6 +220,9 @@ def fo_confirmed_complete(stream_json: str) -> bool:
                 continue
             if block.get("type") == "tool_use":
                 names[block.get("id", "")] = block.get("name", "")
+                if (expect is not None and block.get("name") == "mcp__fo__ask_fo"
+                        and (block.get("input") or {}).get("message") != expect):
+                    return False             # the relay sent something other than the vetted message
             elif block.get("type") == "tool_result":
                 name = names.get(block.get("tool_use_id", ""), "")
                 if name not in ("mcp__fo__ask_fo", "mcp__fo__get_fo_reply"):
@@ -238,24 +241,32 @@ _SAFE = re.compile(r"[^A-Za-z0-9 .,&()-]")
 # Punctuation stripping cannot stop a sentence, so text that reads like an instruction to an assistant, a
 # domain, a long number or a payment/credential word is withheld outright. Residual risk is documented.
 _INSTRUCTION = re.compile(
-    r"ignore|instruction|previous|forget|disregard|system|prompt|assistant|\bfo\b|"
-    r"e-?mail|\bcall|\bbuy|purchas|\bsend|forward|\btext\b|\bpay|transfer|"
+    r"ignore|instruction|previous|forget|disregard|system\s*(prompt|message|instruction)|\bnew\s+prompt|\bfo\b|"
+    r"e-?mail\s+(me|my|your|the|this|that|resume|cv|to|it|them|us)|\bcall\s+(me|us|now|the|\+|\d)|\bbuy\b|purchas|"
+    r"\bsend\b|forward|\btext\s+(me|my|us|them|this|to)|\bpay\s+(me|us|to|\d|\$|into|now)|transfer|"
     r"password|secret|delete|\breply|\bplease\b|\bmust\b|\bnow\b|http|www|"
     r"\bwire\b|venmo|zelle|paypal|crypto|bitcoin|wallet|\bdial\b|\bvisit\b|\bclick\b|download|install|"
-    r"invoice|credential|\bssn\b|\botp\b|gift\s*cards?|\bacct\b", re.I)
+    r"invoice|credential|\bssn\b|\botp\b|gift\s*cards?|\bacct\b|\bbank\b", re.I)
 _DOMAIN = re.compile(r"[a-z0-9]\.[a-z]{2,}", re.I)
+_TECH_DOTS = re.compile(r"\.(js|net|ts|py|io)\b", re.I)       # Node.js, ASP.NET, Next.js are job titles, not domains
 _SQUEEZED = re.compile(r"ignore|instruction|email|send|forward|password|previous")
 
 
 def clean(text: object, limit: int = 50) -> str:
-    """Short, allow-listed characters only; anything that reads like an instruction, a domain or a long
-    number, or does not fit, is replaced by a placeholder rather than trimmed."""
+    """Short, allow-listed characters only. Anything that reads like an instruction, a domain, a long number, or a
+    spelled-out evasion is replaced by a placeholder; a merely long title is cut at a word boundary."""
     raw = " ".join(str(text).replace("/", " ").split())
     out = _SAFE.sub("", raw).strip()
-    letters = re.sub(r"[^a-z0-9]", "", out.lower())
-    if (not out or len(out) > limit or _INSTRUCTION.search(out) or _DOMAIN.search(out)
-            or re.search(r"\d{7,}", out.replace(" ", "")) or _SQUEEZED.search(letters)):
+    if not out:
         return "[withheld]"
+    letters = re.sub(r"[^a-z0-9]", "", out.lower())
+    domain_check = _TECH_DOTS.sub(" ", out)
+    if (_INSTRUCTION.search(out) or _DOMAIN.search(domain_check) or re.search(r"\d{7,}", out.replace(" ", ""))
+            or (_SQUEEZED.search(letters) and not _SQUEEZED.search(out.lower()))):
+        return "[withheld]"
+    if len(out) > limit:
+        out = out[:limit].rsplit(" ", 1)[0].rstrip(" ,.-(")
+        return out or "[withheld]"
     return out
 
 

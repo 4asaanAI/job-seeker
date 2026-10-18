@@ -175,3 +175,57 @@ def test_jsonld_valid_through_is_captured():
     cfg = StructuredConfig(name="a", company_name="Acme", endpoint="https://c.example.com", enabled=True, canary_min_results=1)
     found, _ = JsonLdSource(cfg, fetcher=lambda u, t: html).search("pm", None)
     assert found[0].valid_through == "2030-02-03T00:00"
+
+
+def test_nudge_then_expiry_both_fire(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    store, sid, pid = _deadline_store(tmp_path, None)
+    store.record_notification(sid, pid, "fo", "first")
+    def age(days):
+        store.conn.execute("UPDATE notifications SET delivered_at = ? WHERE kind = 'first'",
+                           ((datetime.now(timezone.utc) - timedelta(days=days)).isoformat(),))
+        store.conn.commit()
+    age(4)
+    assert [i["kind"] for i in store.pending_followups(sid)] == ["nudge"]
+    store.record_notification(sid, pid, "fo", "nudge")
+    assert store.pending_followups(sid) == []                               # nothing more until day 7
+    age(8)
+    assert [i["kind"] for i in store.pending_followups(sid)] == ["expiry"]   # the expiry still fires after a nudge
+    store.close()
+
+
+def test_scoring_backlog_skips_closed_and_finished_jobs(tmp_path):
+    store, sid, pid = _deadline_store(tmp_path, "2020-01-01")
+    store.conn.execute("DELETE FROM scores")
+    store.conn.commit()
+    assert store.unscored_jobs(sid, 10) == []
+    store.conn.execute("UPDATE job_postings SET valid_through = NULL")
+    store.conn.commit()
+    assert [j.posting_id for j in store.unscored_jobs(sid, 10)] == [pid]
+    store.conn.execute("UPDATE seeker_jobs SET status = 'skipped'")
+    store.conn.commit()
+    assert store.unscored_jobs(sid, 10) == []
+    store.close()
+
+
+def test_expiry_notification_never_overwrites_applied(tmp_path):
+    store, sid, pid = _deadline_store(tmp_path, None)
+    store.record_application(sid, pid, "applied")
+    store.conn.execute("UPDATE seeker_jobs SET status = 'applied'")
+    store.conn.commit()
+    store.record_notification(sid, pid, "fo", "first")
+    store.record_notification(sid, pid, "fo", "expiry")
+    assert store.conn.execute("SELECT status FROM seeker_jobs").fetchone()[0] == "applied"
+    store.close()
+
+
+def test_unattended_routine_may_only_discover(tmp_path):
+    seen = {}
+
+    def runner(command, **kw):
+        seen["cmd"] = command
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    from jobpilot.scheduled import run_once
+    run_once(machine="m", mcp_config=tmp_path / "x.json", db_path=tmp_path / "d.db", runner=runner)
+    allowed = seen["cmd"][seen["cmd"].index("--allowedTools") + 1]
+    assert allowed == "mcp__jobpilot__list_seekers,mcp__jobpilot__discover" and "sync_google_sheet" not in allowed

@@ -207,12 +207,18 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
             fp = fingerprint(msg)
             if fp not in seen and all(fp != t[0] for t in todo):
                 todo.append((fp, msg["text"]))
-        done = 0
+        done, failure = 0, None
         for fp, text in todo[:max_commands]:
-            send(None, _safe_reply(store, seeker_id, out_dir, text))   # raises unless Fo confirms
+            try:
+                send(None, _safe_reply(store, seeker_id, out_dir, text))   # raises unless Fo confirms
+            except FoError as exc:
+                failure = failure or exc      # this one is retried next poll; the others still run
+                continue
             seen[fp] = time.time()
             _save(state_path, seen)
             done += 1
+        if failure and not done:
+            raise failure
         return done
 
 

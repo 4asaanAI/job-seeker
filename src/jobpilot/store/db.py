@@ -265,7 +265,7 @@ class Store:
                 (int(telegram_user_id), seeker_id))
             return cur.rowcount == 1
 
-    def best_matches(self, seeker_id: int, limit: int = 10) -> list[dict]:
+    def best_matches(self, seeker_id: int, limit: int = 10, open_only: bool = False) -> list[dict]:
         """This seeker's highest-scored linked jobs, whether or not already sent."""
         with self._lock:
             rows = self.conn.execute(
@@ -275,7 +275,10 @@ class Store:
                 "  ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
                 "JOIN job_postings jp ON jp.id = s.posting_id "
                 "WHERE s.seeker_id = ? AND (jp.valid_through IS NULL OR jp.valid_through >= date('now')) "
-                "ORDER BY s.fit_score DESC, s.scored_at DESC LIMIT ?",
+                + ("AND sj.status NOT IN ('skipped', 'applied', 'expired') AND NOT EXISTS (SELECT 1 FROM applications a "
+                   "WHERE a.seeker_id = s.seeker_id AND a.posting_id = s.posting_id AND a.status != 'withdrawn') "
+                   if open_only else "")
+                + "ORDER BY s.fit_score DESC, s.scored_at DESC LIMIT ?",
                 (seeker_id, int(limit))).fetchall()
         return [dict(r) for r in rows]
 
@@ -697,6 +700,8 @@ class Store:
                 LEFT JOIN scores s
                        ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id
                 WHERE sj.seeker_id = ? AND s.posting_id IS NULL AND jp.last_seen_at >= ?
+                  AND sj.status NOT IN ('skipped', 'applied', 'expired')
+                  AND (jp.valid_through IS NULL OR jp.valid_through >= date('now'))
                 ORDER BY sj.posting_id DESC
                 LIMIT ?
                 """,
@@ -740,7 +745,7 @@ class Store:
             )
             self.conn.execute(
                 "UPDATE seeker_jobs SET status = CASE WHEN ? = 'expiry' "
-                "THEN 'expired' WHEN ? = 'first' AND status = 'scored' "
+                "THEN CASE WHEN status IN ('applied') THEN status ELSE 'expired' END WHEN ? = 'first' AND status = 'scored' "
                 "THEN 'presented' ELSE status END "
                 "WHERE seeker_id = ? AND posting_id = ?",
                 (kind, kind, seeker_id, posting_id),
@@ -1242,7 +1247,7 @@ class Store:
                 "  AND NOT EXISTS (SELECT 1 FROM notifications later "
                 "                  WHERE later.seeker_id = n.seeker_id "
                 "                    AND later.posting_id = n.posting_id "
-                "                    AND later.kind IN ('nudge', 'expiry')) "
+                "                    AND later.kind = 'expiry') "
                 "GROUP BY n.posting_id ORDER BY first_delivered_at ASC LIMIT ?",
                 (seeker_id, nudge_cutoff, limit),
             ).fetchall()
@@ -1250,5 +1255,9 @@ class Store:
         for row in rows:
             item = dict(row)
             item["kind"] = "expiry" if item["first_delivered_at"] <= expiry_cutoff else "nudge"
+            if item["kind"] == "nudge" and self.conn.execute(
+                    "SELECT 1 FROM notifications WHERE seeker_id = ? AND posting_id = ? AND kind = 'nudge'",
+                    (seeker_id, item["posting_id"])).fetchone():
+                continue                       # already nudged; wait for the 7-day expiry
             result.append(item)
         return result
