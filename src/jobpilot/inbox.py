@@ -17,12 +17,16 @@ import argparse
 import hashlib
 import json
 import os
+import fcntl
 import re
 import subprocess
+import tempfile
+import time
 import urllib.parse
+from contextlib import contextmanager
 from pathlib import Path
 
-from .fo import (FO_HOST, FO_URL, FoError, _INSTRUCTION, child_env, clean, fo_sender)
+from .fo import FO_HOST, FO_URL, FoError, child_env, clean, fo_sender
 from .paths import jobpilot_home
 from .server import build_tools
 from .store.db import Store
@@ -58,11 +62,15 @@ class ClaudeReader:
     def fetch(self) -> list[dict]:
         config = json.dumps({"mcpServers": {"fo": {"type": "http", "url": self._url}}})
         command = [self._claude, "-p", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", config,
-                   "--tools", "", "--disable-slash-commands", "--allowedTools", READ_TOOLS,
+                   "--tools", "", "--disable-slash-commands", "--setting-sources", "user",
+                   "--allowedTools", READ_TOOLS,
+                   "--disallowedTools", "mcp__fo__ask_fo,mcp__fo__get_fo_reply,mcp__fo__start_fo_call",
                    "--model", self._model, "--max-budget-usd", str(self._budget), self._prompt()]
         try:
-            done = self._run(command, input="", capture_output=True, text=True, encoding="utf-8",
-                             timeout=self._timeout, check=False, env=child_env())
+            # Neutral cwd: a project's .claude/settings must not be able to approve ask_fo for this session.
+            with tempfile.TemporaryDirectory(prefix="jobpilot-inbox-") as neutral:
+                done = self._run(command, input="", capture_output=True, text=True, encoding="utf-8",
+                                 timeout=self._timeout, check=False, env=child_env(), cwd=neutral)
         except subprocess.TimeoutExpired:
             raise FoError("inbox relay timed out") from None
         except OSError as exc:
@@ -92,16 +100,8 @@ def parse_messages(stdout: str) -> list[dict]:
 
 
 def fingerprint(msg: dict) -> str:
-    return hashlib.sha256(f"{msg['conversationId']}|{msg['at']}|{msg['text']}".encode()).hexdigest()[:20]
-
-
-def _kw_ok(word: str) -> bool:
-    return bool(re.fullmatch(r"[a-z0-9+#.\-]{2,20}", word)) and not _INSTRUCTION.search(word)
-
-
-def _kws(words) -> str:
-    kept = [w for w in words if _kw_ok(w)][:8]
-    return ", ".join(kept) if kept else "none"
+    return hashlib.sha256(
+        f"{msg['conversationId']}|{msg['at'][:19]}|{msg['text'].strip().lower()}".encode()).hexdigest()[:20]
 
 
 def _matches(store: Store, sid: int) -> str:
@@ -137,7 +137,8 @@ def _tailor(store: Store, sid: int, out_dir: Path, posting_id: int) -> str:
     job = plan["job"]
     return (f"JobPilot: tailored resume ready for {clean(job['title'])}, {clean(job['company'])} (id {posting_id}).\n"
             f"Kept {kept} of your bullets, saved on your computer.\n"
-            f"Matches: {_kws(hint['keywords_matched'])}\nGaps: {_kws(hint['keywords_missing_from_resume'])}\n"
+            f"Job terms your resume already covers: {len(hint['keywords_matched'])}. "
+            f"Terms it lacks (not added): {len(hint['keywords_missing_from_resume'])}.\n"
             "Nothing was invented or sent.")
 
 
@@ -152,40 +153,67 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str) -> str:
     return _tailor(store, sid, out_dir, int(m.group(3)))
 
 
-def _load(path: Path) -> set[str]:
+SEEN_TTL = 72 * 3600          # the reader only looks back 48 hours
+
+
+def _load(path: Path) -> dict[str, float]:
     try:
-        return set(json.loads(path.read_text()))
+        raw = json.loads(path.read_text())
     except (OSError, ValueError):
-        return set()
+        return {}
+    if isinstance(raw, list):                                  # older format: a plain list of fingerprints
+        return {str(k): time.time() for k in raw}
+    return {str(k): float(v) for k, v in raw.items() if isinstance(v, (int, float))} if isinstance(raw, dict) else {}
 
 
-def _save(path: Path, seen: set[str]) -> None:
+def _save(path: Path, seen: dict[str, float]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(sorted(seen)[-500:]))
-    tmp.replace(path)
+    cutoff = time.time() - SEEN_TTL
+    fresh = {k: v for k, v in seen.items() if v >= cutoff}
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(fresh, fh)
+    os.replace(tmp, path)
+
+
+@contextmanager
+def _locked(path: Path):
+    """One poll at a time: overlapping polls would answer the same command twice."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _safe_reply(store: Store, sid: int, out_dir: Path, text: str) -> str:
+    try:
+        return reply_for(store, sid, out_dir, text)
+    except Exception as exc:  # noqa: BLE001 - one bad command must not block the inbox
+        return f"JobPilot: that command failed ({type(exc).__name__})."
 
 
 def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_path: Path,
               *, max_commands: int = MAX_COMMANDS) -> int:
-    """Returns how many commands were answered. Nothing is marked handled until the reply is delivered."""
-    seen = _load(state_path)
-    todo = []
-    for msg in reader.fetch():
-        if not msg["text"].strip().lower().startswith("jp"):
-            continue                      # the relay is not trusted to filter for us
-        fp = fingerprint(msg)
-        if fp not in seen and all(fp != t[0] for t in todo):
-            todo.append((fp, msg["text"]))
-    todo = todo[:max_commands]
-    if not todo:
-        return 0
-    replies = [reply_for(store, seeker_id, out_dir, text) for _, text in todo]
-    body = "\n\n".join(replies if len(replies) == 1 else [f"{i}) {r}" for i, r in enumerate(replies, 1)])
-    send(None, body)                      # raises unless Fo confirms; then nothing below runs
-    seen.update(fp for fp, _ in todo)
-    _save(state_path, seen)
-    return len(todo)
+    """Returns how many commands were answered. A command is marked handled only after ITS reply was delivered."""
+    with _locked(state_path):
+        seen = _load(state_path)
+        todo: list[tuple[str, str]] = []
+        for msg in reader.fetch():
+            if not re.match(r"^\s*jp\b", msg["text"], re.IGNORECASE):
+                continue                  # the relay is not trusted to filter for us
+            fp = fingerprint(msg)
+            if fp not in seen and all(fp != t[0] for t in todo):
+                todo.append((fp, msg["text"]))
+        done = 0
+        for fp, text in todo[:max_commands]:
+            send(None, _safe_reply(store, seeker_id, out_dir, text))   # raises unless Fo confirms
+            seen[fp] = time.time()
+            _save(state_path, seen)
+            done += 1
+        return done
 
 
 def main() -> int:
@@ -205,6 +233,9 @@ def main() -> int:
     store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
     try:
         store.migrate()
+        if not any(x.id == cfg.fo_seeker_id for x in store.list_seekers()):
+            print("fo inbox: [fo] seeker_id is not an active seeker")
+            return 2
         client = make_fo_client(cfg, args.claude)
         if client is None:
             print("fo inbox: no Fo transport available")
@@ -214,8 +245,8 @@ def main() -> int:
                       home / "data" / "fo_inbox_seen.json")
         print(f"fo inbox: answered {n} command(s)")
         return 0
-    except FoError as exc:
-        print(f"fo inbox: {exc}")
+    except Exception as exc:  # noqa: BLE001 - report, exit non-zero, never traceback into a scheduler log
+        print(f"fo inbox: {type(exc).__name__}: {exc}")
         return 1
     finally:
         store.close()

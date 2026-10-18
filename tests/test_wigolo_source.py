@@ -35,7 +35,7 @@ def test_wigolo_runs_as_argv_process_and_normalizes_json():
     assert raw == 1 and found[0].external_id == "w1"
     assert calls[0][0] == [
         "wigolo-wrapper", "--url", "https://careers.example.test",
-        "--query", "analyst", "--format", "json", "--location", "Austin",
+        "--query=analyst", "--format", "json", "--location=Austin",
     ]
     assert calls[0][1]["check"] is False
     assert calls[0][1]["timeout"] == 30.0

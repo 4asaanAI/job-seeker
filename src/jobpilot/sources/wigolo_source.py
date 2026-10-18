@@ -58,9 +58,9 @@ class WigoloSource:
         base = [part.replace("{python}", sys.executable).replace("{home}", home)
                 for part in self.cfg.command]
         command = [*base, "--url", self.cfg.endpoint,
-                   "--query", term, "--format", "json"]
+                   f"--query={term}", "--format", "json"]
         if location:
-            command.extend(["--location", location])
+            command.append(f"--location={location}")
         completed = self._runner(
             command, capture_output=True, text=True, check=False,
             timeout=self.cfg.fetch_timeout_seconds,

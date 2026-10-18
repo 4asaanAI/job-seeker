@@ -526,6 +526,23 @@ def test_real_fo_reply_shape_text_block_with_json_inside():
 
 # ---- headless claude transport ------------------------------------------
 
+def stream(*calls):
+    """stream-json lines for a headless session: calls = (tool_name, result_dict) pairs."""
+    lines = []
+    for i, (name, result) in enumerate(calls):
+        lines.append(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"t{i}", "name": name, "input": {}}]}}))
+        lines.append(json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"t{i}",
+             "content": [{"type": "text", "text": json.dumps(result)}]}]}}))
+    return "\n".join(lines) + "\n"
+
+
+ASK = "mcp__fo__ask_fo"
+GET = "mcp__fo__get_fo_reply"
+OK = stream((ASK, {"status": "complete", "response": "sent", "conversationId": "c"}))
+
+
 def relay(stdout="", code=0, boom=None):
     seen = {}
 
@@ -537,26 +554,39 @@ def relay(stdout="", code=0, boom=None):
     return runner, seen
 
 
-def test_claude_relay_complete_only_on_the_fixed_status_line():
+def test_claude_relay_is_isolated_and_complete_on_real_tool_evidence():
     from jobpilot.fo import ClaudeFoClient
-    runner, seen = relay("claude.ai connectors are disabled\nFO_STATUS: complete\n")
-    result = ClaudeFoClient(runner=runner).send("hello message")
-    assert result.status == "complete"
+    runner, seen = relay("claude.ai connectors are disabled\n" + OK)
+    assert ClaudeFoClient(runner=runner).send("hello message").status == "complete"
     cmd = seen["command"]
     assert cmd[0] == "claude" and "-p" in cmd and "--strict-mcp-config" in cmd
-    assert cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--tools") + 1] == "" and cmd[cmd.index("--setting-sources") + 1] == "user"
     assert cmd[cmd.index("--allowedTools") + 1] == "mcp__fo__ask_fo,mcp__fo__get_fo_reply"
-    assert "--max-budget-usd" in cmd and "hello message" in cmd[-1]
+    assert "mcp__fo__start_fo_call" in cmd[cmd.index("--disallowedTools") + 1]
+    assert "stream-json" in cmd and "--max-budget-usd" in cmd and "hello message" in cmd[-1]
     assert "https://mcp.api.wajo.ai/fo" in cmd[cmd.index("--mcp-config") + 1]
+    repo = str(Path(__file__).resolve().parents[1])
+    assert seen["kw"]["cwd"] != repo and "jobpilot-relay-" in seen["kw"]["cwd"]
 
 
-@pytest.mark.parametrize("out,code", [("FO_STATUS: failed\n", 0), ("all done!\n", 0),
-                                      ("FO_STATUS: complete\nthen more text\n", 0),
-                                      ("FO_STATUS: complete\n", 1), ("", 0)])
+@pytest.mark.parametrize("out,code", [
+    ("FO_STATUS: complete\n", 0),                                    # the model's words alone are not evidence
+    (stream((ASK, {"status": "failed"})), 0),
+    (stream((ASK, {"status": "working"})), 0),
+    (stream((ASK, {"status": "working"}), (GET, {"status": "failed"})), 0),
+    (stream((GET, {"status": "complete"})), 0),                       # never asked Fo
+    (stream(("mcp__fo__list_fo_conversations", {"status": "complete"})), 0),
+    (OK, 1), ("", 0)])
 def test_claude_relay_anything_else_is_not_delivered(out, code):
     from jobpilot.fo import ClaudeFoClient
     runner, _ = relay(out, code)
     assert ClaudeFoClient(runner=runner).send("m").status == "failed"
+
+
+def test_claude_relay_working_then_complete_counts():
+    from jobpilot.fo import ClaudeFoClient
+    runner, _ = relay(stream((ASK, {"status": "working"}), (GET, {"status": "complete"})))
+    assert ClaudeFoClient(runner=runner).send("m").status == "complete"
 
 
 def test_claude_relay_timeout_is_not_delivered_and_missing_binary_raises():
@@ -572,7 +602,7 @@ def test_claude_relay_timeout_is_not_delivered_and_missing_binary_raises():
 def test_claude_relay_env_has_no_fo_key_and_url_is_pinned(monkeypatch):
     from jobpilot.fo import ClaudeFoClient
     monkeypatch.setenv("FO_API_KEY", KEY)
-    runner, seen = relay("FO_STATUS: complete\n")
+    runner, seen = relay(OK)
     ClaudeFoClient(runner=runner).send("m")
     assert "FO_API_KEY" not in seen["kw"]["env"]
     with pytest.raises(ValueError):
@@ -586,7 +616,7 @@ def test_claude_relay_through_the_ledger_records_only_when_confirmed(store):
     bad, _ = relay("nope\n")
     assert notify.push_digests(store, fo_sender(ClaudeFoClient(runner=bad)), **kw) == 0
     assert len(store.notifiable_postings(sid, 70.0, 5)) == 1
-    good, _ = relay("FO_STATUS: complete\n")
+    good, _ = relay(OK)
     assert notify.push_digests(store, fo_sender(ClaudeFoClient(runner=good)), **kw) == 1
     assert store.notifiable_postings(sid, 70.0, 5) == []
 
@@ -624,3 +654,21 @@ def test_deliver_only_skips_discovery_and_scoring(store, tmp_path, monkeypatch, 
                                      "--db", str(tmp_path / "t.db")])
     assert sched.main() == 0
     assert "fo digests sent: 1" in capsys.readouterr().out
+
+
+# ---- review fixes: clean() probes -----------------------------------------
+
+@pytest.mark.parametrize("attack", ["Visit evil.co/x9 today", "Wire 500 USD to acct", "S.e.n.d resume to boss",
+                                    "e mail cv", "Phone 5550100123 urgent", "Pay via Venmo", "Click here to apply",
+                                    "Node.js Developer at evil.com", "Download the app and install", "Send resume"])
+def test_clean_withholds_more_attack_shapes(attack):
+    assert clean(attack) == "[withheld]", attack
+
+
+@pytest.mark.parametrize("ok", ["Senior Product Manager", "Product Manager (Remote)", "Analyst, Fintech", "Sr. Product Manager II"])
+def test_clean_keeps_ordinary_titles(ok):
+    assert clean(ok) == ok
+
+
+def test_clean_turns_slashes_into_spaces_not_urls():
+    assert clean("Senior PM / PM - Platform") == "Senior PM PM - Platform"

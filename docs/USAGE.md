@@ -15,8 +15,8 @@ infer an API URL from a careers page.
 From the repository root:
 
 ```bash
-/Users/abhimanyusingh/miniforge3/envs/jobpilot/bin/python -m pytest -q -p no:cacheprovider
-/Users/abhimanyusingh/miniforge3/envs/jobpilot/bin/python scripts/demo.py
+python -m pytest -q -p no:cacheprovider
+python scripts/demo.py
 ```
 
 The demo uses a throwaway database and captured Indeed rows. It does not make
@@ -27,7 +27,7 @@ network requests, touch real seeker profiles, or send Telegram messages.
 Use a real Terminal window, not a non-interactive shell:
 
 ```bash
-/Users/abhimanyusingh/miniforge3/envs/jobpilot/bin/python scripts/demo.py --live
+python scripts/demo.py --live
 ```
 
 This path is deliberately limited to the enabled Indeed sources, caps the

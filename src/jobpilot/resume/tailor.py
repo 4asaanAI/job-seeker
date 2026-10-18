@@ -46,6 +46,8 @@ def suggest(base: BaseResume, title: str, description: str, max_bullets: int = 4
                                        *base.skills])))
     bullet_order = {}
     for exp in base.experience:
+        if not exp.bullets:
+            continue                       # nothing to select; render keeps the entry as is
         ranked = sorted(enumerate(exp.bullets), key=lambda ib: (-_score(ib[1][1], keywords), ib[0]))
         keep = [bid for _, (bid, _t) in ranked[:max(1, max_bullets)]]
         bullet_order[exp.id] = keep

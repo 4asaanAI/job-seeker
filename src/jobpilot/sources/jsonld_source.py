@@ -129,7 +129,10 @@ def _location(value: Any) -> str:
 
 def _to_posting(item: dict[str, Any], cfg: StructuredConfig) -> Posting | None:
     url = safe_url(_text(item.get("url")))
-    identifier = _text(item.get("identifier"))
+    raw_id = item.get("identifier")
+    if isinstance(raw_id, dict):          # schema.org PropertyValue: {"name": <company>, "value": <job id>}
+        raw_id = raw_id.get("value") if raw_id.get("value") not in (None, "") else raw_id.get("name")
+    identifier = _text(raw_id)
     if not identifier and url:
         identifier = "url:" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
     title = _text(item.get("title"))

@@ -27,3 +27,4 @@ tests/fixtures/live/
 2026-09-19-143438-local-command-caveatcaveat-the-messages-below.txt
 .mcp.json
 data/fo_inbox_seen.json
+.mcp.fo-demo.json

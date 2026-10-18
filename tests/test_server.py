@@ -398,3 +398,19 @@ def test_tailor_resume_suggests_renders_and_remembers_the_selection(tmp_path, mo
     assert tools["render_resume"](sid, pid, None, None, {"current": ["nope"]})["ok"] is False
     assert tools["tailor_resume"](sid, pid + 99)["ok"] is False
     store.close()
+
+
+def test_build_fo_message_refuses_other_seekers_in_operator_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        '[paths]\ndata_dir="data"\nout_dir="out"\n[limits]\nscore_batch=40\nmin_request_gap_seconds=4.0\n'
+        '[fo]\nenabled=true\nseeker_id=1\n', encoding="utf-8")
+    tools, store = _tools(tmp_path)
+    a, pa = _seeker_with_resume(tmp_path, store, name="A", ext="A1")
+    b, pb = _seeker_with_resume(tmp_path, store, name="B", tid=2, ext="B1")
+    store.record_score(a, pa, 90.0, "ok", "t")
+    store.record_score(b, pb, 90.0, "ok", "t")
+    assert tools["build_fo_message"](a)["ok"] is True
+    other = tools["build_fo_message"](b)
+    assert other["ok"] is False and "different seeker" in other["error"]
+    store.close()

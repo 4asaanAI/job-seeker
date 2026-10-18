@@ -90,3 +90,14 @@ def test_docx_renders_selected_bullets_and_passes_the_fact_check(base, tmp_path)
 def test_bad_bullet_selections_are_refused(base, bad):
     with pytest.raises(ValueError):
         render_text(base, bullet_order=bad)
+
+
+def test_experience_without_bullets_does_not_break_tailoring(tmp_path):
+    f = tmp_path / "base.yaml"
+    f.write_text(RESUME.replace("  - id: beta\n    employer: Beta\n    title: Intern\n    dates: 2021\n    bullets:\n      - {id: b1, text: Prepared weekly reports}\n",
+                                "  - id: beta\n    employer: Beta\n    title: Intern\n    dates: 2021\n    bullets: []\n"), encoding="utf-8")
+    base = load_base_resume(f)
+    s = suggest(base, JOB_TITLE, JOB_DESC)
+    assert "beta" not in s["bullet_order"]
+    out = tmp_path / "r.docx"
+    assert render_docx(base, out, bullet_order=s["bullet_order"]).ok

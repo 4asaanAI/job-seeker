@@ -26,7 +26,7 @@ from .resume import (
     render_text,
     unverified_facts,
 )
-from .fo import render_fo_digest, render_fo_followups, wrap
+from .fo import MAX_MESSAGE, render_fo_digest, render_fo_followups, wrap
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
 from .sheets import GoogleSheetsExporter, load_google_services
@@ -351,6 +351,14 @@ def build_tools(
         """
         try:
             sid = _check(seeker_id)
+            if pinned_seeker_id is None:
+                # One Fo account serves one person: an unpinned operator session must not build another seeker's message.
+                try:
+                    configured = load_config().fo_seeker_id
+                except (OSError, ValueError, KeyError):
+                    configured = None
+                if configured is not None and sid != configured:
+                    raise PermissionError("Fo is linked to a different seeker; refusing to build this message")
             if kind == "digest":
                 digest = render_fo_digest(store, sid, min_score, limit)
                 text = digest.text
@@ -366,6 +374,8 @@ def build_tools(
         if not record_after:
             return {"ok": True, "seeker_id": sid, "message": None,
                     "note": "Nothing new to send."}
+        if len(text) > MAX_MESSAGE:
+            return {"ok": False, "error": "message too long; lower the limit"}
         return {"ok": True, "seeker_id": sid, "message": wrap(text),
                 "record_after": record_after,
                 "note": "Pass message to ask_fo unchanged, with the user's approval."}
@@ -1051,6 +1061,9 @@ def main() -> None:
     if pin is not None and not pin.strip():
         # An unset-looking pin must never silently widen a session to every seeker.
         raise SystemExit("JOBPILOT_SEEKER_ID is set but empty: refusing to run unpinned")
+    onboard_env = os.environ.get("JOBPILOT_ONBOARD_TELEGRAM_ID")
+    if onboard_env is not None and not onboard_env.strip():
+        raise SystemExit("JOBPILOT_ONBOARD_TELEGRAM_ID is set but empty: refusing to serve the operator tools")
     from fastmcp import FastMCP
 
     home = jobpilot_home()

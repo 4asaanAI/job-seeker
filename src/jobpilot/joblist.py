@@ -17,6 +17,14 @@ COLUMNS = (("Fit score", 10), ("Job title", 42), ("Company", 26), ("Location", 2
            ("My status", 14), ("Link", 10))
 
 
+
+def _inert(value):
+    """Prefix a leading = + - @ tab or CR with an apostrophe so Excel/Sheets treat it as text, not a formula."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def job_rows(store: Store, seeker_id: int, days: int = MAX_AGE_DAYS) -> list[dict]:
     """Jobs still seen within `days`, scored first (high to low), then unrated."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -53,6 +61,7 @@ def write_job_list(store: Store, seeker_id: int, path: Path,
     ws = wb.active
     ws.title = "Jobs"
     ws.append([name for name, _ in COLUMNS])
+    _txt = _inert  # scraped text must never become a live spreadsheet formula
     for i, (_, width) in enumerate(COLUMNS, start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = width
         ws.cell(1, i).font = Font(bold=True, color="FFFFFF")
@@ -64,11 +73,11 @@ def write_job_list(store: Store, seeker_id: int, path: Path,
         url = safe_url(r["canonical_url"] or r["source_url"] or "")
         ws.append([
             round(score) if score is not None else None,
-            r["title"], r["company_name"], r["location"] or "",
+            _txt(r["title"]), _txt(r["company_name"]), _txt(r["location"] or ""),
             (r["posted_at"] or "")[:10], (r["first_seen_at"] or "")[:10],
-            (r["sources"] or "").replace(",", ", "),
-            r["reasoning"] if score is not None else "Not rated yet",
-            r["applied"] or "", "Open" if url else "",
+            _txt((r["sources"] or "").replace(",", ", ")),
+            _txt(r["reasoning"]) if score is not None else "Not rated yet",
+            _txt(r["applied"] or ""), "Open" if url else "",
         ])
         n = ws.max_row
         if url:

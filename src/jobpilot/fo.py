@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -175,36 +176,85 @@ class ClaudeFoClient:
         config = json.dumps({"mcpServers": {"fo": {"type": "http", "url": self._url}}})
         command = [self._claude, "-p", "--no-session-persistence", "--strict-mcp-config",
                    "--mcp-config", config, "--tools", "", "--disable-slash-commands",
+                   "--setting-sources", "user",
                    "--allowedTools", "mcp__fo__ask_fo,mcp__fo__get_fo_reply",
+                   "--disallowedTools", "mcp__fo__start_fo_call,mcp__fo__list_fo_conversations,"
+                                        "mcp__fo__get_fo_conversation",
+                   "--output-format", "stream-json", "--verbose",
                    "--model", self._model, "--max-budget-usd", str(self._budget),
                    self._prompt(message)]
         try:
-            done = self._run(command, input="", capture_output=True, text=True, encoding="utf-8",
-                             timeout=self._timeout, check=False, env=child_env())
+            # A neutral cwd: a project's own .claude/settings must not widen what this session may call.
+            with tempfile.TemporaryDirectory(prefix="jobpilot-relay-") as neutral:
+                done = self._run(command, input="", capture_output=True, text=True, encoding="utf-8",
+                                 timeout=self._timeout, check=False, env=child_env(), cwd=neutral)
         except subprocess.TimeoutExpired:
             return FoResult("working", "headless relay timed out")
         except OSError as exc:
             raise FoError(f"cannot start claude: {type(exc).__name__}") from None
-        lines = [ln.strip() for ln in (done.stdout or "").splitlines() if ln.strip()]
-        if done.returncode == 0 and lines and lines[-1] == self.OK:
+        if done.returncode == 0 and fo_confirmed_complete(done.stdout or ""):
             return FoResult("complete", "headless claude relay")
         return FoResult("failed", f"headless relay did not confirm (exit {done.returncode})")
 
 
-_SAFE = re.compile(r"[^A-Za-z0-9 .,&()/-]")
-# Punctuation stripping cannot stop a sentence, so text that reads like an
-# instruction to an assistant is withheld outright. Residual risk is documented.
+def _tool_text(block: dict) -> str:
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict))
+
+
+def fo_confirmed_complete(stream_json: str) -> bool:
+    """True only if the session's own transcript shows ask_fo was called and the LAST Fo tool result says
+    status complete. The model's closing words are never trusted: it could print success without calling Fo."""
+    names: dict[str, str] = {}
+    asked, last = False, None
+    for line in stream_json.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        content = (event.get("message") or {}).get("content") if isinstance(event, dict) else None
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                names[block.get("id", "")] = block.get("name", "")
+            elif block.get("type") == "tool_result":
+                name = names.get(block.get("tool_use_id", ""), "")
+                if name not in ("mcp__fo__ask_fo", "mcp__fo__get_fo_reply"):
+                    continue
+                try:
+                    data = json.loads(_tool_text(block))
+                except ValueError:
+                    continue
+                if isinstance(data, dict) and isinstance(data.get("status"), str):
+                    asked = asked or name == "mcp__fo__ask_fo"
+                    last = data["status"]
+    return asked and last == "complete"
+
+
+_SAFE = re.compile(r"[^A-Za-z0-9 .,&()-]")
+# Punctuation stripping cannot stop a sentence, so text that reads like an instruction to an assistant, a
+# domain, a long number or a payment/credential word is withheld outright. Residual risk is documented.
 _INSTRUCTION = re.compile(
     r"ignore|instruction|previous|forget|disregard|system|prompt|assistant|\bfo\b|"
     r"e-?mail|\bcall|\bbuy|purchas|\bsend|forward|\btext\b|\bpay|transfer|"
-    r"password|secret|delete|\breply|\bplease\b|\bmust\b|\bnow\b|http|www", re.I)
+    r"password|secret|delete|\breply|\bplease\b|\bmust\b|\bnow\b|http|www|"
+    r"\bwire\b|venmo|zelle|paypal|crypto|bitcoin|wallet|\bdial\b|\bvisit\b|\bclick\b|download|install|"
+    r"invoice|credential|\bssn\b|\botp\b|gift\s*cards?|\bacct\b", re.I)
+_DOMAIN = re.compile(r"[a-z0-9]\.[a-z]{2,}", re.I)
+_SQUEEZED = re.compile(r"ignore|instruction|email|send|forward|password|previous")
 
 
 def clean(text: object, limit: int = 50) -> str:
-    """Short, allow-listed characters only; anything that reads like an instruction
-    or does not fit is replaced by a placeholder rather than trimmed."""
-    out = _SAFE.sub("", " ".join(str(text).split())).strip()
-    if not out or len(out) > limit or _INSTRUCTION.search(out):
+    """Short, allow-listed characters only; anything that reads like an instruction, a domain or a long
+    number, or does not fit, is replaced by a placeholder rather than trimmed."""
+    raw = " ".join(str(text).replace("/", " ").split())
+    out = _SAFE.sub("", raw).strip()
+    letters = re.sub(r"[^a-z0-9]", "", out.lower())
+    if (not out or len(out) > limit or _INSTRUCTION.search(out) or _DOMAIN.search(out)
+            or re.search(r"\d{7,}", out.replace(" ", "")) or _SQUEEZED.search(letters)):
         return "[withheld]"
     return out
 

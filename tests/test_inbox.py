@@ -109,6 +109,7 @@ def test_tailor_replies_with_counts_and_vetted_keywords_and_no_path(demo):
     run(demo, Reader([msg(f"jp tailor {ids[0]}")]), sent)
     text = sent[0]
     assert "tailored resume ready" in text and "Kept " in text and "Nothing was invented or sent." in text
+    assert "Terms it lacks (not added)" in text and "kubernetes" not in text.lower() and "sql" not in text.lower()
     assert "/" not in text and "ignore" not in text.lower() and "instructions" not in text.lower()
     assert list(out.rglob("resume-*.docx"))                      # the DOCX exists locally
 
@@ -138,6 +139,8 @@ def test_reader_command_allows_only_the_two_read_tools(monkeypatch):
     assert inbox.ClaudeReader(runner=runner).fetch() == []
     cmd = seen["cmd"]
     assert cmd[cmd.index("--allowedTools") + 1] == "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
+    assert "mcp__fo__ask_fo" in cmd[cmd.index("--disallowedTools") + 1]
+    assert cmd[cmd.index("--setting-sources") + 1] == "user" and seen["kw"]["cwd"] != str(Path(__file__).resolve().parents[1])
     assert "--strict-mcp-config" in cmd and cmd[cmd.index("--tools") + 1] == ""
     assert "FO_API_KEY" not in seen["kw"]["env"]
     with pytest.raises(ValueError):
@@ -156,3 +159,66 @@ def test_nonzero_exit_raises_fo_error():
     nonzero = lambda command, **kw: SimpleNamespace(returncode=2, stdout="", stderr="")  # noqa: E731
     with pytest.raises(FoError):
         inbox.ClaudeReader(runner=nonzero).fetch()
+
+
+def test_jpeg_is_not_a_command(demo):
+    sent = []
+    assert run(demo, Reader([msg("jpeg attached"), msg("JPMorgan news", at="2026-10-18T05:01:00Z")]), sent) == 0
+    assert sent == []
+
+
+def test_each_command_is_marked_only_after_its_own_reply(demo):
+    store, sid, ids, out, state = demo
+    calls = []
+
+    def flaky(to, text):
+        calls.append(text)
+        if len(calls) == 2:
+            raise FoError("down")
+    batch = [msg("jp status", at="2026-10-18T05:00:00Z"), msg("jp matches", at="2026-10-18T05:01:00Z")]
+    with pytest.raises(FoError):
+        inbox.poll_once(store, sid, out, Reader(batch), flaky, state)
+    seen = inbox._load(state)
+    assert len(seen) == 1                                   # the first reply landed, the second will retry
+    sent = []
+    assert inbox.poll_once(store, sid, out, Reader(batch), lambda to, tx: sent.append(tx), state) == 1
+    assert "top matches" in sent[0]
+
+
+def test_one_failing_command_gets_a_short_error_not_a_stuck_inbox(demo, monkeypatch):
+    store, sid, ids, out, state = demo
+    monkeypatch.setattr(inbox, "_matches", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    sent = []
+    assert run(demo, Reader([msg("jp matches")]), sent) == 1
+    assert "that command failed" in sent[0] and "boom" not in sent[0]
+
+
+def test_seen_state_is_pruned_by_age_and_survives_legacy_and_corrupt_files(tmp_path):
+    import time
+    path = tmp_path / "seen.json"
+    inbox._save(path, {"old": time.time() - 10 * 24 * 3600, "new": time.time()})
+    assert set(inbox._load(path)) == {"new"}
+    path.write_text('["a", "b"]')
+    assert set(inbox._load(path)) == {"a", "b"}             # legacy list format
+    path.write_text("{not json"); assert inbox._load(path) == {}
+    path.write_text('{"x": "oops", "y": 5}'); assert set(inbox._load(path)) == {"y"}
+
+
+def test_polls_are_serialized_by_a_lock_and_temp_files_are_unique(demo, tmp_path):
+    import threading
+    store, sid, ids, out, state = demo
+    order = []
+
+    class Slow(Reader):
+        def fetch(self):
+            order.append("start")
+            import time as _t
+            _t.sleep(0.2)
+            order.append("end")
+            return [msg("jp status")]
+    sent = []
+    ts = [threading.Thread(target=lambda: inbox.poll_once(store, sid, out, Slow([]), lambda to, t: sent.append(t), state))
+          for _ in range(2)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert order == ["start", "end", "start", "end"] and len(sent) == 1   # second poll saw the first one's result
+    assert not list(tmp_path.glob("seen.json*.tmp"))

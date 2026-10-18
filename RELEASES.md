@@ -45,7 +45,7 @@ suite green".
 - Pinned dependency: `python-jobspy` at commit fda080a373e8226f3fd60635323f5da9af9892b1.
 
 ### Gate evidence
-- Full suite: `/Users/abhimanyusingh/miniforge3/envs/jobpilot/bin/python -m pytest -q` -> 138 passed.
+- Full suite: `python -m pytest -q` -> 138 passed.
 - Real JobSpy capture: `tests/fixtures/jobspy_indeed_us.json`, 10 live Indeed US rows (redacted for
   emails and phones inside the capture script). Verified against real data: id, site, date_posted
   types, description populated 10/10, one row with no company correctly rejected (9 postings).
