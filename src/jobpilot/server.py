@@ -346,7 +346,7 @@ def build_tools(
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "seeker_id": sid, "text": digest.text,
-                "posting_ids": list(digest.posting_ids), "recorded": digest.recorded}
+                "posting_ids": list(digest.posting_ids), "recorded": digest.recorded, "note": UNTRUSTED}
 
     def _fo_seeker_guard(sid: int) -> None:
         """One Fo account serves one person: an unpinned operator session must not build another seeker's message."""
@@ -488,7 +488,7 @@ def build_tools(
         try:
             sid = _check(seeker_id)
             return {"ok": True, "seeker_id": sid,
-                    "items": store.seeker_history(sid, query, limit)}
+                    "items": store.seeker_history(sid, query, limit), "note": UNTRUSTED}
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -895,7 +895,7 @@ def build_tools(
         try:
             sid = _check(seeker_id)
             return {"ok": True, "seeker_id": sid,
-                    "items": store.pending_followups(sid, limit)}
+                    "items": store.pending_followups(sid, limit), "note": UNTRUSTED}
         except (PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 

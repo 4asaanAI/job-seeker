@@ -17,8 +17,8 @@ Not fixed, with the honest impact:
 | Shared employer feeds | Feeds found for one seeker are stored globally and listed to all seekers. | Reveals which employers someone targets; stored names are seeker-supplied. |
 | Profile folders | Two profiles in one folder share resume, rubric and uploads. | Operator error only; the bot creates one folder per seeker. |
 | Source health | A single-seeker search records counts used for the "degraded" median. | Can mislabel a source as degraded. |
-| Schema migration | `migrate()` re-parses postings on every server start. | Slower starts with a large database. |
+| Schema migration | `migrate()` re-checks every posting on each start by design, so a half-finished upgrade repairs itself. | Slower starts with a large database. |
 | `ask_fo` is not idempotent | A send that times out may still complete; the next run can duplicate a text. | A duplicate text, never a lost digest. |
-| Untrusted-data notes | A few tools (`get_notifiable`, `my_history`, `get_followups`) return scraped text without the note. | The model is still told scraped text is untrusted elsewhere. |
+| Untrusted-data notes | `get_notifiable` returns a bare list, so it cannot carry the note. | The model is told scraped text is untrusted by the other tools and the system prompt. |
 
 Git history still contains a third party's first name from early commits; it was removed from the current tree.
