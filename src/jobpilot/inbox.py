@@ -48,6 +48,7 @@ GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s
                      re.IGNORECASE)
 MAX_COMMANDS = 3
 MAX_OPEN_CODES = 3
+MAX_DAILY_GOOGLE = 10
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
 HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id>"
 
@@ -237,6 +238,9 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
         return "JobPilot: Google is off. Set [google] enabled = true to use jp sync and jp doc."
     if apply_client is None:
         return "JobPilot: no Fo transport is available."
+    if store.event_count_since(sid, "phone_google", 24) >= MAX_DAILY_GOOGLE:
+        return "JobPilot: today's limit of Google requests by text is reached. Try again tomorrow."
+    store.record_event("phone_google", "sync" if doc is None else f"doc {doc}", sid)
     if doc is None:
         result = google.send_tracker(store, sid, apply_client)
         if result is None:

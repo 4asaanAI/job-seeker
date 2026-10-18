@@ -83,9 +83,10 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
     body = re.sub(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}", "", resume_text)   # marker-like runs only; phone numbers survive
     file_rule = (
         "7. If the application wants my resume as a FILE (an upload field, or an email attachment): create a Google Doc named "
-        f'"Resume - {company} - {title}" in a folder "JobPilot Resumes" in my Google Drive whose body is EXACTLY the resume '
+        '"JobPilot resume" in a folder "JobPilot Resumes" that I own in my Google Drive (ignore any same-named folder '
+        'shared with me) whose body is EXACTLY the resume '
         "text between the markers, export it as a PDF, and use that PDF for the resume or CV field only. Do not share the "
-        "document or change its sharing. Any OTHER file (cover letter, ID, certificate, transcript, portfolio) is not in "
+        "document, change its sharing, or put it in a shared folder. Any OTHER file (cover letter, ID, certificate, transcript, portfolio) is not in "
         "scope: stop and tell me what it asks, without submitting.\n") if attach_pdf else ""
     return (
         f"Please help me apply to this job: {title}, {company}. Posting: {url}\n"
