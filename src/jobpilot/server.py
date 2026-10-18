@@ -680,6 +680,14 @@ def build_tools(
                     "bullets and skills. Do not add wording, numbers or experience that is not in resume_facts.",
         }
 
+    def _selection(base, posting, experience_order, skills, bullet_order):
+        """The user's explicit selection, or else this job's facts-only tailoring (so no application goes out untailored)."""
+        if experience_order is None and skills is None and bullet_order is None:
+            hint = suggest_tailoring(base, posting["title"] or "", posting["description"] or "")
+            return (hint["experience_order"], hint["skills"], hint["bullet_order"],
+                    hint["keywords_missing_from_resume"])
+        return experience_order, skills, bullet_order, []
+
     def apply_candidates(seeker_id: int, limit: int = 10, min_score: float = 70.0) -> dict:
         """List your best-scoring jobs that Fo can most plausibly apply to, easiest route first. READ ONLY.
 
@@ -807,6 +815,7 @@ def build_tools(
             if names is None:
                 raise ValueError("this posting's title or company looks unsafe; apply to it by hand")
             base = load_base_resume(_base_resume_path(sid))
+            experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
             message = apply_message(names[0], names[1], link, text, approved=batch_approved)
             if batch_approved:
@@ -817,7 +826,8 @@ def build_tools(
             return {"ok": False, "error": str(exc)}
         route, route_note = classify_route(link)
         return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
-                "route": route, "route_note": route_note,
+                "route": route, "route_note": route_note, "tailored_to_job": True,
+                "job_terms_missing_from_resume": gaps,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}
 
@@ -971,6 +981,7 @@ def build_tools(
                     raise ValueError("the closing date for this job has passed")
             posting = {**posting, "url": vetted_job_url(posting["url"])}      # an unsafe link is dropped, never passed on
             base = load_base_resume(_base_resume_path(sid))
+            experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills,
                                bullet_order=bullet_order)
         except (OSError, PermissionError, ValueError) as exc:
@@ -979,7 +990,7 @@ def build_tools(
             "ok": True, "seeker_id": sid, "posting_id": int(posting_id),
             "job": {"title": posting["title"], "company": posting["company_name"],
                     "url": posting["url"]},
-            "resume_text": text,
+            "resume_text": text, "job_terms_missing_from_resume": gaps,
             "note": "Nothing was sent. Get the user's explicit yes for this one application first.",
         }
 

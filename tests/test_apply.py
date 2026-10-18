@@ -278,3 +278,15 @@ def test_plan_ids_survive_a_server_restart(tmp_path):
     second = build_tools(store, tmp_path / "d" / "out", pinned_seeker_id=sid, operator_mode=False)   # "restarted" server
     assert second["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=plan)["ok"]
     store.close()
+
+
+def test_apply_message_is_tailored_to_the_job_by_default(env):
+    store, sid, ids, tools = env
+    https_link(store, ids[0])
+    out = tools["build_fo_apply_message"](sid, ids[0])
+    assert out["ok"] and out["tailored_to_job"] is True
+    assert isinstance(out["job_terms_missing_from_resume"], list)
+    prep = tools["prepare_application"](sid, ids[0])
+    assert prep["ok"] and "job_terms_missing_from_resume" in prep
+    explicit = tools["prepare_application"](sid, ids[0], skills=[])
+    assert explicit["ok"] and explicit["job_terms_missing_from_resume"] == []     # an explicit choice is respected
