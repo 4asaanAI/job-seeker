@@ -2,36 +2,32 @@
 
 **Date:** 2026-09-19
 **Status:** Awaiting review
-**Owner:** Abhimanyu Singh (operator) — built on behalf of Alex (job seeker)
+**Owner:** Abhimanyu Singh (operator) — built on behalf of the seeker (job seeker)
 
 ## 1. Context
 
-Alex is a Senior Merchandiser (Product Development) on the export-house
-side of apparel, based in Gurugram. She wants to move to the **brand / buying
-office side** of apparel sourcing.
+The first seeker is a Senior Merchandiser (Product Development) on the export-house side of apparel who wants to
+move to the **brand / buying-office side** of apparel sourcing.
 
-She is non-technical. She will never run a command or read a log. Abhimanyu
-operates the system on her behalf. She struggles to sustain a job search on her
-own, so the system must reduce the effort of applying to near zero and nudge
-proactively.
+They are non-technical and will never run a command or read a log, so the operator runs the system on their
+behalf. They struggle to sustain a job search on their own, so the system must reduce the effort of applying to
+near zero and nudge proactively.
 
-### Her profile (role-level facts only; personal details are kept out of this repository)
+### Seeker profile (role-level facts only; personal details are kept out of this repository)
 
 | Field | Value |
 |---|---|
 | Experience | About 4 years of product-development merchandising on the export-house side, single employer |
-| Accounts handled | Two named apparel brands, one US and one UK (the strongest targeting signal) |
+| Accounts handled | Two named apparel brands (the strongest targeting signal) |
 | Domain | Product development, costing & margin, TNA / critical path, sampling & approvals, vendor management, buyer communication |
-| Location | Gurugram, India |
 
-**Her two named-brand account experience is the strongest targeting signal in the
-profile.** Both maintain sourcing/buying offices in the Delhi NCR region. Job
-scoring weights account adjacency heavily.
+**The named-brand account experience is the strongest targeting signal in the profile.** Both brands maintain
+sourcing/buying offices. Job scoring weights account adjacency heavily.
 
 ## 2. Goals
 
-1. Find brand-side / buying-office merchandising roles she would not otherwise see.
-2. Produce a tailored, ATS-safe resume per role, ready before she is asked to act.
+1. Find brand-side / buying-office merchandising roles they would not otherwise see.
+2. Produce a tailored, ATS-safe resume per role, ready before they are asked to act.
 3. Track every company seen, scored, applied to, and responded to.
 4. Nudge proactively, and never confuse "no jobs" with "we are blocked".
 
@@ -83,7 +79,7 @@ Machine constraints carried over from `Machines/windows-desktop.md`:
 1. **Scheduled routine** - wakes on a cron, runs discovery, scores, tailors,
    writes the digest, exits. Needs no persistent session.
 2. **Live Telegram channel** - `claude --channels plugin:telegram@claude-plugins-official`
-   held open on the desktop. Alex DMs the bot; Claude answers in chat.
+   held open on the desktop. the seeker DMs the bot; Claude answers in chat.
 
 ### Hands (MCP servers)
 
@@ -102,8 +98,8 @@ Machine constraints carried over from `Machines/windows-desktop.md`:
 
 The official Anthropic plugin (`telegram@claude-plugins-official`, free, open
 source) rather than a custom bot. Access policy set to `allowlist` with
-Alex's numeric Telegram ID only. Claude gets `reply` (with file attachments
-up to 50MB, which is how tailored resumes reach her), `react`, `edit_message`.
+the seeker's numeric Telegram ID only. Claude gets `reply` (with file attachments
+up to 50MB, which is how tailored resumes reach their), `react`, `edit_message`.
 Known limitation: the bot has no message history or search, so all durable
 state must live in the JobPilot store, never in the chat.
 
@@ -116,10 +112,10 @@ strictly better than chat history for this purpose: it is queryable, it
 survives restarts and machine moves, and it can be audited when something looks
 wrong.
 
-The specific worry this addresses - re-notifying her about the same job every
+The specific worry this addresses - re-notifying their about the same job every
 day - is handled by a first-class `notifications` table. A job is eligible for
 notification only if no delivered row exists for it, or if a deliberate
-re-surfacing rule fires (the 3-day nudge in section 9). "We already told her
+re-surfacing rule fires (the 3-day nudge in section 9). "We already told their
 about this on this date" is stored as a fact, not inferred from a transcript.
 
 MemPalace is already installed on the desktop and remains the place for
@@ -131,7 +127,7 @@ in the store, because job state needs exact queries, not semantic recall.
 The desktop is primary. **The Mac is the fallback, not merely a watchdog.** If
 the desktop has not completed a run inside its expected window - most likely
 because a reboot left it at the BitLocker prompt - the Mac's scheduled run
-executes the pipeline itself and alerts Abhimanyu that it did so. Alex's
+executes the pipeline itself and alerts Abhimanyu that it did so. the seeker's
 digests keep arriving through an outage rather than stopping silently.
 
 This requires shared state across two machines. The store is therefore
@@ -141,7 +137,7 @@ pattern already proven by the memory vault. Each run pulls before starting and
 pushes after finishing. The data is append-mostly and every row is keyed by
 `(source, external_id)`, so conflicts are rare and resolvable by timestamp.
 
-**Open decision for the operator:** whether her resume and profile go in that
+**Open decision for the operator:** whether their resume and profile go in that
 private repo alongside the job state. Keeping them there makes the Mac fallback
 self-sufficient. Keeping them out means the fallback can discover and score but
 not tailor. Section 13's rule stands either way: this never goes near the
@@ -157,7 +153,7 @@ scheduled routine (desktop)
   -> Claude scores        -> store(fit_score, reasoning)
   -> Claude tailors top N -> validation gate -> render -> extraction gate -> file
   -> digest
-  -> Telegram push (M3) -> her action -> store
+  -> Telegram push (M3) -> their action -> store
   -> stale items -> escalating nudges
 ```
 
@@ -182,7 +178,7 @@ feeds. Stable and cheap to parse.
 **Layer 3 — Aggregators via JobSpy** (`pip install python-jobspy`, MIT).
 Covers Naukri, Indeed (country_indeed=india), Glassdoor, Google Jobs, LinkedIn.
 Treated as supplementary; expected to degrade. LinkedIn runs at low frequency
-and never authenticated as her.
+and never authenticated as their.
 
 **Layer 4 — Playwright fallback.** Only for targets that cannot be served by
 layers 1-3. Slow and heavy; used sparingly and cached aggressively.
@@ -190,7 +186,7 @@ layers 1-3. Slow and heavy; used sparingly and cached aggressively.
 ### 5.2 Target company list
 
 A curated CSV of brand-side employers with a sourcing/buying presence in India,
-seeded around her accounts and expanding outward:
+seeded around their accounts and expanding outward:
 
 - **Tier 1 (account adjacency):** Ralph Lauren, Marks & Spencer
 - **Tier 2 (US/UK sourcing offices in NCR/Bangalore):** PVH, Levi's, Gap,
@@ -246,7 +242,7 @@ padding the list with poor matches to look productive.
 
 ## 5A. Multi-user
 
-Added 2026-09-19. Alex is the first seeker, not the only one. Several of the
+Added 2026-09-19. the seeker is the first seeker, not the only one. Several of the
 operator's friends need the same mechanism, so the system is multi-tenant from
 the start rather than retrofitted later.
 
@@ -347,12 +343,12 @@ This is enforced in the store layer, not left to callers.
 
 ## 7. Resume engine
 
-**Input:** `base_resume.yaml` — her resume as structured data, not a PDF.
+**Input:** `base_resume.yaml` — their resume as structured data, not a PDF.
 
 **Per job:** `brain.tailor(base_resume, job)` reframes export-side language into
 buying-office language. This is a genuine translation, not keyword insertion:
 "buyer PO execution and TNA follow-up" becomes "critical path ownership and
-supplier capability management". Her named-brand account experience is surfaced
+supplier capability management". Their named-brand account experience is surfaced
 first whenever the target is a US/UK brand.
 
 **Hard rule:** the tailoring layer may reframe, reorder and re-emphasise. It
@@ -363,11 +359,11 @@ factual claim is flagged for human review before the file is written.
 
 **Rendering: DOCX primary, PDF on demand.** Workday and Taleo parse .docx more
 reliably than PDF, because the text is already text with no glyph-positioning
-layer to misread. Her current PDF's character detachment is exactly that class
+layer to misread. Their current PDF's character detachment is exactly that class
 of failure. DOCX is the default deliverable; PDF is generated only when a portal
 requires it, and faces the same extraction gate.
 
-**Rendering rules (ATS-safe).** Her current PDF exhibits character-detachment under
+**Rendering rules (ATS-safe).** Their current PDF exhibits character-detachment under
 text extraction ("S ENIOR MERCHANDISER", "C osting"). Workday and Taleo will
 parse it the same way, and Taleo uses literal exact matching, so this plausibly
 suppresses keyword matches today. Requirements for the renderer:
@@ -377,7 +373,7 @@ suppresses keyword matches today. Requirements for the renderer:
 - Section headings from a conventional vocabulary (Experience, Education, Skills)
 - Dates in a single consistent parseable format
 - **Verification gate:** every generated PDF is re-extracted with `pypdf` and
-  the extracted text is asserted to contain her name, current title, both
+  the extracted text is asserted to contain their name, current title, both
   account names, and all employer names as contiguous strings. A PDF that
   fails re-extraction is never delivered.
 
@@ -396,13 +392,13 @@ tools directly.
 
 Consequences the operator has accepted:
 
-- All of Alex's usage draws on Abhimanyu's Claude subscription quota, shared
+- All of the seeker's usage draws on Abhimanyu's Claude subscription quota, shared
   with Layaa, eduflow and cockroach work. Batch sizes capped in config; the
   routine runs off-peak.
-- She is using his account. Anthropic ships multi-user allowlisting in the
+- They are using his account. Anthropic ships multi-user allowlisting in the
   official plugin, so this is a contemplated setup, but the account and the
   budget remain his responsibility.
-- She cannot run this herself without her own account.
+- They cannot run this herself without their own account.
 
 If the system later moves to a Linux VPS, the scheduled routine becomes either
 Claude Code authenticated on that box, or API calls with a hard spend cap. The
@@ -414,7 +410,7 @@ Notifications alone are a weak lever. The design removes activation energy and
 adds gentle accountability instead.
 
 1. **Nothing to start, only something to approve.** The tailored resume exists
-   before she is told the job exists.
+   before they are told the job exists.
 2. **One tap.** Apply / Skip / Tomorrow. Skipped items go quiet permanently.
 3. **Escalation on silence, not on volume.** An item left undecided for 3 days
    is re-surfaced once, more directly. Undecided after 7 days, it expires and
@@ -464,15 +460,15 @@ healthy.
 
 - **Terms of service.** Layer 3 scraping of Naukri/LinkedIn/Indeed is against
   those sites' terms. Layers 1 and 2 are not. The design leans on 1 and 2 as
-  primary partly for this reason. LinkedIn is never accessed with her account.
-- **Data.** Her personal data and resume live in this repo. It must not be
+  primary partly for this reason. LinkedIn is never accessed with their account.
+- **Data.** Their personal data and resume live in this repo. It must not be
   pushed to any public remote, and must not be placed in the ClaudeMemory
   vault, which syncs to GitHub. `.gitignore` excludes generated resumes and the
   database by default.
 - **jobseek data licence.** If any jobseek-derived data is used later, its job
   data is CC BY-NC 4.0 — acceptable for personal use, not for anything
   commercial.
-- **Single-employer resume.** Four years at one company is her main structural
+- **Single-employer resume.** Four years at one company is their main structural
   weakness for brand-side roles. The tailoring layer should address it
   positively (depth of account ownership) rather than ignore it.
 
@@ -494,14 +490,14 @@ Investigated 2026-09-19:
 Shipped incrementally; each milestone is usable on its own.
 
 **M1 (now):** JobPilot MCP skeleton + multi-seeker store + JobSpy MCP wired up
-+ canary health + target company list + scoring + local digest. Alex is
++ canary health + target company list + scoring + local digest. the seeker is
 seeker #1; the schema and tools are multi-seeker from the first commit, because
 retrofitting tenancy into a store is far more expensive than starting with it.
 
 **M2:** ATS JSON fetchers for tiers 1-2, structured-data parsing, resume
 tailoring with the validation gate, DOCX renderer + extraction gate.
 
-**M3:** Telegram channel on the desktop allowlisted to Alex, scheduled
+**M3:** Telegram channel on the desktop allowlisted to the seeker, scheduled
 routine, Mac watchdog.
 
 **M4:** Separate specs - LinkedIn post generation; interview prep.
@@ -540,7 +536,7 @@ Claude plus MCP, but the tools must be seeker-scoped and read-only:
 - `my_status(seeker_id)` - jobs found, scored, shown, applied this week.
 - `my_sources(seeker_id)` - which sources ran and whether any were blocked,
   in plain language.
-- `my_history(seeker_id, query)` - what she was shown and when.
+- `my_history(seeker_id, query)` - what they was shown and when.
 
 These obey section 5A isolation: no roster, no other seeker's data, no
 operator internals. A seeker asking about another person is refused.
@@ -568,7 +564,7 @@ Not adopted, for three reasons:
 1. **It does not change the terms position.** Apify is a host; scraping
    LinkedIn through it still breaches LinkedIn's terms. It moves the IP
    address, not the legality.
-2. **It is not where her jobs are.** Brand-side employers post to their own
+2. **It is not where their jobs are.** Brand-side employers post to their own
    Workday and SuccessFactors tenants, which M2 reads directly - free,
    permitted, and more complete than any LinkedIn scrape.
 3. **It adds a paid external dependency** for the weakest source.
@@ -636,7 +632,7 @@ requires touching Python, the boundary is in the wrong place.
 **Rubric contract.** Every rubric, whatever the field, must contain: score
 bands, an explicit list of what to score 0-39 regardless of title match, what
 to weight heavily for that person, the reasoning format, and the untrusted-text
-warning. The apparel rubric written for Alex is the worked example.
+warning. The apparel rubric written for the seeker is the worked example.
 
 ### 17.7 Digest review gate (decided 2026-09-19)
 
@@ -698,14 +694,14 @@ on automated access must be checked before either is scraped.
 ### 17.4 Google Sheets as the seeker-facing view (M3)
 
 Each seeker gets a Google Sheet showing every job found, its score, its status
-and what has been applied to. Telegram hands her the link. She reads and
-annotates it in a tool she already knows, with no app to learn.
+and what has been applied to. Telegram hands their the link. They reads and
+annotates it in a tool they already knows, with no app to learn.
 
 **Architecture: one-way, database to sheet.** The SQLite store stays the single
 source of truth; the sheet is a rendered view, rebuilt on each run. Status
 changes happen through Telegram buttons, which write to the store. Two-way sync
 would create a second source of truth and a merge problem for no real gain.
-One exception: a `Notes` column she owns, read back and stored against the job.
+One exception: a `Notes` column they owns, read back and stored against the job.
 
 **Access, and why not per-seeker OAuth.** Asking every seeker to complete a
 Google OAuth flow is friction that defeats the point, and credential entry is
@@ -731,7 +727,7 @@ section 5A already requires.
 
 1. Salary expectation and notice period — needed for scoring and for
    application forms. Not on the resume.
-2. Is she open to Bangalore/Mumbai, or NCR only? Currently assuming NCR
+2. Is they open to Bangalore/Mumbai, or NCR only? Currently assuming NCR
    preferred, others considered.
-3. Should the operator review every digest before she sees it (M3 onward), or
+3. Should the operator review every digest before they sees it (M3 onward), or
    only the first few weeks?

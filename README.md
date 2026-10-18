@@ -1,4 +1,58 @@
-# JobPilot
+# JobPilot × Fo
+
+[![tests](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml/badge.svg)](https://github.com/4asaanAI/job-seeker/actions/workflows/tests.yml)
+
+**Claude finds and judges the jobs. [Fo](https://wajo.ai) (Wajo's assistant, over MCP) does the real-world part: it texts me the matches
+and books the reminders.** One Claude session holds both MCP servers; you just ask in plain English.
+Built for the GSD hackathon. JobPilot already existed; the Fo link, the safety layer, tailored resumes and the
+unattended digest are what was built for it.
+
+> Fo can email, call and buy, and job posts are written by strangers. So Fo never sees a job post: it receives only an id,
+> a score and a vetted title, and every Fo action asks for permission first.
+
+## Try it in three minutes (no accounts, nothing is sent)
+
+```bash
+python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python scripts/injection_demo.py   # a poisoned job posting is neutralized before Fo sees it
+.venv/bin/python scripts/fo_demo.py          # dry run on a fictional seeker: the exact messages Fo would get
+.venv/bin/python -m pytest -q                # 500+ offline tests, including one that starts the real MCP server
+```
+
+## What is new for the hackathon
+
+- **Fo delivery with a safety layer.** A minimal digest (id, score, vetted title), random-marker wrapper, host-pinned
+  client that never follows redirects, and "delivered" only when Fo confirms. One Fo account serves exactly one seeker.
+- **Two transports.** `api` (an `FO_API_KEY`, ready for when Wajo ships keys; tested with a fake Fo) and `claude`, a
+  headless `claude -p` relay on your own Fo login with only Fo's send/poll tools. The relay is verified live.
+- **Tailored resumes, facts-only.** `tailor_resume` ranks your own bullets and skills against a job and lists the
+  job terms your resume lacks. `render_resume` can only keep and reorder what your resume already says.
+- **Applications you approve.** `prepare_application` builds a text package from your resume facts and sends nothing.
+- **Real-server test.** The MCP server is started over stdio and driven like Claude would, including seeker pinning.
+
+```mermaid
+flowchart LR
+  boards[Job boards and employer ATS] --> JP[JobPilot MCP server]
+  JP -->|scored matches, ledger| Claude
+  you([You]) <-->|plain English| Claude
+  Claude -->|ask_fo, with your approval| Fo[Fo MCP: text, email, calendar]
+  Fo --> phone([Your phone and calendar])
+  JP -.->|scheduled digest: headless relay, vetted text only| Fo
+```
+
+## Honest status
+
+| Verified live | Built and tested, not live |
+|---|---|
+| Claude -> Fo texts and calendar create/delete | `api` transport (Wajo has not released headless keys) |
+| Headless digest through the `claude` relay | Text-to-Fo-triggers-JobPilot via webhook (not released) |
+| Real Fo permission prompt shows the exact vetted message | |
+
+More: [docs/FO-DEMO.md](docs/FO-DEMO.md) (demo and safety choices) · [docs/APPLYING.md](docs/APPLYING.md) (using it for your own search).
+
+---
+
+## Background: JobPilot itself
 
 JobPilot is a local, multi-seeker job-discovery service. Claude (or another
 approved MCP client) orchestrates discovery and scoring; the server owns the
@@ -23,51 +77,6 @@ supported for ordinary career pages, but no Wigolo executable is currently
 configured on this machine. The MCP
 surface also includes per-seeker status/history views, watchlists, and
 explicit one-page browser-investigation handoffs.
-
-## Fo x JobPilot (GSD hackathon)
-
-JobPilot finds and scores jobs; [Fo](https://wajo.ai) (Wajo's assistant, reached over MCP) does the
-real-world part: it texts you the matches, nudges you to follow up, and books the follow-up on your
-calendar. Claude holds both MCP servers, so you ask in plain English.
-
-```mermaid
-flowchart LR
-  boards[Job boards and employer ATS] --> JP[JobPilot MCP server]
-  JP -->|scored matches, ledger| Claude
-  you([You]) <-->|plain English| Claude
-  Claude -->|ask_fo, with your approval| Fo[Fo MCP: text, email, calendar]
-  Fo --> phone([Your phone and calendar])
-  JP -.->|scheduled digest, minimal text only| Fo
-```
-
-What makes it more than glue:
-
-- **Safe by design.** Fo can email, call and buy, and job posts are written by strangers. Fo only ever
-  receives an id, a score and a vetted title/company, never reasoning or links. The host is pinned, the key
-  never follows a redirect, and each application needs your explicit yes.
-- **Never told twice.** A notification ledger records every delivery by channel; a failed send is retried,
-  never counted as sent.
-- **Facts-only applications.** `prepare_application` builds your application from your own saved resume
-  facts. It cannot invent experience.
-- **Tested.** 490+ offline tests, plus a test that starts the real MCP server and drives it like Claude.
-
-**Hackathon scope.** JobPilot (discovery, scoring, ledger, resume engine, MCP server) existed before the
-hackathon; Wajo's organizers confirmed a pre-built app is fine as long as it uses the Fo MCP. Built during the
-hackathon (commits from Oct 17): the Fo client and delivery channel, the minimal-digest safety layer, follow-ups
-through Fo, `prepare_application`, the fictional-data demo, and the real-server MCP test.
-
-Try it in two minutes with fictional data: `python scripts/fo_demo.py` (dry run, sends nothing). See
-[docs/FO-DEMO.md](docs/FO-DEMO.md) for the demo script and safety choices, and
-[docs/APPLYING.md](docs/APPLYING.md) to use it for your own search.
-Status: verified live: the interactive Claude + Fo path (texts, calendar) and the unattended digest through a
-headless `claude -p` relay on your own Fo login (`[fo] transport = "claude"`; Fo confirmed receiving the exact
-vetted message). Not available yet: Wajo has not released a headless API key or an inbound reply webhook, so a text
-to Fo cannot trigger JobPilot. Both are on Wajo's roadmap, and the direct API-key transport is built and tested
-with a fake Fo, ready for when the key exists.
-
-**Tailored resumes.** `tailor_resume` ranks your own saved bullets and skills against a job's title and
-description and lists the job terms your resume lacks (gaps to tell you about, never to invent). `render_resume`
-then keeps and orders only those bullet ids. Nothing is written for you: every line comes from your resume.
 
 ## macOS development
 

@@ -7,11 +7,11 @@ The deployed instance runs a tag, never `main`.
 
 A free Naukri saved-search email alert, independent of all JobPilot code.
 
-**This needs a Naukri account, so Alex or the operator must do it — Claude
+**This needs a Naukri account, so the seeker or the operator must do it — Claude
 does not create accounts or enter credentials.**
 
-1. Sign in at naukri.com (Alex's own account is best: results are tuned to
-   her profile).
+1. Sign in at naukri.com (the seeker's own account is best: results are tuned to
+   their profile).
 2. Search: keyword `merchandiser`, location `Gurgaon`. Repeat for
    `senior merchandiser` and `product development merchandiser`.
 3. Set Freshness to "Last 7 days" and Experience to 4 years.
@@ -122,7 +122,7 @@ and MCP registration gate.
 - Full offline suite: **283 passed**.
 - Windows Python 3.12 suite: **283 passed**.
 - Guarded Windows smoke: Indeed India **healthy**, 34 normalized results and
-  30 links for Alex. Naukri returned HTTP 406 (`recaptcha required`) and was
+  30 links for the seeker. Naukri returned HTTP 406 (`recaptcha required`) and was
   deliberately disabled; it is not presented as a quiet market. No LinkedIn
   requests were made.
 - Claude Code MCP registration: `jobpilot` user-scoped server **connected**
