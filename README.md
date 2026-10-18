@@ -59,9 +59,15 @@ through Fo, `prepare_application`, the fictional-data demo, and the real-server 
 Try it in two minutes with fictional data: `python scripts/fo_demo.py` (dry run, sends nothing). See
 [docs/FO-DEMO.md](docs/FO-DEMO.md) for the demo script and safety choices, and
 [docs/APPLYING.md](docs/APPLYING.md) to use it for your own search.
-Status: the interactive Claude + Fo path is verified live (texts and calendar). The unattended digest is tested
-with a fake Fo only: Wajo confirmed (Oct 17) that a headless API key and an inbound reply webhook are not released
-yet, so JobPilot cannot yet be triggered by a text to Fo. Both are on Wajo's roadmap.
+Status: verified live: the interactive Claude + Fo path (texts, calendar) and the unattended digest through a
+headless `claude -p` relay on your own Fo login (`[fo] transport = "claude"`; Fo confirmed receiving the exact
+vetted message). Not available yet: Wajo has not released a headless API key or an inbound reply webhook, so a text
+to Fo cannot trigger JobPilot. Both are on Wajo's roadmap, and the direct API-key transport is built and tested
+with a fake Fo, ready for when the key exists.
+
+**Tailored resumes.** `tailor_resume` ranks your own saved bullets and skills against a job's title and
+description and lists the job terms your resume lacks (gaps to tell you about, never to invent). `render_resume`
+then keeps and orders only those bullet ids. Nothing is written for you: every line comes from your resume.
 
 ## macOS development
 

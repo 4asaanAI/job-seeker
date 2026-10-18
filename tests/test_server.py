@@ -381,3 +381,20 @@ def test_build_fo_message_is_vetted_wrapped_and_sends_nothing(tmp_path, monkeypa
     assert tools["build_fo_message"](sid, "followups")["message"] is None
     assert tools["build_fo_message"](sid, "bogus")["ok"] is False
     store.close()
+
+
+def test_tailor_resume_suggests_renders_and_remembers_the_selection(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    tools, store = _tools(tmp_path)
+    sid, pid = _seeker_with_resume(tmp_path, store)
+    out = tools["tailor_resume"](sid, pid)
+    assert out["ok"] and out["job"]["title"] == "Senior Merchandiser"
+    assert out["suggestion"]["bullet_order"]["current"] == ["b1"] and out["previous_versions"] == []
+    sug = out["suggestion"]
+    rendered = tools["render_resume"](sid, pid, sug["experience_order"], sug["skills"], sug["bullet_order"])
+    assert rendered["ok"] and Path(rendered["path"]).exists()
+    again = tools["tailor_resume"](sid, pid)
+    assert again["previous_versions"][0]["selection"]["bullet_order"] == {"current": ["b1"]}
+    assert tools["render_resume"](sid, pid, None, None, {"current": ["nope"]})["ok"] is False
+    assert tools["tailor_resume"](sid, pid + 99)["ok"] is False
+    store.close()

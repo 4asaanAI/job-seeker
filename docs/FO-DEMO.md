@@ -31,7 +31,10 @@ and your replies inside Fo do not come back to JobPilot. Replying and acting hap
   reply shape (a text block holding JSON with `status`, `response`, `conversationId`) is covered by a test.
 - Wajo's answer (Oct 17): an API key for headless use and an inbound-reply webhook (conversation.reply) are not released yet.
   So a text to Fo cannot trigger JobPilot, and unattended runs cannot call Fo with a key.
-- Scheduled notifier (B): covered by tests with a fake Fo, NOT yet run live. It needs `FO_API_KEY`, and the
+- Scheduled notifier (B), transport `claude`: verified live. A headless `claude -p` relay with only the Fo send/poll
+  tools delivered a vetted message, and Fo's own transcript shows the exact text. An LLM is in this path, so delivery
+  counts only when the relay prints a fixed status line. Transport `api` (FO_API_KEY): tested with a fake Fo only.
+- (older note) Scheduled notifier via API key: covered by tests with a fake Fo, NOT yet run live. It needs `FO_API_KEY`, and the
   header the key goes in (`Authorization: Bearer`) is unconfirmed. A `working` (slow) reply has not been seen live.
 
 ## Run it

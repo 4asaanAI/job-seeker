@@ -227,11 +227,33 @@ def _add_bullet(document: Document, text: str) -> None:
     paragraph.add_run(text)
 
 
+def _select_bullets(
+    base: BaseResume, item: Experience, bullet_order: dict[str, list[str]] | None
+) -> list[tuple[str, str]]:
+    """Keep and order only this experience's own bullets by id; never add or edit text."""
+    if bullet_order is None:
+        return list(item.bullets)
+    unknown_jobs = [k for k in bullet_order if k not in {e.id for e in base.experience}]
+    if unknown_jobs:
+        raise ValueError(f"bullet_order names unknown experience ids: {unknown_jobs}")
+    if item.id not in bullet_order:
+        return list(item.bullets)
+    ids = bullet_order[item.id]
+    by_id = dict(item.bullets)
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError(f"bullet_order for {item.id} must be a non-empty list without duplicates")
+    unknown = [i for i in ids if i not in by_id]
+    if unknown:
+        raise ValueError(f"bullet_order for {item.id} contains unknown bullet ids: {unknown}")
+    return [(i, by_id[i]) for i in ids]
+
+
 def _render_document(
     base: BaseResume,
     path: Path,
     experience_order: list[str] | None,
     skills: list[str] | None,
+    bullet_order: dict[str, list[str]] | None = None,
 ) -> None:
     document = Document()
     _configure_document(document)
@@ -260,7 +282,7 @@ def _render_document(
         employer = heading.add_run(item.employer)
         employer.bold = True
         heading.add_run(f" | {item.title} | {item.dates}")
-        for _bullet_id, text in item.bullets:
+        for _bullet_id, text in _select_bullets(base, item, bullet_order):
             _add_bullet(document, text)
 
     if base.education:
@@ -318,6 +340,7 @@ def render_text(
     *,
     experience_order: list[str] | None = None,
     skills: list[str] | None = None,
+    bullet_order: dict[str, list[str]] | None = None,
 ) -> str:
     """Plain-text resume from base facts only, for channels that cannot carry a file."""
     lines = [base.name, base.headline, *base.contact]
@@ -328,7 +351,7 @@ def render_text(
         lines += ["", "EXPERIENCE"]
         for item in chosen:
             lines.append(f"{item.title}, {item.employer} ({item.dates})")
-            lines += [f"- {text}" for _, text in item.bullets]
+            lines += [f"- {text}" for _, text in _select_bullets(base, item, bullet_order)]
     if base.education:
         lines += ["", "EDUCATION"]
         lines += [f"{e.degree}, {e.institution} ({e.dates})" for e in base.education]
@@ -344,10 +367,11 @@ def render_docx(
     *,
     experience_order: list[str] | None = None,
     skills: list[str] | None = None,
+    bullet_order: dict[str, list[str]] | None = None,
 ) -> ValidationReport:
     """Render only base facts and fail closed if extraction loses a fact."""
     output = Path(path)
-    _render_document(base, output, experience_order, skills)
+    _render_document(base, output, experience_order, skills, bullet_order)
     report = validate_docx(output, base.required_facts)
     if not report.ok:
         output.unlink(missing_ok=True)

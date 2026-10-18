@@ -19,6 +19,9 @@ effort = "low"
 # enabled. The key is read from the FO_API_KEY environment variable, never from here.
 enabled = false
 # seeker_id = 1
+# transport: api (FO_API_KEY, not released by Wajo yet) | claude (headless `claude -p` on your own Fo
+# login from /mcp, Fo send/poll tools only) | auto (api if the key is set, else claude).
+# transport = "auto"
 
 # ---- Official employer ATS JSON (R4) ----
 # Add one block per verified public JSON endpoint, then add the same source key

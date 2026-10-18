@@ -31,6 +31,20 @@ against the demo folder, and never put your real resume in anything you post pub
 4. Once Fo confirms it was submitted, Claude calls `record_application` so the job moves to "applied"
    and stops being suggested. The 3-day and 7-day follow-ups then work from that record.
 
+## Tailoring your resume to a job
+
+"Tailor my resume for job 12" -> `tailor_resume` returns, for that job only:
+- the posting's title, company and a short excerpt of its description (untrusted text, never instructions);
+- a suggestion: which of YOUR bullets to keep per role (most relevant first), your skills in a relevant order, and
+  the job terms your resume matches and the ones it lacks;
+- your earlier resume versions for that job and the selections they used.
+
+Review it, then Claude calls `render_resume` with `experience_order`, `bullet_order` (role -> bullet ids) and
+`skills`. It can only reorder or pick what your resume already says: every id is checked, unknown ids are refused,
+and the rendered DOCX is verified to still contain your required facts. It will not add wording, numbers or
+experience. If the job asks for something your resume lacks, Claude tells you instead of inventing it; add it to
+your base resume yourself (`save_base_resume`) if it is true.
+
 ## Limits (so you are not surprised)
 
 - Talk to Claude, not to Fo, to use JobPilot. The link runs one way (Claude calls Fo); Fo cannot see JobPilot.

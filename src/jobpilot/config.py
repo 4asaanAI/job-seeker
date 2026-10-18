@@ -85,6 +85,9 @@ class Config:
     fo_enabled: bool = False
     fo_seeker_id: int | None = None
     fo_url: str = "https://mcp.api.wajo.ai/fo"
+    # api = FO_API_KEY direct call; claude = headless claude session on the operator's Fo login;
+    # auto = api when FO_API_KEY is set, else claude.
+    fo_transport: str = "auto"
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -221,6 +224,9 @@ def load_config(path: Path | None = None) -> Config:
     fo_enabled = fo.get("enabled", False)
     if not isinstance(fo_enabled, bool):
         raise ValueError('[fo] enabled must be true or false (no quotes)')
+    fo_transport = str(fo.get("transport", "auto"))
+    if fo_transport not in ("auto", "api", "claude"):
+        raise ValueError("[fo] transport must be auto, api or claude")
     fo_seeker_id = int(fo["seeker_id"]) if fo.get("seeker_id") is not None else None
 
     base = home
@@ -235,6 +241,7 @@ def load_config(path: Path | None = None) -> Config:
         fo_enabled=fo_enabled,
         fo_seeker_id=fo_seeker_id,
         fo_url=str(fo.get("url") or "https://mcp.api.wajo.ai/fo"),
+        fo_transport=fo_transport,
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,

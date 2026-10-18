@@ -396,7 +396,7 @@ def test_missing_key_skips_fo_cleanly(store, tmp_path, capsys):
     sid, _ = seed(store, tid=111)
     bot = FakeBot()
     deliver(store, cfg(seeker=sid), tmp_path, bot_factory=lambda: bot, fo_factory=lambda: None)
-    assert "FO_API_KEY is not set" in capsys.readouterr().out
+    assert "no Fo transport available" in capsys.readouterr().out
     assert bot.sent == [111]
 
 
@@ -522,3 +522,88 @@ def test_real_fo_reply_shape_text_block_with_json_inside():
     result = c.send("hi")
     assert result.status == "complete"
     assert result.response == "Sent. It went to your iMessage a few seconds ago."
+
+
+# ---- headless claude transport ------------------------------------------
+
+def relay(stdout="", code=0, boom=None):
+    seen = {}
+
+    def runner(command, **kw):
+        seen["command"], seen["kw"] = command, kw
+        if boom:
+            raise boom
+        return SimpleNamespace(returncode=code, stdout=stdout, stderr="")
+    return runner, seen
+
+
+def test_claude_relay_complete_only_on_the_fixed_status_line():
+    from jobpilot.fo import ClaudeFoClient
+    runner, seen = relay("claude.ai connectors are disabled\nFO_STATUS: complete\n")
+    result = ClaudeFoClient(runner=runner).send("hello message")
+    assert result.status == "complete"
+    cmd = seen["command"]
+    assert cmd[0] == "claude" and "-p" in cmd and "--strict-mcp-config" in cmd
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--allowedTools") + 1] == "mcp__fo__ask_fo,mcp__fo__get_fo_reply"
+    assert "--max-budget-usd" in cmd and "hello message" in cmd[-1]
+    assert "https://mcp.api.wajo.ai/fo" in cmd[cmd.index("--mcp-config") + 1]
+
+
+@pytest.mark.parametrize("out,code", [("FO_STATUS: failed\n", 0), ("all done!\n", 0),
+                                      ("FO_STATUS: complete\nthen more text\n", 0),
+                                      ("FO_STATUS: complete\n", 1), ("", 0)])
+def test_claude_relay_anything_else_is_not_delivered(out, code):
+    from jobpilot.fo import ClaudeFoClient
+    runner, _ = relay(out, code)
+    assert ClaudeFoClient(runner=runner).send("m").status == "failed"
+
+
+def test_claude_relay_timeout_is_not_delivered_and_missing_binary_raises():
+    import subprocess
+    from jobpilot.fo import ClaudeFoClient
+    runner, _ = relay(boom=subprocess.TimeoutExpired("claude", 1))
+    assert ClaudeFoClient(runner=runner).send("m").status == "working"
+    runner, _ = relay(boom=FileNotFoundError())
+    with pytest.raises(FoError):
+        ClaudeFoClient(runner=runner).send("m")
+
+
+def test_claude_relay_env_has_no_fo_key_and_url_is_pinned(monkeypatch):
+    from jobpilot.fo import ClaudeFoClient
+    monkeypatch.setenv("FO_API_KEY", KEY)
+    runner, seen = relay("FO_STATUS: complete\n")
+    ClaudeFoClient(runner=runner).send("m")
+    assert "FO_API_KEY" not in seen["kw"]["env"]
+    with pytest.raises(ValueError):
+        ClaudeFoClient(url="https://evil.example/fo")
+
+
+def test_claude_relay_through_the_ledger_records_only_when_confirmed(store):
+    from jobpilot.fo import ClaudeFoClient
+    sid, pid = seed(store)
+    kw = dict(channel="fo", seeker_ids={sid}, recipient=lambda s: s.id, render=render_fo_digest)
+    bad, _ = relay("nope\n")
+    assert notify.push_digests(store, fo_sender(ClaudeFoClient(runner=bad)), **kw) == 0
+    assert len(store.notifiable_postings(sid, 70.0, 5)) == 1
+    good, _ = relay("FO_STATUS: complete\n")
+    assert notify.push_digests(store, fo_sender(ClaudeFoClient(runner=good)), **kw) == 1
+    assert store.notifiable_postings(sid, 70.0, 5) == []
+
+
+def test_transport_selection_and_config(tmp_path, monkeypatch):
+    from jobpilot.fo import ClaudeFoClient
+    from jobpilot.scheduled import make_fo_client
+    c = lambda t: SimpleNamespace(fo_transport=t, fo_url=FO_URL)
+    monkeypatch.delenv("FO_API_KEY", raising=False)
+    assert isinstance(make_fo_client(c("auto")), ClaudeFoClient)
+    assert make_fo_client(c("api")) is None
+    monkeypatch.setenv("FO_API_KEY", KEY)
+    assert isinstance(make_fo_client(c("auto")), FoClient)
+    assert isinstance(make_fo_client(c("claude")), ClaudeFoClient)
+    f = tmp_path / "c.toml"
+    f.write_text(BASE + '[fo]\nenabled=true\nseeker_id=1\ntransport="claude"\n')
+    assert load_config(f).fo_transport == "claude"
+    f.write_text(BASE + '[fo]\ntransport="telepathy"\n')
+    with pytest.raises(ValueError, match="transport"):
+        load_config(f)

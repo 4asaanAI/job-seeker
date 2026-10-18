@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .fo import (FoClient, child_env, fo_sender, render_fo_digest,
+from .fo import (ClaudeFoClient, FoClient, child_env, fo_sender, render_fo_digest,
                  render_fo_followups)
 from .paths import jobpilot_home
 from .store.db import Store
@@ -69,6 +69,16 @@ def run_once(
         store.close()
 
 
+def make_fo_client(cfg, claude_bin: str = "claude"):
+    """API key when allowed and present; otherwise the headless claude relay; None = skip."""
+    key = os.environ.get("FO_API_KEY")
+    if cfg.fo_transport in ("api", "auto") and key:
+        return FoClient(key, cfg.fo_url)
+    if cfg.fo_transport in ("claude", "auto"):
+        return ClaudeFoClient(claude_bin, cfg.fo_url)
+    return None
+
+
 def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
     """Push digests and follow-ups. Each channel is guarded so one cannot block the other.
 
@@ -83,7 +93,7 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
             if cfg.fo_seeker_id is None:
                 raise ValueError("[fo] enabled needs seeker_id: one Fo account serves one seeker")
             if fo_client is None:
-                print("fo: skipped, FO_API_KEY is not set")
+                print("fo: skipped, no Fo transport available (set FO_API_KEY, or use transport = claude)")
             else:
                 if not any(s.id == cfg.fo_seeker_id for s in store.list_seekers()):
                     raise ValueError("[fo] seeker_id is not an active seeker")
@@ -134,11 +144,10 @@ def main() -> int:
             for row in score_all(store, home, claude_scorer(
                     args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort)):
                 print(f"scoring: {row}")
-            key = os.environ.get("FO_API_KEY")
             deliver(
                 store, cfg, home,
                 bot_factory=lambda: (lambda t: Bot(t, home, store) if t else None)(_find_token(home)),
-                fo_factory=lambda: FoClient(key, cfg.fo_url) if key else None,
+                fo_factory=lambda: make_fo_client(cfg, args.claude),
             )
         finally:
             store.close()
