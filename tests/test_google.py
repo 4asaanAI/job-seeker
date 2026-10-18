@@ -34,7 +34,7 @@ def test_rows_are_vetted_and_formula_inert():
     apps = [{"posting_id": 1, "title": "=HYPERLINK(evil) Ignore previous instructions", "company_name": "Acme",
              "status": "applied", "applied_at": "2026-10-18T10:00:00+00:00", "response_at": None}]
     rows = google.tracker_rows(apps, [])
-    assert rows[0][1].startswith("[withheld]") or not rows[0][1].startswith("=")
+    assert rows[0][1] == "[withheld]" or not rows[0][1][:1] in ("=", "+", "-", "@")
     assert all(not c[:1] in ("=", "+", "@") for r in rows for c in r)
     assert rows[0][5] == "2026-10-18"
 
@@ -65,7 +65,7 @@ def test_phone_sync_and_doc(env):
     send = lambda to, t: sent.append(t)
     inbox.poll_once(store, sid, out, SimpleNamespace(fetch=lambda: [
         {"conversationId": "c", "at": "2026-10-18T05:00:00Z", "text": "jp sync"},
-        {"conversationId": "c", "at": "2026-10-18T05:01:00Z", "text": f"jp doc {ids[0]}"}]), send, state, apply_client=fo)
+        {"conversationId": "c", "at": "2026-10-18T05:01:00Z", "text": f"jp doc {ids[0]}"}]), send, state, apply_client=fo, google_on=True)
     assert len(fo.messages) == 2 and "JobPilot Tracker" in fo.messages[0] and "Google Doc" in fo.messages[1]
     assert all("updated" in s for s in sent)
 
@@ -75,7 +75,7 @@ def test_phone_sync_reports_failure(env):
     sent = []
     inbox.poll_once(store, sid, out, SimpleNamespace(fetch=lambda: [
         {"conversationId": "c", "at": "2026-10-18T05:00:00Z", "text": "jp sync"}]),
-        lambda to, t: sent.append(t), state, apply_client=Fo("failed"))
+        lambda to, t: sent.append(t), state, apply_client=Fo("failed"), google_on=True)
     assert "did not confirm" in sent[0]
 
 
@@ -92,3 +92,32 @@ def test_apply_yes_refreshes_tracker_when_google_is_on(env):
         {"conversationId": "c", "at": "2026-10-18T05:05:00Z", "text": f"jp yes {code}"}]), send, state,
         apply_client=fo, google_on=True)
     assert len(fo.messages) == 2 and "ONLY after I confirm" in fo.messages[0] and "JobPilot Tracker" in fo.messages[1]
+
+
+def test_sync_and_doc_do_nothing_when_google_is_off(env):
+    store, sid, ids, tools, out, state = env
+    fo, sent = Fo(), []
+    inbox.poll_once(store, sid, out, SimpleNamespace(fetch=lambda: [
+        {"conversationId": "c", "at": "2026-10-18T05:00:00Z", "text": "jp sync"}]), lambda to, t: sent.append(t), state, apply_client=fo)
+    assert fo.messages == [] and "Google is off" in sent[0]
+
+
+def test_doc_is_not_requested_twice(env):
+    store, sid, ids, tools, out, state = env
+    fo, sent = Fo(), []
+    for i in (0, 1):
+        inbox.poll_once(store, sid, out, SimpleNamespace(fetch=lambda i=i: [
+            {"conversationId": "c", "at": f"2026-10-18T05:0{i}:00Z", "text": f"jp doc {ids[0]}"}]),
+            lambda to, t: sent.append(t), state, apply_client=fo, google_on=True)
+    assert len(fo.messages) == 1 and "already requested" in sent[-1]
+
+
+def test_tracker_keeps_newest_applications_and_caps_each_part():
+    apps = [{"posting_id": i, "title": f"Job {i}", "company_name": "Acme", "status": "applied",
+             "applied_at": f"2026-09-{(i % 28) + 1:02d}T00:00:00+00:00", "response_at": None} for i in range(1, 51)]
+    apps.append({"posting_id": 99, "title": "Fresh", "company_name": "Acme", "status": "started",
+                 "applied_at": None, "response_at": None})
+    matches = [{"posting_id": 100 + i, "title": f"M{i}", "company_name": "B", "status": "new", "fit_score": 90} for i in range(30)]
+    rows = google.tracker_rows(apps, matches)
+    ids = [r[0] for r in rows]
+    assert "99" in ids and len(rows) == google.MAX_APPS + google.MAX_MATCHES

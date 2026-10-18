@@ -21,7 +21,7 @@ Two ways in, one ledger:
   digest and follow-up nudges through Fo (`[fo]` in `config.toml`). Each delivery is written to the
   notifications ledger with `channel = fo`, so a job is never announced twice.
 
-What Fo cannot do (so we do not pretend): `ask_fo` takes text only, so it cannot attach the resume,
+What Fo cannot do (so we do not pretend): `ask_fo` takes text only, so it cannot attach the resume itself (with `[google] enabled` Fo can build a PDF from a Google Doc and upload that instead),
 and your replies inside Fo do not reach JobPilot reliably (the polling inbox is experimental and not verified live). Replying and acting happens in the Claude session.
 
 ## What is verified live

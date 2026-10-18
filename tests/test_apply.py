@@ -303,3 +303,26 @@ def test_auto_tailoring_keeps_every_bullet_and_handles_no_description(env):
     assert out["ok"]
     for b in first["bullets"]:
         assert b["text"] in out["resume_text"]
+
+
+def test_attach_rule_only_when_google_is_on_and_limited_to_the_resume():
+    off = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", approved=True)
+    on = ap.apply_message("Analyst", "Acme", "https://a.example.com/j", "NAME", approved=True, attach_pdf=True)
+    assert "PDF" not in off and "a file)" in off
+    assert "export it as a PDF" in on and "JobPilot Resumes" in on and "a file other than my resume" in on
+    assert "Do not share the document" in on and "OTHER file" in on
+    assert on.count(on.splitlines()[-1]) == 3         # rule 2 and the two framing lines, as before
+
+
+def test_auto_tailoring_keeps_a_fifth_bullet(env):
+    import yaml
+    store, sid, ids, tools = env
+    path = Path(store.get_seeker(sid).profile_path).parent / "base_resume.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["experience"][0]["bullets"] = [{"id": f"b{i}", "text": t} for i, t in enumerate(
+        [d if isinstance(d, str) else d["text"] for d in data["experience"][0]["bullets"]]
+        + [f"Extra fact number {i} about work." for i in range(4)])]
+    path.write_text(yaml.safe_dump(data))
+    https_link(store, ids[0])
+    out = tools["prepare_application"](sid, ids[0])
+    assert out["ok"] and all(f"Extra fact number {i} about work." in out["resume_text"] for i in range(4))

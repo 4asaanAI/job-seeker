@@ -15,7 +15,7 @@ from .joblist import _inert
 TRACKER_NAME = "JobPilot Tracker"
 RESUME_FOLDER = "JobPilot Resumes"
 HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated")
-MAX_ROWS = 40
+MAX_APPS, MAX_MATCHES = 30, 10
 
 _RULES = (
     "Rules, all of them:\n"
@@ -32,16 +32,20 @@ def _fence(body: str) -> tuple[str, str]:
 def tracker_rows(apps: list[dict], matches: list[dict]) -> list[list[str]]:
     """Applications first, then good open matches not yet applied to. Every cell is vetted and formula-inert."""
     seen, rows = set(), []
+    # newest first; a "started" application has no date yet and is the newest of all
+    apps = sorted(apps, key=lambda a: a.get("response_at") or a.get("applied_at") or "9999", reverse=True)[:MAX_APPS]
     for a in apps:
         seen.add(a["posting_id"])
         rows.append([str(int(a["posting_id"])), clean(a["title"], 60), clean(a["company_name"], 40), a["status"],
                      "", (a.get("applied_at") or "")[:10], ((a.get("response_at") or a.get("applied_at")) or "")[:10]])
-    for m in matches:
+    for m in matches[:MAX_MATCHES * 3]:
+        if len(rows) >= len(apps) + MAX_MATCHES:
+            break
         if m["posting_id"] in seen or m["status"] in ("skipped", "applied", "expired") or (m["fit_score"] or 0) < 70:
             continue
         rows.append([str(int(m["posting_id"])), clean(m["title"], 60), clean(m["company_name"], 40), "match",
                      f"{float(m['fit_score']):.0f}", "", ""])
-    return [[_inert(c) for c in r] for r in rows[:MAX_ROWS]]
+    return [[_inert(c) for c in r] for r in rows]
 
 
 def tracker_message(rows: list[list[str]]) -> str:
@@ -51,7 +55,7 @@ def tracker_message(rows: list[list[str]]) -> str:
         "create it if it does not exist (one tab). Row 1 is the header: " + " | ".join(HEADER) + ".\n"
         "The lines between the markers are tab-separated rows in the same column order. For each, update the row "
         "whose ID matches, or add a new row at the bottom. Never delete or reorder other rows, and write cells as plain "
-        "text, never as formulas.\n" + _RULES +
+        "text, never as formulas. A blank cell here means unknown: keep what the sheet already has.\n" + _RULES +
         "4. Afterwards tell me in one line how many rows you added and updated, and give me the sheet link.\n"
         f"{marker}\n{body}\n{marker}")
 

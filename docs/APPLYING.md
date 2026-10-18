@@ -98,6 +98,7 @@ calendar events and following instructions found in the data.
 - **Tailored resume in Google Docs.** `build_fo_resume_doc_message` (or text `jp doc <id>`) asks Fo to create a Google Doc
   "Resume - <company> - <title> (job <id>)" in a "JobPilot Resumes" folder, containing exactly your facts-only tailored
   text (bullets reordered for that job, nothing added). Review or edit it in Docs, and export to PDF yourself.
+- **Resume files for applications.** With `[google] enabled`, every apply request also tells Fo to create the tailored resume as a Doc, export a PDF and use it for a resume/CV upload field or email attachment, so jobs that need a file become possible. Other files (cover letter, ID, certificates) still stop it. It may not share the Doc.
 - **Automatic.** Put `[google] enabled = true` in `config.local.toml` (with `[fo]` enabled). The daily run then refreshes the
   tracker, and every `jp yes` application triggers a refresh. Nothing else is automatic.
 - Fo's own claim, confirmed by asking it on 2026-10-18; not exercised end to end here. The first run is a supervised pilot.
@@ -135,7 +136,7 @@ your base resume yourself (`save_base_resume`) if it is true.
 - Fo says it can drive a website in a browser for you (searches, filling application forms). This is Fo's own
   claim and is not tested here; ask Fo to show you what a form needs before it submits.
 
-- Fo takes text only: it cannot attach a file. It cannot complete phone or email codes it cannot read (the request tells it to stop). Applications go as pasted resume text, or Fo works
+- Without `[google] enabled`, Fo takes text only and cannot attach a file. With it, Fo makes your tailored resume as a Google Doc, exports a PDF and uses it for a resume upload field or an email attachment (Fo's own claim, asked 2026-10-18, not yet exercised end to end); any other file (cover letter, ID, certificate) still makes it stop and ask. It cannot complete phone or email codes it cannot read (the request tells it to stop). Applications go as pasted resume text, or Fo works
   through whatever form or email route the posting offers. That is Fo's own capability and is not verified here;
   the first real application is a supervised pilot. Many postings need a web form or account.
   How well Fo handles those is up to Fo; ask it to tell you before it submits.

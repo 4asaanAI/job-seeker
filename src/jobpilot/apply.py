@@ -77,9 +77,16 @@ def classify_route(url: str | None) -> tuple[str, str]:
     return "unknown", "Unknown application route; Fo will stop and ask if it needs an account or a code."
 
 
-def apply_message(title: str, company: str, url: str, resume_text: str, *, approved: bool = False) -> str:
+def apply_message(title: str, company: str, url: str, resume_text: str, *, approved: bool = False,
+                  attach_pdf: bool = False) -> str:
     marker = secrets.token_hex(8)
     body = re.sub(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}", "", resume_text)   # marker-like runs only; phone numbers survive
+    file_rule = (
+        "7. If the application wants my resume as a FILE (an upload field, or an email attachment): create a Google Doc named "
+        f'"Resume - {company} - {title}" in a folder "JobPilot Resumes" in my Google Drive whose body is EXACTLY the resume '
+        "text between the markers, export it as a PDF, and use that PDF for the resume or CV field only. Do not share the "
+        "document or change its sharing. Any OTHER file (cover letter, ID, certificate, transcript, portfolio) is not in "
+        "scope: stop and tell me what it asks, without submitting.\n") if attach_pdf else ""
     return (
         f"Please help me apply to this job: {title}, {company}. Posting: {url}\n"
         "Rules, all of them:\n"
@@ -87,7 +94,8 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         f"2. Use only the resume text between the two lines containing {marker}. Do not add or change any fact.\n"
         + ("3. I have ALREADY approved applying to this exact job. Complete the form with my resume facts and submit it "
            "once, only if every answer comes from the resume text. If any field asks for something not in the resume "
-           "(salary, notice period, a question, a file), do NOT guess: stop and tell me what it asks, without submitting.\n"
+           f"(salary, notice period, a question, {'a file other than my resume' if attach_pdf else 'a file'}), do NOT guess: "
+           "stop and tell me what it asks, without submitting.\n"
            if approved else
            "3. If the application is by email, show me the draft and send it ONLY after I confirm. If a web form asks for "
            "anything not in the resume, ask me. Do not submit anything until I confirm.\n") +
@@ -96,7 +104,7 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
         "5. If the page needs an account, a password or a one-time code that only my phone could receive, STOP right away "
         "and tell me; do not create accounts, do not retry more than once, and do not use any other email or number.\n"
         "6. Afterwards tell me exactly what you submitted and where.\n"
-        f"{marker}\n{body}\n{marker}")
+        f"{file_rule}{marker}\n{body}\n{marker}")
 
 
 def reply_check_message(title: str, company: str) -> str:

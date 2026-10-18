@@ -394,6 +394,12 @@ def build_tools(
         if configured is not None and sid != configured:
             raise PermissionError("Fo is linked to a different seeker; refusing to build this message")
 
+    def _google_on() -> bool:
+        try:
+            return load_config().google_enabled
+        except (OSError, ValueError, KeyError):
+            return False                           # no readable config: no Google file step
+
     def build_fo_message(
         seeker_id: int, kind: str = "digest", min_score: float = 70.0, limit: int = 5,
     ) -> dict:
@@ -838,14 +844,8 @@ def build_tools(
                     raise ValueError("this board needs an account or a code Fo cannot receive; apply by hand (manual_apply_packet)")
                 if store.event_count_since(sid, "fo_apply_batch", 24) >= MAX_DAILY_APPLY_REQUESTS:
                     raise ValueError("daily limit of Fo apply requests reached; try again tomorrow")
-                with store._lock:                       # check, consume and mark started as one step: one request per code
-                    if not _phone_approval_ok(sid, int(posting_id), phone_code):
-                        raise ValueError("that approval code is not valid for this job, was already used, or has expired")
-                    if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
-                           for a in store.applications(sid, 500)):
-                        raise ValueError("an application for this job is already recorded")
-                    store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
-                    store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                if not _phone_approval_ok(sid, int(posting_id), phone_code):
+                    raise ValueError("that approval code is not valid for this job, was already used, or has expired")
                 # Fo submits without asking again ONLY when the user has turned review mode off; otherwise Fo fills the
                 # form and asks the user in Fo's own chat before it submits.
                 auto_submit = not store.get_seeker(sid).review_required
@@ -856,16 +856,27 @@ def build_tools(
             tailored = experience_order is None and skills is None and bullet_order is None
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
             text = render_text(base, experience_order=experience_order, skills=skills, bullet_order=bullet_order)
-            message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit))
+            message = apply_message(names[0], names[1], link, text, approved=batch_approved or (bool(phone_code) and auto_submit),
+                                    attach_pdf=_google_on())
+            if phone_code:
+                with store._lock:                       # only now, with the message built: check, consume and mark started as one step
+                    if not _phone_approval_ok(sid, int(posting_id), phone_code):
+                        raise ValueError("that approval code is not valid for this job, was already used, or has expired")
+                    if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
+                           for a in store.applications(sid, 500)):
+                        raise ValueError("an application for this job is already recorded")
+                    store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
+                    store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
             if batch_approved or phone_code:
                 store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
                 # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
-                store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                if batch_approved:
+                    store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         route, route_note = classify_route(link)
         return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "message": message,
-                "route": route, "route_note": route_note, "tailored_to_job": tailored,
+                "route": route, "route_note": route_note, "tailored_to_job": tailored, "resume_pdf_via_google_docs": _google_on(),
                 "job_terms_missing_from_resume": gaps,
                 "note": "Nothing was sent. Needs the user's explicit yes for this one job. No calendar event now: "
                         "one is made only if the company sends an invitation (build_fo_reply_check_message)."}

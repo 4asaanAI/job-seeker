@@ -177,7 +177,13 @@ def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> st
             used.add(json.loads(detail).get("code"))
         except ValueError:
             pass
-    open_codes = [d for d, _ in store.recent_event_details(sid, "phone_apply", 2, 50) if json.loads(d).get("code") not in used]
+    open_codes = []
+    for d, _ in store.recent_event_details(sid, "phone_apply", 2, 50):
+        try:
+            if json.loads(d).get("code") not in used:
+                open_codes.append(d)
+        except ValueError:
+            pass
     if len(open_codes) >= MAX_OPEN_CODES:
         return "JobPilot: you have several applications waiting for a yes. Reply to one (jp yes <code>) or wait two hours."
     code = secrets.token_hex(3)
@@ -218,14 +224,17 @@ def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -
         return (f"JobPilot: could not reach Fo for id {posting_id}. It is marked started, so it will not be sent twice; "
                 "check Fo, or apply by hand.")
     if result.status == "complete":
-        return (f"JobPilot: Fo has handled your application for id {posting_id}. It stops and texts you if the form "
-                "needed anything not in your resume. Ask Claude 'how am I doing' to record the result.")
+        return (f"JobPilot: Fo has your application for id {posting_id}. With review mode on (the default) it now waits for "
+                "your confirmation in the Fo chat before submitting; otherwise it stops and texts you if the form needs anything "
+                "not in your resume. Ask Claude 'how am I doing' to record the result.")
     return (f"JobPilot: Fo did not confirm the application for id {posting_id} ({result.status}); it is marked started, "
             "so it will not be sent twice. Check with Fo, or apply by hand.")
 
 
-def _google(store: Store, sid: int, out_dir: Path, apply_client, *, doc: int | None) -> str:
+def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool, *, doc: int | None) -> str:
     """Sheet or Doc through Fo. Both only touch the user's own Drive, so they need no code."""
+    if not google_on:
+        return "JobPilot: Google is off. Set [google] enabled = true to use jp sync and jp doc."
     if apply_client is None:
         return "JobPilot: no Fo transport is available."
     if doc is None:
@@ -238,6 +247,9 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, *, doc: int | N
         built = tools["build_fo_resume_doc_message"](sid, doc)
         if not built.get("ok"):
             return f"JobPilot: no document for id {doc}: {clean(built.get('error'), 110)}."
+        if any(d == str(doc) for d, _ in store.recent_event_details(sid, "phone_doc", 3, 50)):
+            return f"JobPilot: a Google Doc for id {doc} was already requested in the last 3 hours; check your Drive."
+        store.record_event("phone_doc", str(doc), sid, doc)         # before sending: a lost reply must not make a second Doc
         result = apply_client.send(built["message"])
         what = f"a Google Doc for id {doc}"
     if result.status == "complete":
@@ -257,16 +269,16 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
         return _apply_preview(store, sid, out_dir, int(m.group(4)))
     if m.group(5):
         reply = _apply_yes(store, sid, out_dir, m.group(5).lower(), apply_client)
-        if google_on and reply.startswith("JobPilot: Fo has handled"):
+        if google_on and reply.startswith("JobPilot: Fo has your application"):
             try:
                 google.send_tracker(store, sid, apply_client)        # best effort: the apply already happened
             except Exception:  # noqa: BLE001
                 pass
         return reply
     if m.group(6):
-        return _google(store, sid, out_dir, apply_client, doc=None)
+        return _google(store, sid, out_dir, apply_client, google_on, doc=None)
     if m.group(7):
-        return _google(store, sid, out_dir, apply_client, doc=int(m.group(7)))
+        return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(7)))
     return _tailor(store, sid, out_dir, int(m.group(3)))
 
 
