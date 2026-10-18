@@ -56,7 +56,7 @@ def load_profile(path: Path) -> Profile:
         min_score=float(raw.get("min_score", 70)),
         notes=list(raw.get("notes") or []),
         also_search=list(raw.get("also_search") or []),
-        rubric=raw.get("rubric") or None,
+        rubric=raw.get("rubric") or "general",
     )
 
 

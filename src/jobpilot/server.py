@@ -359,14 +359,15 @@ def build_tools(
                 "posting_ids": list(digest.posting_ids), "recorded": digest.recorded, "note": UNTRUSTED}
 
     def _fo_seeker_guard(sid: int) -> None:
-        """One Fo account serves one person: an unpinned operator session must not build another seeker's message."""
-        if pinned_seeker_id is None:
-            try:
-                configured = load_config().fo_seeker_id
-            except (OSError, ValueError, KeyError):
-                configured = None
-            if configured is not None and sid != configured:
-                raise PermissionError("Fo is linked to a different seeker; refusing to build this message")
+        """One Fo account serves one person: no session may build another seeker's message. Fails closed."""
+        try:
+            configured = load_config().fo_seeker_id
+        except FileNotFoundError:
+            configured = None                      # no config at all: nothing is linked to Fo yet
+        except (OSError, ValueError, KeyError) as exc:
+            raise PermissionError("cannot read the [fo] settings; refusing to build a Fo message") from exc
+        if configured is not None and sid != configured:
+            raise PermissionError("Fo is linked to a different seeker; refusing to build this message")
 
     def build_fo_message(
         seeker_id: int, kind: str = "digest", min_score: float = 70.0, limit: int = 5,
@@ -685,7 +686,8 @@ def build_tools(
 
     def _eligible_for_batch(sid: int, limit: int, min_score: float = 70.0) -> list[dict]:
         out = apply_candidates(sid, limit=25, min_score=min_score)
-        return [i for i in out.get("items", []) if i["route"] in ("direct", "aggregator", "unknown")][:limit]
+        # unknown domains never go into an auto-submitting batch: they use the per-job path with a confirmation
+        return [i for i in out.get("items", []) if i["route"] in ("direct", "aggregator")][:limit]
 
     def plan_apply_batch(seeker_id: int, limit: int = 5, min_score: float = 70.0) -> dict:
         """The list for "apply to all my new jobs". READ ONLY: show it to the user and ask for ONE yes.
@@ -769,6 +771,8 @@ def build_tools(
             message = apply_message(names[0], names[1], link, text, approved=batch_approved)
             if batch_approved:
                 store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
+                # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
+                store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         route, route_note = classify_route(link)

@@ -68,9 +68,9 @@ def test_notes_and_also_search_round_trip(tmp_path):
     assert prof.also_search == ["United States"]
 
 
-def test_rubric_defaults_to_none(tmp_path):
+def test_rubric_defaults_to_general(tmp_path):
     prof = load_profile(_write(tmp_path, PROFILE))
-    assert prof.rubric is None
+    assert prof.rubric == "general"  # a seeker's own rubric.md still wins; this only avoids a first-run crash
 
 
 def test_rubric_round_trips(tmp_path):

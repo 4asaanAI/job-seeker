@@ -79,7 +79,7 @@ def classify_route(url: str | None) -> tuple[str, str]:
 
 def apply_message(title: str, company: str, url: str, resume_text: str, *, approved: bool = False) -> str:
     marker = secrets.token_hex(8)
-    body = re.sub(r"[0-9a-fA-F]{12,}", "", resume_text)
+    body = re.sub(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}", "", resume_text)   # marker-like runs only; phone numbers survive
     return (
         f"Please help me apply to this job: {title}, {company}. Posting: {url}\n"
         "Rules, all of them:\n"

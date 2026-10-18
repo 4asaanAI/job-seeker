@@ -275,6 +275,7 @@ class Store:
                 "  ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
                 "JOIN job_postings jp ON jp.id = s.posting_id "
                 "WHERE s.seeker_id = ? AND (jp.valid_through IS NULL OR jp.valid_through >= date('now')) "
+                "AND jp.last_seen_at >= date('now', '-45 days') "
                 + ("AND sj.status NOT IN ('skipped', 'applied', 'expired') AND NOT EXISTS (SELECT 1 FROM applications a "
                    "WHERE a.seeker_id = s.seeker_id AND a.posting_id = s.posting_id AND a.status != 'withdrawn') "
                    if open_only else "")
@@ -769,6 +770,7 @@ class Store:
                   AND s.fit_score >= ?
                   AND sj.status NOT IN ('skipped', 'applied', 'expired')
                   AND (jp.valid_through IS NULL OR jp.valid_through >= date('now'))
+                  AND jp.last_seen_at >= date('now', '-45 days')
                   AND NOT EXISTS (
                         SELECT 1 FROM notifications n
                         WHERE n.seeker_id = sj.seeker_id
@@ -1192,9 +1194,10 @@ class Store:
                 "(seeker_id, posting_id, status, resume_version_id, applied_at, notes) "
                 "VALUES (?,?,?,?,?,?) "
                 "ON CONFLICT(seeker_id, posting_id) DO UPDATE SET "
-                "status=excluded.status, resume_version_id=excluded.resume_version_id, "
+                "status=excluded.status, "
+                "resume_version_id=COALESCE(excluded.resume_version_id, applications.resume_version_id), "
                 "applied_at=COALESCE(excluded.applied_at, applications.applied_at), "
-                "notes=excluded.notes",
+                "notes=CASE WHEN excluded.notes = '' THEN applications.notes ELSE excluded.notes END",
                 (seeker_id, posting_id, status, resume_version_id, applied_at, clean_notes),
             )
             if status == "applied":

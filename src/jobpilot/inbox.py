@@ -17,7 +17,10 @@ import argparse
 import hashlib
 import json
 import os
-import fcntl
+try:
+    import fcntl
+except ImportError:          # Windows: no flock; polls are then not serialized, so run one scheduler
+    fcntl = None
 import re
 import subprocess
 import tempfile
@@ -101,7 +104,7 @@ def parse_messages(stdout: str) -> list[dict]:
 
 def fingerprint(msg: dict) -> str:
     return hashlib.sha256(
-        f"{msg['conversationId']}|{msg['at'][:19]}|{msg['text'].strip().lower()}".encode()).hexdigest()[:20]
+        f"{msg['conversationId']}|{msg['at'][:16]}|{msg['text'].strip().lower()}".encode()).hexdigest()[:20]
 
 
 def _matches(store: Store, sid: int) -> str:
@@ -181,11 +184,13 @@ def _locked(path: Path):
     """One poll at a time: overlapping polls would answer the same command twice."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.with_suffix(".lock"), "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if fcntl:
+            fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            if fcntl:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _safe_reply(store: Store, sid: int, out_dir: Path, text: str) -> str:

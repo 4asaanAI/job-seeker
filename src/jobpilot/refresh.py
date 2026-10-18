@@ -63,6 +63,8 @@ def main() -> int:
         for row in out.get("sources", []):
             print(f"source {row['source']}: {row['status']}, {row['found']} found")
         print(f"scoring: {out['scoring']}")
+        if not out["plan"].get("ok", True):
+            print(f"plan: {out['plan'].get('error')}")
         items = out["plan"].get("items", [])
         print(f"{len(items)} job(s) Fo can plausibly apply to:")
         for i in items:

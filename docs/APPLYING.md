@@ -3,20 +3,19 @@
 Real data lives outside git: `data/seekers/` and `data/*.db` are already ignored. Never run this
 against the demo folder, and never put your real resume in anything you post publicly.
 
-## 1. Set up yourself as a seeker
+## 1. Set up yourself as a seeker (no hand-written YAML)
 
-1. Create `data/seekers/<you>/profile.yaml` (see `scripts/fo_demo.py` for the fields: name, headline,
-   location, sources, search_terms, min_score).
-2. Give Claude your resume as a PDF or Word file and ask it to save it. It calls `save_base_resume`,
-   which writes `data/seekers/<you>/base_resume.yaml` and checks every fact against your file.
-3. Register yourself (`add_seeker`), then pin the session to you: set `JOBPILOT_SEEKER_ID=<your id>`
-   and copy `.mcp.fo-demo.json.example` to `.mcp.json`, pointing `JOBPILOT_DB` at `data/jobpilot.db`.
-4. Log in to Fo with `/mcp` (restart Claude Code after adding it).
+```bash
+python -m jobpilot.onboard --name "Your Name" --resume ~/Downloads/resume.pdf --role "Product Manager" \
+  --location "India" --terms "product manager,technical product manager" --sources indeed_in,foundit_in,himalayas_in \
+  --note "pay: 20 lakh a year or more"
+python -m jobpilot.doctor --seeker 1        # tells you exactly what is still missing
+```
 
-## 2. Find and judge jobs
-
-"Run my search" -> `run_my_search`; "what are my best matches?" -> `my_matches`. Scoring uses the
-`[scoring]` model in `config.toml` (use `haiku` to save credits).
+`onboard` copies your resume into `data/seekers/<name>/` (git-ignored), reads its text (the file every resume fact is later
+checked against), writes a starter profile, registers you, and prints the id. Then pin your MCP session
+(`JOBPILOT_SEEKER_ID=<id>`, see `.mcp.fo-demo.json.example`), start Claude Code, and ask it to save your structured resume with
+`save_base_resume`. Log in to Fo with `/mcp` (restart Claude Code after adding it).
 
 ## 2a. Your day-to-day tools
 

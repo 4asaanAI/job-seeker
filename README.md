@@ -14,14 +14,14 @@ can apply when I say yes (verified on the request side; the one live attempt sto
 Built for the GSD hackathon. JobPilot already existed; the Fo link, the safety layer, tailored resumes and the
 unattended digest are what was built for it.
 
-> Fo can email, call and buy, and job posts are written by strangers. So Fo never sees a job post: it receives only an id,
-> a score and a vetted title, and every Fo action asks for permission first.
+> Fo can email, call and buy, and job posts are written by strangers. So JobPilot never forwards a job post to Fo: digests carry only an id,
+> a score and a vetted title. (When you ask Fo to apply, it opens the company's own page itself, which is why every request is
+> vetted and every Fo action asks permission first.)
 
 ## Using it with Claude Code (macOS or Linux)
 
 Copy `.mcp.fo-demo.json.example` to `.mcp.json` (the older `.mcp.json.example` is the Windows layout), set `JOBPILOT_PYTHON`,
-`JOBPILOT_DB`, `JOBPILOT_OUT` and `JOBPILOT_SEEKER_ID`, start Claude Code, and log in to Fo with `/mcp`. New to it? Ask Claude:
-"start with my resume" and use `docs/APPLYING.md`. One-call status: `my_dashboard`. Login-gated jobs: `manual_apply_packet`.
+`JOBPILOT_DB`, `JOBPILOT_OUT` and `JOBPILOT_SEEKER_ID`, start Claude Code, and log in to Fo with `/mcp`. New to it? Run `python -m jobpilot.onboard --help`, then `python -m jobpilot.doctor`; steps are in `docs/APPLYING.md`. One-call status: `my_dashboard`. Login-gated jobs: `manual_apply_packet`.
 
 ## Try it in three minutes (no accounts, nothing is sent)
 

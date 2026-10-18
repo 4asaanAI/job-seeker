@@ -35,7 +35,7 @@ def test_apply_message_has_every_rule_and_forbids_calendar_events():
                  "ONLY after I confirm", "Do NOT create any calendar event", "only if the company itself sends me an interview invitation"):
         assert must in m
     lines = m.splitlines()
-    marker = next(l for l in lines if l.endswith("\n") or len(l) == 16)
+    marker = next(l for l in lines if len(l) == 16 and all(c in '0123456789abcdef' for c in l))
     assert m.count(marker) == 3 and "resume facts" in m
 
 
@@ -114,7 +114,6 @@ def test_apply_candidates_orders_by_route_and_leaves_out_done_jobs(env):
     https_link(store, ids[0], "https://www.foundit.in/job/1")
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
     https_link(store, ids[2], "https://himalayas.app/companies/a/jobs/3")
-    store.record_application(sid, ids[3], "applied") if False else None
     out = tools["apply_candidates"](sid)
     assert out["ok"]
     routes = [i["route"] for i in out["items"]]
