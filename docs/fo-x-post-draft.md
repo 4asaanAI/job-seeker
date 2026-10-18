@@ -1,10 +1,21 @@
-# X quote-post draft (on Wajo's MCP launch post)
+# X quote-post (on Wajo's MCP launch post). Deadline: Oct 19, 4:00pm PT.
 
-Draft 1:
-I built JobPilot x Fo: my job search now texts me.
-JobPilot scores new roles, Fo delivers the matches and books my follow-ups.
-Job posts are written by strangers, so Fo only ever gets an id, a score and a scrubbed title.
-Repo + 60s demo below. @wajo_ai #GSDhackathon
+## Option 1 (recommended)
+My job search now texts me.
+JobPilot scores new roles. Fo delivers the matches to my phone and books the follow-up on my calendar. I just talk to Claude.
+Job posts are written by strangers, so Fo only ever sees an id, a score and a vetted title. Never the post.
+Demo + code: <REPO LINK> @wajo_ai #GSDhackathon
 
-Attach: the demo clip (phone buzzing, then Claude tailoring a resume, then the calendar entry).
-Add the repo link before posting. Post by the deadline (Oct 19, 4:00pm PT), with margin.
+## Option 2 (shorter)
+Built JobPilot x Fo: Claude finds the jobs, Fo does the real-world part (texts, calendar, follow-ups).
+Safe by design: Fo gets an id and a score, never the job post. 490 tests, real MCP end to end.
+<REPO LINK> @wajo_ai
+
+## Attach
+60-90s screen recording: phone buzzes with 3 matches -> ask Claude "prepare my application for the Fabrikam role"
+-> Claude shows the permission prompt before calling Fo (keep it on screen) -> calendar entry appears.
+Use the fictional seeker (python scripts/fo_demo.py --send). No real resume or contacts on screen.
+
+## Before posting
+- Repo must be public (or judges invited) and the link filled in above.
+- Post with hours to spare, not at 3:59pm.
