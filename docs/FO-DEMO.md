@@ -45,6 +45,8 @@ authenticate Fo with `/mcp` (or set `FO_API_KEY`).
 
 ## Demo script (60-90 seconds)
 
+Start from the Claude session, never by texting Fo "use JobPilot": Fo cannot see JobPilot and will say so.
+
 1. `python scripts/fo_demo.py --send`: the phone buzzes with three matches.
 2. In Claude Code: "What new matches do I have?" (JobPilot answers).
 3. "Tailor my resume for the Fabrikam role." (JobPilot writes a DOCX; show the path).

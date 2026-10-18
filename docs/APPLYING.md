@@ -33,6 +33,11 @@ against the demo folder, and never put your real resume in anything you post pub
 
 ## Limits (so you are not surprised)
 
+- Talk to Claude, not to Fo, to use JobPilot. The link runs one way (Claude calls Fo); Fo cannot see JobPilot.
+  If you text Fo directly, it will say it has no JobPilot tool. That is expected.
+- Fo says it can drive a website in a browser for you (searches, filling application forms). This is Fo's own
+  claim and is not tested here; ask Fo to show you what a form needs before it submits.
+
 - Fo takes text only: it cannot attach a file. Applications go as pasted resume text, or Fo works
   through whatever form or email route the posting offers. Many postings need a web form or account.
   How well Fo handles those is up to Fo; ask it to tell you before it submits.
