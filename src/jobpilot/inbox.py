@@ -53,6 +53,7 @@ GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s
 MAX_COMMANDS = 3
 MAX_OPEN_CODES = 3
 MAX_DAILY_GOOGLE = 10
+MAX_DAILY_TRACKER = 5          # sheet refreshes started by outcome texts
 READ_TOOLS = "mcp__fo__list_fo_conversations,mcp__fo__get_fo_conversation"
 HELP = "JobPilot commands: jp matches | jp status | jp tailor <id> | jp apply <id> | jp sync | jp doc <id> | jp letter <id> | jp deck | jp replies | jp interview|rejected|applied|withdrawn <id>"
 
@@ -272,6 +273,8 @@ def _google(store: Store, sid: int, out_dir: Path, apply_client, google_on: bool
         store.record_event(f"phone_{kind}", str(doc), sid, doc)     # before sending: a lost reply must not make a second Doc
         result = apply_client.send(built["message"])
         what = f"a cover letter for id {doc}" if kind == "letter" else f"a Google Doc for id {doc}"
+    if result.status == "busy":
+        return "JobPilot: a sheet update is still running. Try again in a few minutes."
     if result.status == "complete":
         return f"JobPilot: Fo has updated {what}. Its reply with the link is in your Fo chat."
     return f"JobPilot: Fo did not confirm {what} ({result.status}). Try again later."
@@ -315,13 +318,7 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
     if m.group(4):
         return _apply_preview(store, sid, out_dir, int(m.group(4)))
     if m.group(5):
-        reply = _apply_yes(store, sid, out_dir, m.group(5).lower(), apply_client)
-        if google_on and reply.startswith("JobPilot: Fo has your application"):
-            try:
-                google.send_tracker(store, sid, apply_client)        # best effort: the apply already happened
-            except Exception:  # noqa: BLE001
-                pass
-        return reply
+        return _apply_yes(store, sid, out_dir, m.group(5).lower(), apply_client)
     if m.group(6):
         return _google(store, sid, out_dir, apply_client, google_on, doc=None)
     if m.group(8):
@@ -335,6 +332,20 @@ def reply_for(store: Store, sid: int, out_dir: Path, text: str, apply_client=Non
     if m.group(7):
         return _google(store, sid, out_dir, apply_client, google_on, doc=int(m.group(7)))
     return _tailor(store, sid, out_dir, int(m.group(3)))
+
+
+_CHANGED = re.compile(r"^JobPilot: (id \d+ recorded as |Fo has your application)")
+
+
+def _refresh_tracker(store: Store, sid: int, apply_client) -> None:
+    """One best-effort sheet refresh after the outcomes of a poll. The outcomes are already recorded and answered."""
+    if store.event_count_since(sid, "phone_tracker", 24) >= MAX_DAILY_TRACKER:
+        return
+    store.record_event("phone_tracker", "refresh", sid)               # before sending: a lost reply must not allow a storm
+    try:
+        google.send_tracker(store, sid, apply_client)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 SEEN_TTL = 72 * 3600          # the reader only looks back 48 hours
@@ -393,16 +404,20 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
             fp = fingerprint(msg)
             if fp not in seen and all(fp != t[0] for t in todo):
                 todo.append((fp, msg["text"]))
-        done, failure = 0, None
+        done, failure, changed = 0, None, False
         for fp, text in todo[:max_commands]:
+            reply = _safe_reply(store, seeker_id, out_dir, text, apply_client, google_on)
             try:
-                send(None, _safe_reply(store, seeker_id, out_dir, text, apply_client, google_on))   # raises unless Fo confirms
+                send(None, reply)             # raises unless Fo confirms
             except FoError as exc:
                 failure = failure or exc      # this one is retried next poll; the others still run
                 continue
             seen[fp] = time.time()
             _save(state_path, seen)
             done += 1
+            changed = changed or bool(_CHANGED.match(reply))
+        if changed and google_on and apply_client is not None:
+            _refresh_tracker(store, seeker_id, apply_client)
         if failure and not done:
             raise failure
         return done

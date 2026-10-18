@@ -6,19 +6,25 @@ email, calendar events and following instructions found in the data.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 import secrets
+from pathlib import Path
+from types import SimpleNamespace
 
 from .fo import clean
 from .joblist import _inert
+from .paths import jobpilot_home
+from .profiles import seeker_min_score
 
 TRACKER_NAME = "JobPilot Tracker"
 DECK_NAME = "JobPilot Progress"
 EXPORT_FOLDER = "JobPilot Exports"
-STATUSES = ("match", "started", "applied", "interview", "rejected", "withdrawn", "expired", "stale", "offer")
+STATUSES = ("match", "started", "applied", "interview", "rejected", "withdrawn", "deadline passed", "stale", "offer", "expired")
 RESUME_FOLDER = "JobPilot Resumes"
-HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated")
-MAX_APPS, MAX_MATCHES = 30, 10
+HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated", "First seen", "Deadline")
+MAX_ROWS, MAX_APPS, MAX_CLOSED = 100, 50, 15          # one request, so the cap is on the whole request
+BUSY = SimpleNamespace(status="busy", response="")      # another refresh of the sheet is still running
 
 _RULES = (
     "Rules, all of them:\n"
@@ -46,8 +52,11 @@ TRACKER_FORMAT = (
     "column widths that fit (Job and Company wide, ID and Fit score narrow); ID and Fit score right-aligned as numbers; "
     "dates as YYYY-MM-DD; light grey banded rows; a dropdown on the Status column limited to: " + ", ".join(STATUSES) + "; "
     "conditional colours on Status (match = blue, started = amber, applied = green, interview = bold green, "
-    "rejected = red, offer = bold green, withdrawn, expired and stale = grey). Add a second tab named Summary with the count of rows per status "
-    "(COUNTIF formulas on the Status column are fine there and only there) and a bar chart of those counts.\n")
+    "rejected = red, offer = bold green, deadline passed = orange, withdrawn, expired and stale = grey). Add a second tab named Summary with the count of rows per status "
+    "(COUNTIF formulas on the Status column are fine there and only there), a bar chart of those counts, the counts "
+    "'New since yesterday' (First seen is yesterday or today) and 'Closing within 7 days' (Deadline within 7 days), and a note: "
+    "'Edits here do not reach JobPilot. To record an outcome text jp applied, jp interview, jp rejected or jp withdrawn followed "
+    "by the job ID. Stale means no longer listed; deadline passed means the closing date is over.'\n")
 
 DOC_FORMAT = (
     "Style the resume (never shorten, merge or drop anything to fit a page) using real named styles, not manual formatting: the name line as Title, the "
@@ -57,23 +66,49 @@ DOC_FORMAT = (
     "Do not use a table for layout, images, columns or text boxes, so that applicant systems can read it.\n")
 
 
-def tracker_rows(apps: list[dict], matches: list[dict]) -> list[list[str]]:
-    """Applications first, then good open matches not yet applied to. Every cell is vetted and formula-inert."""
+_SHEET_OPS = re.compile(
+    r"\banyone with\b|\bpermissions?\b|\boverwrite\b|\bpublish\b|"
+    r"\b(mark|set|change|update|make|move|rename|clear|remove|share)\b.{0,30}\b(rows?|sheet|columns?|tab|status|stale|"
+    r"rejected|applied|interview|public)\b", re.I)
+
+
+def _cell(text: object, limit: int) -> str:
+    """A tracker cell: vetted text, and nothing that reads like an operation on the sheet itself."""
+    out = clean(text, limit)
+    return "[withheld]" if _SHEET_OPS.search(out) else out
+
+
+def _day(value: object) -> str:
+    return str(value or "")[:10]
+
+
+def tracker_rows(apps: list[dict], tracked: list[dict]) -> list[list[str]]:
+    """At most MAX_ROWS rows: the newest applications, then jobs whose deadline just passed, then the best open matches.
+
+    `tracked` comes from Store.tracked_jobs (each item says whether it is closed). Status: an application's own status;
+    otherwise `deadline passed` for a closed job and `match` for an open one. Every cell is vetted and formula-inert."""
     seen, rows = set(), []
     # newest first; a "started" application has no date yet and is the newest of all
     apps = sorted(apps, key=lambda a: a.get("response_at") or a.get("applied_at") or "9999", reverse=True)[:MAX_APPS]
     for a in apps:
         seen.add(a["posting_id"])
-        rows.append([str(int(a["posting_id"])), clean(a["title"], 60), clean(a["company_name"], 40), a["status"],
-                     "", (a.get("applied_at") or "")[:10], ((a.get("response_at") or a.get("applied_at")) or "")[:10]])
-    for m in matches[:MAX_MATCHES * 3]:
-        if len(rows) >= len(apps) + MAX_MATCHES:
-            break
-        if m["posting_id"] in seen or m["status"] in ("skipped", "applied", "expired") or (m["fit_score"] or 0) < 70:
-            continue
-        rows.append([str(int(m["posting_id"])), clean(m["title"], 60), clean(m["company_name"], 40), "match",
-                     f"{float(m['fit_score']):.0f}", "", ""])
+        rows.append([str(int(a["posting_id"])), _cell(a["title"], 60), _cell(a["company_name"], 40), a["status"],
+                     "", _day(a.get("applied_at")), _day(a.get("response_at") or a.get("applied_at")), "", ""])
+    fresh = [t for t in tracked if t["posting_id"] not in seen]
+    closed = [t for t in fresh if t["closed"]][:max(0, min(MAX_CLOSED, MAX_ROWS - len(rows)))]
+    opened = [t for t in fresh if not t["closed"]][:max(0, MAX_ROWS - len(rows) - len(closed))]
+    for t in opened + closed:
+        rows.append([str(int(t["posting_id"])), _cell(t["title"], 60), _cell(t["company_name"], 40),
+                     "deadline passed" if t["closed"] else "match", f"{float(t['fit_score']):.0f}", "", "",
+                     _day(t.get("first_seen_at")), _day(t.get("valid_through"))])
     return [[_inert(c) for c in r] for r in rows]
+
+
+def tracker_inputs(store, seeker_id: int, home: Path | None = None, today: str | None = None) -> list[list[str]]:
+    """The rows to send for this seeker, using their own score threshold."""
+    today = today or dt.date.today().isoformat()
+    min_score = seeker_min_score(store.get_seeker(seeker_id).profile_path, home or jobpilot_home())
+    return tracker_rows(store.applications(seeker_id, 500), store.tracked_jobs(seeker_id, min_score, today))
 
 
 def tracker_message(rows: list[list[str]], export: bool = False) -> str:
@@ -81,11 +116,17 @@ def tracker_message(rows: list[list[str]], export: bool = False) -> str:
     return (
         f'Please keep my job search record in a Google Sheet named "{TRACKER_NAME}" in my Google Drive. Find it, or '
         "create it if it does not exist (it starts with one tab). Row 1 is the header: " + " | ".join(HEADER) + ".\n"
-        "The lines between the markers are tab-separated rows in the same column order. For each, update the row "
-        "whose ID matches, or add a new row at the bottom. Never delete or reorder other rows, and write cells as plain "
-        "text, never as formulas (except the Summary tab's counts). A blank cell here means unknown: keep what the sheet already has. A row whose Status is match "
-        "and whose ID is not between the markers is no longer among my best open matches: set its Status to stale, do not delete it.\n" + TRACKER_FORMAT + _RULES +
-        "4. Afterwards tell me in one line how many rows you added and updated, and give me the sheet link.\n"
+        "The lines between the markers are tab-separated rows in the same column order. Match every cell to its column by the "
+        "header NAME in row 1, not by position: if First seen or Deadline is missing from row 1, add them after the last used "
+        "header, and never write into a column whose header is not in that list. Read column A once, then write all the rows "
+        "in ONE range update instead of cell by cell. For each row, update the row whose ID matches, or add a new row at the "
+        "bottom. Never delete or reorder other rows, and write cells as plain text, never as formulas (except the Summary "
+        "tab's counts). A blank cell here means unknown: keep what the sheet already has. Never move a status backwards: a "
+        "row already applied, interview, offer, rejected or withdrawn keeps that status. A row whose Status is match and "
+        "whose ID is not between the markers is no longer among my best open matches: set its Status to stale, do not delete "
+        "it.\n" + TRACKER_FORMAT + _RULES +
+        "4. Afterwards tell me in one line how many rows you added and updated, the final total number of data rows, and give "
+        "me the sheet link.\n"
         + (_export("sheet") if export else "") +
         f"{marker}\n{body}\n{marker}")
 
@@ -124,10 +165,24 @@ def cover_letter_message(posting_id: int, letter_text: str, export: bool = False
         f"{marker}\n{body}\n{marker}")
 
 
-def send_tracker(store, seeker_id: int, client):
-    """Ask Fo (through an already vetted client) to refresh the tracker sheet. None when there is nothing to record."""
-    rows = tracker_rows(store.applications(seeker_id, 500), store.best_matches(seeker_id, 25, open_only=True))
-    return client.send(tracker_message(rows)) if rows else None
+def send_tracker(store, seeker_id: int, client, home: Path | None = None, today: str | None = None):
+    """Ask Fo (through an already vetted client) to refresh the tracker sheet.
+
+    None when there is nothing to record; BUSY when another refresh started in the last 30 minutes has not finished
+    (two Fo turns writing one sheet would duplicate rows). A timeout ("working") keeps the lease open for 30 minutes."""
+    rows = tracker_inputs(store, seeker_id, home, today)
+    if not rows:
+        return None
+    if not store.claim_tracker(seeker_id):
+        return BUSY
+    try:
+        result = client.send(tracker_message(rows))
+    except Exception:
+        store.finish_tracker(seeker_id)
+        raise
+    if result.status != "working":
+        store.finish_tracker(seeker_id)
+    return result
 
 
 def deck_message(counts: dict[str, int], top: list[list[str]], export: bool = False) -> str:
@@ -146,14 +201,19 @@ def deck_message(counts: dict[str, int], top: list[list[str]], export: bool = Fa
         + f"{marker}\n{body}\n{marker}")
 
 
-def deck_inputs(store, seeker_id: int) -> tuple[dict[str, int], list[list[str]]]:
+def deck_inputs(store, seeker_id: int, home: Path | None = None,
+                today: str | None = None) -> tuple[dict[str, int], list[list[str]]]:
+    """Status counts (true counts, from the same query as the tracker) and the six best open matches as rows."""
+    today = today or dt.date.today().isoformat()
+    min_score = seeker_min_score(store.get_seeker(seeker_id).profile_path, home or jobpilot_home())
     counts: dict[str, int] = {}
     for a in store.applications(seeker_id, 500):
         counts[a["status"]] = counts.get(a["status"], 0) + 1
-    applied = {a["posting_id"] for a in store.applications(seeker_id, 500)}
-    good = [[str(int(m["posting_id"])), clean(m["title"], 60), clean(m["company_name"], 40), f"{float(m['fit_score']):.0f}"]
-           for m in store.best_matches(seeker_id, 25, open_only=True)
-           if m["posting_id"] not in applied and m["status"] not in ("skipped", "applied", "expired")
-           and (m["fit_score"] or 0) >= 70]
+    tracked = store.tracked_jobs(seeker_id, min_score, today, open_limit=100000, closed_limit=100000)
+    good = [t for t in tracked if not t["closed"]]
     counts["match"] = len(good)                  # the true count; only the first 6 rows are shown
-    return counts, [[_inert(c) for c in r] for r in good[:6]]
+    if len(tracked) > len(good):
+        counts["deadline passed"] = len(tracked) - len(good)
+    top = [[str(int(m["posting_id"])), clean(m["title"], 60), clean(m["company_name"], 40), f"{float(m['fit_score']):.0f}"]
+           for m in good[:6]]
+    return {k: v for k, v in counts.items() if v}, [[_inert(c) for c in r] for r in top]

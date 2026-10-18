@@ -112,15 +112,16 @@ def test_doc_is_not_requested_twice(env):
     assert len(fo.messages) == 1 and "already requested" in sent[-1]
 
 
-def test_tracker_keeps_newest_applications_and_caps_each_part():
+def test_tracker_keeps_newest_applications_and_caps_the_request():
     apps = [{"posting_id": i, "title": f"Job {i}", "company_name": "Acme", "status": "applied",
-             "applied_at": f"2026-09-{(i % 28) + 1:02d}T00:00:00+00:00", "response_at": None} for i in range(1, 51)]
+             "applied_at": f"2026-09-{(i % 28) + 1:02d}T00:00:00+00:00", "response_at": None} for i in range(1, 61)]
     apps.append({"posting_id": 99, "title": "Fresh", "company_name": "Acme", "status": "started",
                  "applied_at": None, "response_at": None})
-    matches = [{"posting_id": 100 + i, "title": f"M{i}", "company_name": "B", "status": "new", "fit_score": 90} for i in range(30)]
-    rows = google.tracker_rows(apps, matches)
+    tracked = [{"posting_id": 100 + i, "title": f"M{i}", "company_name": "B", "fit_score": 90, "closed": False,
+                "first_seen_at": "2026-10-01T00:00:00", "valid_through": None} for i in range(80)]
+    rows = google.tracker_rows(apps, tracked)
     ids = [r[0] for r in rows]
-    assert "99" in ids and len(rows) == google.MAX_APPS + google.MAX_MATCHES
+    assert "99" in ids and len(rows) == google.MAX_ROWS and sum(1 for r in rows if r[3] == "applied") == google.MAX_APPS - 1
 
 
 def test_requests_only_use_files_i_own_and_treat_drive_content_as_data():

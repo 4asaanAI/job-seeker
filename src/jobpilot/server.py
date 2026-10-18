@@ -925,7 +925,7 @@ def build_tools(
         try:
             sid = _check(seeker_id)
             _fo_seeker_guard(sid)
-            rows = google.tracker_rows(store.applications(sid, 500), store.best_matches(sid, 25, open_only=True))
+            rows = google.tracker_inputs(store, sid)
             if not rows:
                 return {"ok": True, "seeker_id": sid, "message": None, "note": "Nothing to record yet."}
             return {"ok": True, "seeker_id": sid, "rows": len(rows), "message": google.tracker_message(rows, export_xlsx),

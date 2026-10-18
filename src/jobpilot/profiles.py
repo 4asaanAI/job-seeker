@@ -76,3 +76,14 @@ def load_companies(path: Path) -> list[CompanyRow]:
                 )
             )
     return rows
+
+
+def seeker_min_score(profile_path: str | Path, home: Path) -> float:
+    """The seeker's own score threshold. Never raises: a missing or broken profile, or a value that is not a finite
+    number, gives 70; the result is kept between 50 and 100 so a stray 0 cannot dump every scored posting."""
+    try:
+        path = Path(profile_path)
+        value = float(load_profile(path if path.is_absolute() else Path(home) / path).min_score)
+    except Exception:  # noqa: BLE001 - any trouble reading a profile means the default
+        return 70.0
+    return min(100.0, max(50.0, value)) if value == value and abs(value) != float("inf") else 70.0

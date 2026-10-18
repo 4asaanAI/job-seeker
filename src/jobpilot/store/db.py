@@ -1288,6 +1288,58 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def tracked_jobs(self, seeker_id: int, min_score: float, today: str, open_limit: int = 100,
+                     closed_limit: int = 15, closed_days: int = 14) -> list[dict]:
+        """Jobs for the tracker sheet: good open matches, and good jobs whose deadline passed in the last `closed_days`.
+
+        Open means the same as best_matches(open_only=True) (not skipped, applied or nudged out; seen in the last 45
+        days). Closed needs a real deadline before `today`. A job with any application row is the application list's
+        business, never listed here. `today` is YYYY-MM-DD and is passed in so the result never depends on the clock."""
+        base = ("SELECT jp.id AS posting_id, jp.title, jp.company_name, s.fit_score, sj.status AS seeker_status, "
+                "       sj.first_seen_at, jp.valid_through, {closed} AS closed "
+                "FROM scores s JOIN seeker_jobs sj ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
+                "JOIN job_postings jp ON jp.id = s.posting_id "
+                "WHERE s.seeker_id = ? AND s.fit_score >= ? "
+                "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.seeker_id = s.seeker_id AND a.posting_id = s.posting_id) ")
+        with self._lock:
+            opened = self.conn.execute(
+                base.format(closed=0) + "AND (jp.valid_through IS NULL OR jp.valid_through >= ?) "
+                "AND sj.status NOT IN ('skipped', 'applied', 'expired') AND jp.last_seen_at >= date(?, '-45 days') "
+                "ORDER BY s.fit_score DESC, sj.first_seen_at DESC, jp.id DESC LIMIT ?",
+                (seeker_id, float(min_score), today, today, max(0, int(open_limit)))).fetchall()
+            closed = self.conn.execute(
+                base.format(closed=1) + "AND jp.valid_through IS NOT NULL AND jp.valid_through < ? "
+                "AND jp.valid_through >= date(?, ?) AND sj.status NOT IN ('skipped', 'applied') "
+                "ORDER BY jp.valid_through DESC, s.fit_score DESC, jp.id DESC LIMIT ?",
+                (seeker_id, float(min_score), today, today, f"-{int(closed_days)} days", max(0, int(closed_limit)))).fetchall()
+        return [dict(r) for r in opened] + [dict(r) for r in closed]
+
+    def claim_tracker(self, seeker_id: int, minutes: int = 30) -> bool:
+        """Take the one lease for refreshing the tracker sheet. False when a refresh started in the last `minutes`
+        has not finished (two Fo turns writing one sheet would duplicate rows). Atomic across processes."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+        with self._lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                def latest(kind):
+                    return self.conn.execute("SELECT MAX(created_at) FROM events WHERE seeker_id = ? AND kind = ?",
+                                             (seeker_id, kind)).fetchone()[0]
+                pending, done = latest("tracker_pending"), latest("tracker_done")
+                if pending and pending >= cutoff and (done is None or done < pending):
+                    self.conn.execute("ROLLBACK")
+                    return False
+                self.conn.execute("INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) VALUES (?,?,?,?,?)",
+                                  (seeker_id, None, "tracker_pending", "refresh", _now()))
+                self.conn.execute("COMMIT")
+                return True
+            except BaseException:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                raise
+
+    def finish_tracker(self, seeker_id: int) -> None:
+        self.record_event("tracker_done", "refresh", seeker_id)
+
     def pending_followups(self, seeker_id: int, limit: int = 5) -> list[dict]:
         """Return deliberate 3-day nudges and 7-day expiry candidates."""
         limit = max(0, min(int(limit), 100))

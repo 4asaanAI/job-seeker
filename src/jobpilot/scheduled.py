@@ -99,13 +99,18 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory) -> None:
                     raise ValueError("[fo] seeker_id is not an active seeker")
                 send = fo_sender(fo_client)
                 ids = {cfg.fo_seeker_id}
-                print(f"fo digests sent: {push_digests(store, send, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)}")
-                print(f"fo follow-ups sent: {push_followups(store, send, render_fo_followups, channel='fo', seeker_ids=ids)}")
-                fo_id = cfg.fo_seeker_id
-                if cfg.google_enabled:
-                    from .google import send_tracker
-                    result = send_tracker(store, cfg.fo_seeker_id, fo_client)
-                    print(f"google tracker: {result.status if result else 'nothing to record'}")
+                try:
+                    print(f"fo digests sent: {push_digests(store, send, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)}")
+                    print(f"fo follow-ups sent: {push_followups(store, send, render_fo_followups, channel='fo', seeker_ids=ids)}")
+                    fo_id = cfg.fo_seeker_id
+                finally:
+                    if cfg.google_enabled:         # its own guard: a failed digest must not skip the sheet
+                        try:
+                            from .google import send_tracker
+                            result = send_tracker(store, cfg.fo_seeker_id, fo_client, home=home)
+                            print(f"google tracker: {result.status if result else 'nothing to record'}")
+                        except Exception as exc:  # noqa: BLE001
+                            print(f"google tracker failed: {type(exc).__name__}: {exc}")
         except Exception as exc:  # noqa: BLE001 - reported, Telegram still runs
             print(f"fo delivery failed: {type(exc).__name__}: {exc}")
     try:
