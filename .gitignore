@@ -34,3 +34,4 @@ config.local.toml
 data/daily.log
 data/inbox.log
 data/fo_inbox_seen.*
+data/runs.jsonl
