@@ -185,6 +185,24 @@ def tracker_message(rows: list[list[str]], export: bool = False, link: str | Non
         f"{marker}\n{body}\n{marker}")
 
 
+def tracker_row_message(rows: list[list[str]], link: str | None = None) -> str:
+    """A short request for one or a few rows (after an application or an outcome). The full refresh rewrites ~100 rows and can
+    take Fo 15+ minutes; this touches only the rows given, with no reformatting and no stale marking."""
+    link_col = HEADER.index("Link")
+    marker, body = _fence("\n".join("\t".join(c if i == link_col else _HEX_RUN.sub("", c) for i, c in enumerate(r))
+                                     for r in rows), scrub=False)
+    sheet = _SHEET_URL.search(link or "")
+    where = (f'In my Google Sheet "{TRACKER_NAME}" (id {sheet.group(1)}), Tracker tab only: ' if sheet else
+             f'In my Google Sheet "{TRACKER_NAME}" in my Google Drive, Tracker tab only: ')
+    return (
+        where + "for each tab-separated line between the markers, update the row whose ID (column A) matches, or add one "
+        "row at the bottom if none does. The columns are: " + " | ".join(HEADER) + ". Match cells to the header names in "
+        "row 1. A blank cell here means keep what the sheet has. Change no other row, write plain text, keep the existing "
+        "formatting.\n" + _RULES +
+        "4. Afterwards tell me in one line which row numbers you wrote.\n"
+        f"{marker}\n{body}\n{marker}")
+
+
 def resume_doc_message(title: str, company: str, posting_id: int, resume_text: str, export: bool = False) -> str:
     marker, body = _fence(resume_text)
     return (

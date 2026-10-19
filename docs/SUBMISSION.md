@@ -58,5 +58,5 @@ through either, so that job is recorded as withdrawn.
 sheet session. Emails and phone numbers are masked.
 
 ## G. Run count
-18 runs, 12 succeeded, 6 failed (`docs/run-count.md`, generated from the run log). Fo submitted two applications to Turing. Paytm
+19 runs, 13 succeeded, 6 failed (`docs/run-count.md`, generated from the run log). Fo submitted two applications to Turing. Paytm
 blocked Fo every time. One early test against Turing's form submitted before it should have.
