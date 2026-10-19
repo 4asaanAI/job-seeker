@@ -1,63 +1,110 @@
 # Fo bridge: JobPilot reachable from Fo on text, email and calls
 
-Status: design, waiting for approval. Nothing here is built yet.
+Status: design, revised after a security review and an architecture review (Oct 19). Waiting for approval. Nothing is built.
 
 ## Problem
 
 The loop in the demo works only inside Claude Code. When I text, email or call Fo directly, nothing reaches JobPilot:
-Fo's API does not return my own texts (checked again on Oct 19), and Fo has no way to call JobPilot. Fo confirmed on
-Oct 19 that it can call a custom MCP server on any channel, as long as the server is reachable over public HTTPS. It cannot
+Fo's API does not return my own texts (checked again on Oct 19), and Fo has no way to call JobPilot. Fo confirmed on Oct 19
+that it can call a custom MCP server on any channel if the server is reachable over public HTTPS with a stored key. It cannot
 forward my messages to a webhook.
 
 ## Goal
 
-From my phone I can text Fo "find me product jobs", "apply to 689" or "what's on my sheet", and Fo calls JobPilot to do it,
-with the same safety rules as in Claude Code: the job-post filter, the review draft before any submit, and the hand-off when a
-site blocks it.
+From my phone I text Fo "find me product jobs", "apply to 689" or "what's on my sheet", and Fo calls JobPilot. The safety rules
+stay as strong as in Claude Code: job posts never reach Fo raw, nothing is submitted without my approval, and a blocked site
+ends in a hand-off.
+
+## Scope: one user, opt-in
+
+Pinned to my seeker (id 1). One key, held only by my Fo account. Runs on my Mac, off until I turn it on. Other JobPilot users
+keep Claude Code, the daily run and Telegram; nothing about them changes.
+
+## The one big change from the first draft: Fo cannot approve itself
+
+In Claude Code, I approve each Fo action before Fo gets it. Through the bridge, Fo would both ask me and act, and anything Fo
+reads (a recruiter email, a web page) could steer it. So:
+
+- **Submitting needs a code from my phone.** `build_fo_apply_message` through the bridge always builds a review-only request.
+  To submit, Fo must call `approve_submit(posting_id, code)` with a 6-digit code that JobPilot texts to my phone (reusing the
+  existing phone-approval flow, `_phone_approval_ok`). Codes are single-use, tied to one job and expire in 30 minutes. Fo
+  never sees a code it did not get from me.
+- **Batch approval does not exist on the bridge.** `batch_approved`, `plan_id`, `phone_code`, `set_review_mode` and
+  `plan_apply_batch` are not exposed.
 
 ## Design
 
-**One extra way to start the existing server.** `python -m jobpilot.bridge` starts the same JobPilot tool surface over HTTP
-(FastMCP's HTTP transport) on 127.0.0.1, pinned to one seeker. No new business logic; it reuses `build_tools`.
+**Server.** `python -m jobpilot.bridge` starts a new FastMCP server (fastmcp 4.0.5, pinned in pyproject to `>=4.0,<4.1`) with
+`transport="http"`, `stateless_http=True`, `json_response=True`, at `127.0.0.1:8765/mcp`. It registers tools from an
+explicit list, never by filtering `build_tools` (which would bring along `web_fetch`, resume editing and more). Each tool is a
+thin wrapper with no `seeker_id` parameter; the pinned id is bound inside. At startup it refuses to run unless the config's Fo
+seeker id equals the pin.
 
-**Public HTTPS through Tailscale Funnel** (already installed on this Mac). Funnel gives a fixed `https://<machine>.ts.net`
-address and forwards it to the local port. Moving it to a small server later changes only the address.
+**Public address.** Tailscale Funnel publishes only the `/mcp` path (`tailscale funnel --set-path /mcp 8765`). The server sets
+`allowed_hosts=["<machine>.ts.net", "127.0.0.1"]` (otherwise FastMCP answers 421), rejects any request with an `Origin` header,
+sends no CORS headers and caps request bodies at 64 KB. `tailscale serve status` is checked so nothing else is published. The
+hostname appears in public certificate logs, so scanning is expected from day one.
 
-**A secret key.** On first start, the bridge creates a random 32-byte key in `~/.config/jobpilot/fo_bridge_key` (mode 600,
-same pattern as the Fo API key). Every request must carry it; anything without it gets a 401 and is logged. I give the key
-to Fo through Fo's secure link, never in chat.
+**Key.** A `TokenVerifier` subclass compares the `Authorization: Bearer` key with `hmac.compare_digest`. The key is read from
+`~/.config/jobpilot/fo_bridge_key` on every request (deleting or rotating it revokes access at once). It is created with
+`os.open(O_CREAT|O_EXCL, 0o600)` and `secrets.token_urlsafe(32)`, never accepted in a query string, never logged. `--rotate`
+makes a new one. A Starlette middleware logs every 401 and blocks an IP after 10 failures in 10 minutes. A config switch
+`[bridge] enabled` is checked on every request as an off switch.
 
-**A short list of tools Fo may call.** The bridge exposes only these:
+**Tools Fo may call, and what they return.**
 
-| Tool | Why Fo needs it | Limit |
+| Tool | Returns / does | Guard |
 |---|---|---|
-| `my_matches`, `apply_candidates`, `my_status`, `my_tracker_link` | answer "what did you find" | read only |
-| `refresh` (new, wraps `jobpilot.refresh`) | "find me jobs": search and score | 3 per day; starts in the background and returns at once, because it takes minutes |
-| `update_my_profile` | "only remote roles" | the existing checks |
-| `build_fo_apply_message` | "apply to 689" | the request carries the review-draft and hand-off rules; Fo still asks me before submitting |
-| `record_application` | "it went through" | statuses limited to applied, interview, rejected, withdrawn |
-| `build_fo_tracker_message` (with `posting_id`) | update one sheet row | the existing busy-lock |
+| `my_matches`, `apply_candidates` (bridge versions) | job id, score, checked title and company (`safe_title_company`), route. Never the link, location or the scorer's notes | items that fail the check are dropped |
+| `my_status`, `my_tracker_link`, `refresh_status` | counts, the sheet link, refresh progress | read only |
+| `refresh` | starts search + scoring in a background thread, returns at once | one at a time (lock), counted as `manual_search` so the daily cap of 3 is shared with `run_my_search`; a file lock shared with the 08:00 daily run; wall-clock timeout; never delivers texts |
+| `update_my_profile` | changes search terms, headline, location | headline cleaned; cannot remove every source; returns before/after; every change logged for undo |
+| `build_fo_apply_message` | a review-only apply request | writes a `started` row in the same lock as the duplicate check, so two channels cannot start the same job twice |
+| `approve_submit` | releases the submit for one job | needs the phone code |
+| `record_application` | applied / interview / rejected only | forward moves only; `applied` only if a `started` row exists; never `withdrawn`; the previous status is logged |
+| `update_tracker_row` | one-row sheet update (from today's fix) | takes the sheet lease, released when done or after 30 minutes |
 
-Not exposed: resume editing, the web tools, cover letters, onboarding, operator tools.
+The internal `refresh` uses a private operator-mode tool set that is never registered, calls discovery only for the pinned
+seeker and scores with the neutral prompt. Tool descriptions are written for Fo ("do this yourself; confirm with the user on
+the same channel"), not for Claude.
 
-**Job posts still never reach Fo raw.** Every result that carries job text goes through the same vetting as the texts JobPilot
-already sends (checked titles, no descriptions, safe links).
+**Errors and storage.** SQLite runs in WAL mode with a busy timeout. Wrappers catch database errors and return fixed messages
+with no paths or internals.
 
-## What stays the same, and the limits
+**Audit log.** One line per call in `data/bridge.log`: time, tool, arguments with answers and notes redacted, ok or error, and
+the client IP. Never the key.
 
-- Fo asks me on the same channel before submitting anything. That rule lives in the apply request, not in the bridge.
-- The Mac must be awake and online for Fo to reach JobPilot. If it is not, Fo says it cannot reach JobPilot. A small server
-  fixes this later.
-- Scoring uses the `claude` CLI on this Mac, so `refresh` only runs where that works.
-- Anti-bot checks and job-board logins still stop Fo. That is the hand-off, not a bug.
+**Running it.** A `com.jobpilot.bridge` LaunchAgent with KeepAlive, a full PATH and HOME (so the `claude` CLI works), and log
+rotation. `doctor` checks the port, tailscaled, the Funnel and the key file. An unauthenticated `/health` route returns "ok"
+and nothing else. If the bridge is down, Funnel returns 502, and Fo's instructions say: "tell me JobPilot is offline; do not
+retry or guess."
 
-## Testing
+## Open questions for Wajo (asked before building)
 
-- Unit tests: a request without the key is refused; tools outside the list are not exposed; `refresh` respects its daily cap
-  and returns at once; `record_application` refuses other statuses.
-- Live test from my phone: text Fo "find me jobs" → matches come back; "apply to <id>" → review draft by text → "submit" → the
-  sheet row updates. Each run goes in the run log.
+1. Does Fo connect with streamable HTTP or SSE?
+2. Does it send the stored key as `Authorization: Bearer`?
+3. Are Fo's outgoing IP addresses published? If so, the bridge accepts only those.
+
+## Limits
+
+- The Mac must be awake and online. A small server removes this later.
+- Anti-bot checks and job-board logins still stop Fo. That is the hand-off, by design.
+
+## Tests
+
+- HTTP: 401 without the key or with a wrong key; 200 with the key and the Funnel Host; 421 for other hosts; a request with an
+  Origin header is rejected; the tool list equals the allowlist exactly.
+- Pinning: no exposed tool takes a seeker id; startup refuses a mismatched config.
+- Vetting: a seeded hostile posting (title, company, scorer notes carrying instructions) never appears in any bridge output.
+- Approval: `build_fo_apply_message` never yields a submit-ready request; `approve_submit` refuses a wrong, reused or expired code.
+- Concurrency: two parallel apply calls for one job, exactly one succeeds; a second `refresh` is refused; the file lock blocks
+  scoring while the daily run holds it; the shared daily cap counts both tools.
+- Records: `record_application` refuses `withdrawn`, backward moves, and `applied` without a `started` row.
+- Errors: a locked database returns a fixed error, not a crash.
+- Live, each in the run log: text, email and a call to Fo; a test during the 08:00 run; a refresh across a Mac sleep and wake;
+  the bridge down.
 
 ## Rollback
 
-Stop the bridge and turn off the Funnel (`tailscale funnel off`). Delete the key file so the old key stops working.
+`python -m jobpilot.bridge --rotate` (old key stops working at once), set `[bridge] enabled = false`, `tailscale funnel off`,
+unload the LaunchAgent.
