@@ -1441,6 +1441,11 @@ def build_tools(
         "my_applications": my_applications,
         "get_followups": get_followups,
     }
+    def _vault_folder(seeker_id: int) -> Path:
+        """Private (never an MCP tool): the folder that holds this seeker's saved answers."""
+        return _base_resume_path(_check(seeker_id)).parent
+
+    tools["_vault_folder"] = _vault_folder
     tools.update(build_extra_tools(
         store, out_dir, home, check=_check, profile_for=_profile_for, resume_path=_base_resume_path,
         selection=_selection, fo_guard=_fo_seeker_guard,

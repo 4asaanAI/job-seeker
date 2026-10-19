@@ -29,6 +29,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .apply import safe_title_company
+from .bridge_more import NAMES as MORE_NAMES
 from .fo import clean
 from .paths import jobpilot_home
 
@@ -370,18 +371,37 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
 
     @guarded("update_my_profile")
     def update_my_profile(headline: str | None = None, location: str | None = None,
-                          search_terms: list[str] | None = None) -> dict:
-        """Change what JobPilot searches for. Only the fields given change. Tell the user what changed."""
+                          search_terms: list[str] | None = None, also_search: list[str] | None = None,
+                          seniority: list[str] | None = None, work_modes: list[str] | None = None,
+                          locations: list[str] | None = None, salary_floor: float | None = None,
+                          salary_currency: str | None = None, blacklist_companies: list[str] | None = None,
+                          whitelist_companies: list[str] | None = None,
+                          exclude_staffing_agencies: bool | None = None, source_weights: dict[str, float] | None = None,
+                          min_score: float | None = None, followup_days: int | None = None,
+                          target_companies: list[str] | None = None, sources: list[str] | None = None,
+                          exclude_keywords: list[str] | None = None) -> dict:
+        """Change the search profile; only the fields given change, and every scored job is re-weighed at once. Roles
+        (search_terms), cities (location, also_search), seniority, filters (work_modes remote/hybrid/onsite, locations,
+        salary_floor + salary_currency INR/USD/EUR/GBP), company lists (blacklist, whitelist, exclude_staffing_agencies),
+        board weights (source_weights -20..20), the digest threshold (min_score 50-100), follow-up days, target
+        companies (their careers feeds are found automatically), sources, exclude_keywords. Tell the user what changed."""
         if headline is not None:
             headline = clean(headline, 120)
             if headline == "[withheld]":
                 return {"ok": False, "error": "that headline cannot be used; use plain words"}
-        out = inner["update_my_profile"](pin, headline=headline, location=location, search_terms=search_terms)
+        given = {k: v for k, v in dict(
+            headline=headline, location=location, search_terms=search_terms, also_search=also_search,
+            seniority=seniority, work_modes=work_modes, locations=locations, salary_floor=salary_floor,
+            salary_currency=salary_currency, blacklist_companies=blacklist_companies,
+            whitelist_companies=whitelist_companies, exclude_staffing_agencies=exclude_staffing_agencies,
+            source_weights=source_weights, min_score=min_score, followup_days=followup_days,
+            target_companies=target_companies, sources=sources, exclude_keywords=exclude_keywords).items()
+            if v is not None}
+        out = inner["update_my_profile"](pin, **given)
         if out.get("ok"):
-            store.record_event("bridge_profile", json.dumps({"headline": headline, "location": location,
-                                                             "search_terms": search_terms}), pin)
-            prof = out.get("profile") or {}
-            return {"ok": True, "now": {k: prof.get(k) for k in ("headline", "location", "search_terms")}}
+            store.record_event("bridge_profile", json.dumps(given, default=str)[:1500], pin)
+            return {"ok": True, "now": {k: v for k, v in (out.get("profile") or {}).items() if k in given},
+                    "reweighted": out.get("reweighted"), "target_companies": out.get("target_companies")}
         return {"ok": False, "error": out.get("error", "not changed")}
 
     def _run_refresh():
@@ -559,16 +579,18 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         built = inner["build_fo_tracker_message"](pin, posting_id=int(posting_id))
         return {k: v for k, v in built.items() if k in ("ok", "message", "error", "code")}
 
-    return {f.__name__: f for f in (my_matches, apply_candidates, my_status, my_tracker_link, update_my_profile, refresh,
+    from .bridge_more import build_more
+    base = {f.__name__: f for f in (my_matches, apply_candidates, my_status, my_tracker_link, update_my_profile, refresh,
                                     refresh_status, build_fo_apply_message, approve_submit, record_application,
                                     update_tracker_row, form_profile, pre_submit_check, report_blocked,
                                     record_progress, report_submit_failed, cancel_application)}
+    return {**build_more(inner, pin, store, guarded), **base}
 
 
 ALLOWED = ("my_matches", "apply_candidates", "my_status", "my_tracker_link", "update_my_profile", "refresh",
            "refresh_status", "build_fo_apply_message", "approve_submit", "record_application", "update_tracker_row",
            "form_profile", "pre_submit_check", "report_blocked", "record_progress", "report_submit_failed",
-           "cancel_application")
+           "cancel_application") + MORE_NAMES
 
 
 # ---- serving ------------------------------------------------------------------------------------------------------------

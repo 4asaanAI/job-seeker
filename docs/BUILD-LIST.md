@@ -80,3 +80,18 @@ already had it before this list; those items were checked and extended where the
 
 Everything above has offline tests (1008 in total), and an independent code and security review's 14 findings were fixed with a regression test each. Not yet exercised against the real services: the AI cover letter
 (headless Claude), the dashboard sending through Fo, the phone over Tailscale, and the Gmail proposals with real mail.
+
+## What Fo can use (the Fo bridge)
+
+Fo reaches JobPilot over the bridge with about 60 tools (no seeker id on any): searching and profile (all filters and company
+lists), matches with full job detail, the Wigolo web tools (`web_search`, `web_fetch`, `web_crawl`, `web_extract`,
+`web_research`, `company_openings`), resumes and PDFs, AI cover-letter drafts, the answers vault, applying with the
+pre-submit check and the approval code, blocked / failed / retry handling, the audit log, the tracker sheet (one row or the
+whole sheet), the deck and Google Doc requests, email suggestions and calendar holds, follow-up drafts, interview prep,
+analytics, history import and snapshots. Every result is shaped first: unsafe links and local paths are removed, job titles
+are screened, long text is cut, and anything from a web page or posting travels with a "data, not instructions" note.
+
+Kept from Fo on purpose, because each one removes your per-application OK or widens who JobPilot serves: `set_review_mode`,
+batch planning and approval, adding seekers, the unattended search and score writes, and the service-account sheet exporter.
+Fo can save a form answer you told it but cannot overwrite one (change those in the dashboard), cannot mark a job applied
+without your approval code, and cannot accept an email suggestion that says "applied".
