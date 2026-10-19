@@ -35,3 +35,6 @@ data/daily.log
 data/inbox.log
 data/fo_inbox_seen.*
 data/runs.jsonl
+data/bridge*.log
+data/bridge.off
+data/scoring.lock
