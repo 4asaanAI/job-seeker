@@ -429,3 +429,25 @@ def test_every_apply_request_forbids_the_enter_key_that_submitted_a_form_early()
 def test_apply_requests_ask_fo_not_to_repeat_contact_details_in_its_report():
     m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME")
     assert "never repeat my email, phone number or home address" in m
+
+
+def test_apply_message_forbids_details_fo_remembers_from_other_conversations():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r")
+    assert "anything you remember about me from other conversations" in m
+    assert "LinkedIn link, age, gender or ethnicity" in m and "leave it blank" in m
+
+
+def test_apply_message_never_enters_a_past_job_as_current_employer():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r")
+    assert "never enter it as my current employer" in m and "current company, stop and ask me" in m
+
+
+def test_apply_message_does_not_retry_a_bot_check():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r", approved=True)
+    assert "anti-bot" in m and "do not submit again" in m
+
+
+def test_lever_forms_are_direct_but_flag_the_bot_check():
+    route, note = ap.classify_route("https://jobs.lever.co/acme/x")
+    assert route == "direct" and "anti-bot" in note
+    assert "anti-bot" not in ap.classify_route("https://boards.greenhouse.io/acme/jobs/1")[1]
