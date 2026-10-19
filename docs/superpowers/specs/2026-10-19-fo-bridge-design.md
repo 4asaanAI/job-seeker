@@ -1,6 +1,7 @@
 # Fo bridge: JobPilot reachable from Fo on text, email and calls
 
-Status: design, revised after a security review and an architecture review (Oct 19). Waiting for approval. Nothing is built.
+Status: built on Oct 19 after a security review and an architecture review of this design, then a security review of the
+code. The section "As built" at the end lists where the code differs from the text above.
 
 ## Problem
 
@@ -108,3 +109,18 @@ retry or guess."
 
 `python -m jobpilot.bridge --rotate` (old key stops working at once), set `[bridge] enabled = false`, `tailscale funnel off`,
 unload the LaunchAgent.
+
+## As built (Oct 19), and why it differs
+
+- **Approval codes come from an authenticator app, not a text.** JobPilot's only way to text me is through Fo, so a texted
+  code would pass through the agent it is meant to check. The bridge uses time-based codes (RFC 6238) from my authenticator
+  app instead. A code is single use, accepted only for the one application waiting for approval (one at a time, for two
+  hours), and five wrong codes lock approval until I run `--unlock-codes` on the Mac.
+- **The off switch is a file** (`data/bridge.off`), checked on every request, instead of a config flag.
+- **Status `offer`** is allowed after `interview`. `applied` also needs an approval code for that job.
+- **Host check:** only the public Funnel hostname is accepted. FastMCP's own check is off by default, so the bridge enforces
+  it itself and turns FastMCP's on as well.
+- **Client address** is uvicorn's (Funnel connects from 127.0.0.1); the bridge never trusts a forwarded-for header itself.
+- **Logs** are private files, rotated at 5 MB, with the request path escaped so it cannot forge lines.
+- **The daily run waits at most an hour** for a bridge search to release the scoring lock, then skips scoring for that day.
+- **Not done:** a Wajo IP allowlist (Wajo publishes none) and `doctor` checks for the bridge.

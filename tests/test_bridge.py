@@ -94,10 +94,44 @@ def test_apply_request_needs_the_authenticator_code_and_starts_the_record(env):
     store, sid, ids, tools, secret, _ = env
     out = tools["build_fo_apply_message"](ids[1])
     assert out["ok"], out
-    assert b.BRIDGE_SUBMIT_RULE in out["message"] and b.SUBMIT_RULE not in out["message"]
+    msg = out["message"]
+    assert b.SUBMIT_RULES[0][1] in msg and "approve_submit" in msg
+    for loophole in ("If I reply 'submit'", "until I confirm", "ONLY after I confirm", "wait for my confirmation",
+                     "only after I have confirmed"):
+        assert loophole not in msg, loophole
+    assert set(out) == {"ok", "posting_id", "message", "route", "note"}       # no job-description words
     assert {a["posting_id"]: a["status"] for a in store.applications(sid)}[ids[1]] == "started"
     again = tools["build_fo_apply_message"](ids[1])
     assert not again["ok"] and "already recorded" in again["error"]
+
+
+def test_one_application_waits_for_a_code_at_a_time_and_a_code_only_fits_that_job(env):
+    store, sid, ids, tools, secret, _ = env
+    assert tools["build_fo_apply_message"](ids[1])["ok"]
+    blocked = tools["build_fo_apply_message"](ids[2])
+    assert not blocked["ok"] and "waiting for its approval code" in blocked["error"]
+    assert not tools["approve_submit"](ids[2], b.totp(secret))["ok"]          # a code cannot be spent on another job
+    ok = tools["approve_submit"](ids[1], b.totp(secret))
+    assert ok["ok"] and ok["approved"]
+
+
+def test_wrong_codes_lock_approval_until_the_user_unlocks(env):
+    store, sid, ids, tools, secret, _ = env
+    tools["build_fo_apply_message"](ids[1])
+    wrong = "000000" if b.totp(secret) != "000000" else "111111"
+    for _ in range(b.MAX_CODE_FAILS):
+        assert not tools["approve_submit"](ids[1], wrong)["ok"]
+    locked = tools["approve_submit"](ids[1], b.totp(secret))
+    assert not locked["ok"] and "unlock" in locked["error"]
+    store.record_event("bridge_code_event", "unlock", sid)
+    assert tools["approve_submit"](ids[1], b.totp(secret))["ok"]
+
+
+def test_non_digit_codes_are_refused_without_errors(env):
+    store, sid, ids, tools, secret, _ = env
+    tools["build_fo_apply_message"](ids[1])
+    for bad in ("١٢٣٤٥٦", "12345", "abcdef", None):
+        assert not tools["approve_submit"](ids[1], bad)["ok"]
 
 
 def test_two_channels_cannot_start_the_same_job_twice(env):
@@ -123,10 +157,12 @@ def test_approve_submit_checks_the_code_once_and_only_for_a_started_job(env):
 
 
 def test_record_application_moves_forward_only_and_never_withdraws(env):
-    store, sid, ids, tools, *_ = env
+    store, sid, ids, tools, secret, _ = env
     assert not tools["record_application"](ids[1], "applied")["ok"]           # applied needs a started request
     tools["build_fo_apply_message"](ids[1])
     assert not tools["record_application"](ids[1], "withdrawn")["ok"]
+    assert not tools["record_application"](ids[1], "applied")["ok"]           # ...and an approval code
+    assert tools["approve_submit"](ids[1], b.totp(secret))["ok"]
     assert tools["record_application"](ids[1], "applied")["ok"]
     assert not tools["record_application"](ids[1], "started")["ok"]
     assert tools["record_application"](ids[1], "interview")["ok"]
@@ -151,11 +187,20 @@ def test_refresh_runs_once_at_a_time_and_counts_toward_the_daily_cap(env, monkey
     assert "limit" in tools["refresh"]()["error"]
 
 
-def test_scoring_lock_blocks_a_second_holder(tmp_path):
+def test_scoring_lock_blocks_a_second_holder_and_waiting_gives_up(tmp_path):
     with b.scoring_lock(tmp_path, wait=False):
         with pytest.raises(BlockingIOError):
             with b.scoring_lock(tmp_path, wait=False):
                 pass
+        with pytest.raises(BlockingIOError):
+            with b.scoring_lock(tmp_path, wait=True, timeout=0):
+                pass
+
+
+def test_errors_reaching_fo_carry_no_home_path(env):
+    store, sid, ids, tools, *_ = env
+    out = tools["build_fo_apply_message"](999999)
+    assert not out["ok"] and str(Path.home()) not in out["error"]
 
 
 # ---- HTTP ---------------------------------------------------------------------------------------------------------------
@@ -191,10 +236,32 @@ def test_http_refuses_browsers_big_bodies_other_hosts_and_repeated_bad_keys(clie
     auth = {**HDRS, "authorization": f"Bearer {key}"}
     assert c.post("/mcp", json=BODY, headers={**auth, "origin": "https://evil.example"}).status_code == 403
     assert c.post("/mcp", content=b"x" * (b.MAX_BODY + 1), headers=auth).status_code == 413
-    assert c.post("/mcp", json=BODY, headers={**auth, "host": "evil.example"}).status_code in (400, 421)
+    assert c.post("/mcp", json=BODY, headers={**auth, "host": "evil.example"}).status_code == 421
+    assert c.post("/mcp", json=BODY, headers={**auth, "host": "localhost"}).status_code == 421
     for _ in range(b.FAIL_LIMIT):
         c.post("/mcp", json=BODY, headers={**HDRS, "authorization": "Bearer nope"})
     assert c.post("/mcp", json=BODY, headers=auth).status_code == 429
+
+
+def test_http_ignores_forwarded_for_spoofing_and_logs_paths_safely(client):
+    c, key, mcp, tmp_path = client
+    for i in range(b.FAIL_LIMIT):                       # a fresh fake address each time must not dodge the block
+        c.post("/mcp", json=BODY, headers={**HDRS, "authorization": "Bearer nope", "x-forwarded-for": f"10.0.0.{i}"})
+    assert c.post("/mcp", json=BODY, headers={**HDRS, "authorization": f"Bearer {key}"}).status_code == 429
+    c.get("/x%0a2026-01-01T00:00:00Z forged 200")
+    log = (tmp_path / "d" / "data" / "bridge.log").read_text()
+    assert "\n2026-01-01T00:00:00Z forged" not in log
+    assert oct((tmp_path / "d" / "data" / "bridge.log").stat().st_mode & 0o777) == "0o600"
+
+
+def test_chunked_body_over_the_limit_gets_413(client):
+    c, key, *_ = client
+
+    def chunks():
+        for _ in range(5):
+            yield b"x" * (b.MAX_BODY // 4)
+    r = c.post("/mcp", content=chunks(), headers={**HDRS, "authorization": f"Bearer {key}"})
+    assert r.status_code == 413
 
 
 def test_off_switch_turns_the_bridge_off(client):

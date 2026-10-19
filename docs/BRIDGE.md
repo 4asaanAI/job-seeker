@@ -23,6 +23,7 @@ review draft, then asks for the current code from your authenticator app before 
 
 - Pause: create `data/bridge.off` (requests get "turned off"); delete it to resume.
 - Cut off Fo: `python -m jobpilot.bridge --rotate` (the old key stops working at once).
+- After five wrong approval codes, approval is locked: `python -m jobpilot.bridge --unlock-codes` turns it back on.
 - Stop: `tailscale funnel --set-path /mcp off`, and unload the LaunchAgent.
 
 Every call is logged in `data/bridge.log` (never the key or a code). The Mac must be awake for Fo to reach JobPilot.
