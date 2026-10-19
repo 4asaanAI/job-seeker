@@ -16,13 +16,14 @@ from .fo import clean
 from .joblist import _inert
 from .paths import jobpilot_home
 from .profiles import seeker_min_score
+from .sources.base import safe_url
 
 TRACKER_NAME = "JobPilot Tracker"
 DECK_NAME = "JobPilot Progress"
 EXPORT_FOLDER = "JobPilot Exports"
 STATUSES = ("match", "started", "applied", "interview", "rejected", "withdrawn", "deadline passed", "stale", "offer", "expired")
 RESUME_FOLDER = "JobPilot Resumes"
-HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated", "First seen", "Deadline")
+HEADER = ("ID", "Job", "Company", "Status", "Fit score", "Applied on", "Last updated", "First seen", "Deadline", "Link")
 MAX_ROWS, MAX_APPS, MAX_CLOSED = 100, 50, 15          # one request, so the cap is on the whole request
 BUSY = SimpleNamespace(status="busy", response="", reply="")      # another refresh of the sheet is still running
 
@@ -50,9 +51,12 @@ def sheet_link(text: object) -> str | None:
     return f"https://docs.google.com/spreadsheets/d/{m.group(1)}/edit" if m else None
 
 
-def _fence(body: str) -> tuple[str, str]:
+_HEX_RUN = re.compile(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}")
+
+
+def _fence(body: str, scrub: bool = True) -> tuple[str, str]:
     marker = secrets.token_hex(8)
-    return marker, re.sub(r"(?=[0-9]*[a-fA-F])[0-9a-fA-F]{12,}", "", body)   # nothing marker-like can be forged
+    return marker, _HEX_RUN.sub("", body) if scrub else body               # nothing marker-like can be forged
 
 
 def _export(kind: str) -> str:
@@ -104,6 +108,12 @@ def _day(value: object) -> str:
     return str(value or "")[:10]
 
 
+def _link(url: object) -> str:
+    """The job's own http(s) link, or blank (any other scheme, or a link too long for one cell request)."""
+    out = safe_url(str(url or "")) or ""
+    return out if len(out) <= 300 else ""
+
+
 def _pair(title: object, company: object) -> tuple[str, str]:
     """Title and company, each screened alone and also together (an operation can be split across the two cells)."""
     t, c = _cell(title, 60), _cell(company, 40)
@@ -125,7 +135,7 @@ def tracker_rows(apps: list[dict], tracked: list[dict]) -> list[list[str]]:
         seen.add(a["posting_id"])
         title, company = _pair(a["title"], a["company_name"])
         rows.append([str(int(a["posting_id"])), title, company, a["status"],
-                     "", _day(a.get("applied_at")), _day(a.get("response_at") or a.get("applied_at")), "", ""])
+                     "", _day(a.get("applied_at")), _day(a.get("response_at") or a.get("applied_at")), "", "", _link(a.get("url"))])
     fresh = [t for t in tracked if t["posting_id"] not in seen]
     closed = [t for t in fresh if t["closed"]][:max(0, min(MAX_CLOSED, MAX_ROWS - len(rows)))]
     opened = [t for t in fresh if not t["closed"]][:max(0, MAX_ROWS - len(rows) - len(closed))]
@@ -133,7 +143,7 @@ def tracker_rows(apps: list[dict], tracked: list[dict]) -> list[list[str]]:
         title, company = _pair(t["title"], t["company_name"])
         rows.append([str(int(t["posting_id"])), title, company,
                      "deadline passed" if t["closed"] else "match", f"{float(t['fit_score']):.0f}", "", "",
-                     _day(t.get("first_seen_at")), _day(t.get("valid_through"))])
+                     _day(t.get("first_seen_at")), _day(t.get("valid_through")), _link(t.get("url"))])
     return [[_inert(c) for c in r] for r in rows]
 
 
@@ -146,7 +156,9 @@ def tracker_inputs(store, seeker_id: int, home: Path | None = None, today: str |
 
 def tracker_message(rows: list[list[str]], export: bool = False, link: str | None = None,
                     text_me: bool = False) -> str:
-    marker, body = _fence("\n".join("\t".join(r) for r in rows))
+    link_col = HEADER.index("Link")       # a vetted http(s) link keeps its hex job id (Indeed's jk=...); other cells lose such runs
+    marker, body = _fence("\n".join("\t".join(c if i == link_col else _HEX_RUN.sub("", c) for i, c in enumerate(r))
+                                     for r in rows), scrub=False)
     sheet = _SHEET_URL.search(link or "")
     where = (
         f'Please keep my job search record in the Google Sheet "{TRACKER_NAME}" that you made for me earlier; its id is '
@@ -157,7 +169,7 @@ def tracker_message(rows: list[list[str]], export: bool = False, link: str | Non
     return (
         where + "Row 1 is the header: " + " | ".join(HEADER) + ".\n"
         "The lines between the markers are tab-separated rows in the same column order. Match every cell to its column by the "
-        "header NAME in row 1, not by position: if First seen or Deadline is missing from row 1, add them after the last used "
+        "header NAME in row 1, not by position: if First seen, Deadline or Link is missing from row 1, add them after the last used "
         "header, and never write into a column whose header is not in that list. Read column A once, then write all the rows "
         "in ONE range update instead of cell by cell. For each row, update the row whose ID matches, or add a new row at the "
         "bottom. Never delete or reorder other rows, and write cells as plain text, never as formulas (except the Summary "

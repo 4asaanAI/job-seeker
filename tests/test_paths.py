@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from jobpilot.paths import jobpilot_home
 

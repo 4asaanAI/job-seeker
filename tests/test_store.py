@@ -546,7 +546,7 @@ def test_the_own_hash_gate_stops_a_fallback_adoption_from_wrong_merging_later(st
     the seeker's saved job silently moved onto an unrelated role). With it:
     back == c (3 rows, nothing moved)."""
     sid = store.add_seeker("A", 1, "a.yaml", 20)
-    g = store.upsert_posting(_posting(source="naukri", external_id="g1", location="Gurgaon, India"))
+    store.upsert_posting(_posting(source="naukri", external_id="g1", location="Gurgaon, India"))
     store.upsert_posting(_posting(source="naukri", external_id="m1", location="Mumbai, India"))
     c = store.upsert_posting(_posting(source="indeed", external_id="c1", location="India"))
     store.link_posting(sid, c)

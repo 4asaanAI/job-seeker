@@ -11,7 +11,6 @@ import hashlib
 import json
 import subprocess
 import sys
-from datetime import datetime
 from typing import Any, Callable
 
 from ..config import WigoloConfig

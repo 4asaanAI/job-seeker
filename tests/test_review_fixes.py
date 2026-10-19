@@ -272,7 +272,7 @@ def test_feed_lookups_share_one_global_daily_cap_and_rotate_fairly(tmp_path, mon
 
 
 def test_short_skills_must_be_real_words_in_the_source():
-    from jobpilot.resume.engine import BaseResume, Education, Experience, unverified_facts
+    from jobpilot.resume.engine import BaseResume, unverified_facts
     base = BaseResume(name="Pat", headline="Analyst", contact=(), summary=None, experience=(), education=(),
                       skills=("Go", "SQL", "Excel"), required_facts=())
     assert unverified_facts(base, "Pat Analyst. Worked at Google with PostgreSQL and excellent reports.") == ["Go", "SQL", "Excel"]
@@ -296,7 +296,7 @@ def test_job_lists_are_not_sent_to_a_seeker_served_through_fo(tmp_path):
     store = Store(tmp_path / "j.db")
     store.migrate()
     a = store.add_seeker("A", 111, "a.yaml", 20)
-    b = store.add_seeker("B", 222, "b.yaml", 20)
+    store.add_seeker("B", 222, "b.yaml", 20)
     sent = []
     push_job_lists(store, lambda uid, chat, flag: sent.append(uid) or True, skip={a})
     assert sent == [222]
