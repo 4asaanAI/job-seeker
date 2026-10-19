@@ -142,8 +142,8 @@ def test_jobs_past_their_deadline_leave_every_list_immediately(tmp_path):
 
 
 def test_open_and_undated_jobs_stay_and_the_last_day_is_still_open(tmp_path):
-    from datetime import date
-    for value in (None, date.today().isoformat(), "2099-12-31"):
+    from datetime import datetime, timezone
+    for value in (None, datetime.now(timezone.utc).date().isoformat(), "2099-12-31"):
         sub = tmp_path / str(value)
         sub.mkdir()
         store, sid, pid = _deadline_store(sub, value)

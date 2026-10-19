@@ -465,8 +465,8 @@ def test_a_failed_digest_is_reported_and_the_sheet_still_goes(env, capsys):
 
 # ---- the sheet link ----------------------------------------------------------------------------------------------------
 
-SHEET = "https://docs.google.com/spreadsheets/d/1R1f9aN3Buj5Hm7kha9uxu8R97ZosSOV33qa8G35Le2M/edit?usp=drivesdk"
-CANON = "https://docs.google.com/spreadsheets/d/1R1f9aN3Buj5Hm7kha9uxu8R97ZosSOV33qa8G35Le2M/edit"
+SHEET = "https://docs.google.com/spreadsheets/d/1FAKEsheetIdForTestsOnly0000000000000000000/edit?usp=drivesdk"
+CANON = "https://docs.google.com/spreadsheets/d/1FAKEsheetIdForTestsOnly0000000000000000000/edit"
 
 
 class TalkingFo(Fo):
@@ -500,7 +500,7 @@ def test_the_first_link_from_fo_is_saved_and_used_by_id_afterwards(env):
     assert "Find it, or create it" in first.messages[0]                       # first time: by name
     second = TalkingFo("Updated.")
     google.send_tracker(store, sid, second, home)
-    assert "its id is 1R1f9aN3Buj5Hm7kha9uxu8R97ZosSOV33qa8G35Le2M" in second.messages[0]
+    assert "its id is 1FAKEsheetIdForTestsOnly0000000000000000000" in second.messages[0]
     assert "do not create another sheet" in second.messages[0] and "Find it, or create it" not in second.messages[0]
     assert "whenever I ask for it, text me its link" in second.messages[0]
 
