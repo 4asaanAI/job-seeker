@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from jobpilot import bridge as b
-from jobpilot import reliability, server
+from jobpilot import reliability
 from jobpilot.fo import FoResult, render_fo_digest, wrap
 from jobpilot.server import build_tools
 

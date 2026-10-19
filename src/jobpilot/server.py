@@ -11,7 +11,7 @@ import secrets
 import re
 import ntpath
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from typing import Callable
