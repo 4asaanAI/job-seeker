@@ -46,7 +46,6 @@ from . import google
 from .fo import FO_HOST, FO_URL, FoError, child_env, clean, fo_sender
 from .paths import jobpilot_home
 from .server import build_tools
-from .server import MAX_DAILY_APPLY_REQUESTS
 from .store.db import Store
 
 GRAMMAR = re.compile(r"^\s*jp\s+(?:(matches)|(status)|tailor\s+(\d{1,9})|apply\s+(\d{1,9})|yes\s+([0-9a-f]{6})|(sync)|doc\s+(\d{1,9})|(deck)|(replies)|(applied|interview|rejected|withdrawn)\s+(\d{1,9})|letter\s+(\d{1,9})|(link)(?:\s+(reset))?)\s*$",
@@ -168,14 +167,12 @@ def _tailor(store: Store, sid: int, out_dir: Path, posting_id: int) -> str:
 
 def _apply_preview(store: Store, sid: int, out_dir: Path, posting_id: int) -> str:
     tools = build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
-    built = tools["build_fo_apply_message"](sid, posting_id)        # validates the job and link; sends and records nothing
+    built = tools["_apply_core"](sid, posting_id, preview=True)     # validates the job and link; sends and records nothing
     if not built.get("ok"):
         return f"JobPilot: cannot apply to id {posting_id}: {clean(built.get('error'), 110)}."
     if built["route"] == "login":
         return (f"JobPilot: id {posting_id} is on a board that needs an account or a phone code Fo cannot receive. "
                 "Apply by hand; ask Claude for manual_apply_packet.")
-    if store.event_count_since(sid, "fo_apply_batch", 24) >= MAX_DAILY_APPLY_REQUESTS:
-        return "JobPilot: you have reached today's limit of Fo applications. Try again tomorrow."
     posting = store.posting_view(sid, posting_id)
     job = {"title": posting["title"], "company": posting["company_name"]}
     used = set()
@@ -229,9 +226,11 @@ def _apply_yes(store: Store, sid: int, out_dir: Path, code: str, apply_client) -
         return f"JobPilot: not applied: {clean(built.get('error'), 110)}."
     try:
         result = apply_client.send(built["message"])
-    except FoError:
+    except FoError as exc:
+        store.audit(sid, posting_id, "sent", "unknown", f"FoError: {str(exc)[:120]}")      # logged; never re-sent
         return (f"JobPilot: could not reach Fo for id {posting_id}. It is marked started, so it will not be sent twice; "
                 "check Fo, or apply by hand.")
+    store.audit(sid, posting_id, "sent", "fo_" + str(result.status))
     if result.status == "complete":
         return (f"JobPilot: Fo has your application for id {posting_id}. With review mode on (the default) it now waits for "
                 "your confirmation in the Fo chat before submitting; otherwise it stops and texts you if the form needs anything "

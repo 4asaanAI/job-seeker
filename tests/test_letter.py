@@ -146,6 +146,7 @@ def test_applications_carry_the_letter_only_when_switched_on(env, monkeypatch):
     store, sid, ids, tools, *_ = env
     off = tools["build_fo_apply_message"](sid, ids[0])
     assert off["ok"] and "Dear Hiring Team," not in off["message"] and off["cover_letter_if_required"] is False
+    assert tools["cancel_application"](sid, ids[0])["ok"]           # one application in flight at a time
     real = server_mod.load_config()
     monkeypatch.setattr(server_mod, "load_config", lambda *a, **k: dataclasses.replace(real, apply_cover_letters=True))
     on = tools["build_fo_apply_message"](sid, ids[1])

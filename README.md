@@ -33,6 +33,15 @@ python3.12 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python -m jobpilot.setup           # your own profile and resume in one guided command (asks before writing anything)
 ```
 
+## New since the hackathon (Fo's build list, 2026-10-19)
+
+Filters (salary floor, work mode, locations, company black/whitelists, staffing agencies), a 14-day freshness window, a
+duplicate guard, scores that learn from outcomes, a reusable answers vault with a pre-submit check, one application in
+flight at a time, an append-only submit audit with one user-approved retry, PDF resumes per company, AI cover-letter
+drafts you approve, email-based status proposals you confirm, a nightly CSV snapshot, history import, a weekly funnel,
+follow-up drafts, interview prep, stable error codes, and a local dashboard you can also use from your phone. Item by
+item: [docs/BUILD-LIST.md](docs/BUILD-LIST.md); the dashboard: [docs/DASHBOARD.md](docs/DASHBOARD.md).
+
 ## What is new for the hackathon
 
 - **Fo delivery with a safety layer.** A minimal digest (id, score, vetted title), random-marker wrapper, host-pinned

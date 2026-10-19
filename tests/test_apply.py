@@ -191,18 +191,19 @@ def test_approved_batch_refuses_jobs_not_on_the_list(env):
     assert "not on the approved apply list" in tools["build_fo_apply_message"](sid, ids[3], batch_approved=True, plan_id=plan)["error"]
 
 
-def test_attempted_jobs_are_not_retried_and_daily_cap_holds(env, monkeypatch):
-    from jobpilot import server
+def test_attempted_jobs_are_not_retried_and_there_is_no_daily_cap(env):
     store, sid, ids, tools = env
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
     store.record_application(sid, ids[1], "started", "blocked: needs a code")
     assert ids[1] not in [i["posting_id"] for i in tools["plan_apply_batch"](sid)["items"]]
-    monkeypatch.setattr(server, "MAX_DAILY_APPLY_REQUESTS", 1)
     https_link(store, ids[2], "https://boards.greenhouse.io/acme/jobs/3")
     https_link(store, ids[0], "https://boards.greenhouse.io/acme/jobs/4")
     plan = _approve(tools, sid)
+    for _ in range(50):                                                   # the user may apply as much as they like
+        store.record_event("fo_apply_batch", "x", sid)
     assert tools["build_fo_apply_message"](sid, ids[2], batch_approved=True, plan_id=plan)["ok"]
-    assert "daily limit" in tools["build_fo_apply_message"](sid, ids[0], batch_approved=True, plan_id=plan)["error"]
+    tools["record_application"](sid, ids[2], "applied")
+    assert tools["build_fo_apply_message"](sid, ids[0], batch_approved=True, plan_id=plan)["ok"]
 
 
 # ---- dashboard, reply sweep, manual packet --------------------------------

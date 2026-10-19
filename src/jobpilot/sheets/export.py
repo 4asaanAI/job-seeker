@@ -76,6 +76,41 @@ def _a1(sheet_title: str, cell_range: str) -> str:
     return "'" + sheet_title.replace("'", "''") + "'!" + cell_range
 
 
+# Status colours for the Job Status and Application Status columns (light fills, readable text).
+STATUS_COLOURS = {
+    "applied": (0.85, 0.94, 0.85), "interview": (0.72, 0.89, 0.72), "offer": (0.58, 0.83, 0.58),
+    "started": (1.0, 0.93, 0.8), "rejected": (0.96, 0.8, 0.8), "withdrawn": (0.9, 0.9, 0.9),
+    "expired": (0.9, 0.9, 0.9), "skipped": (0.9, 0.9, 0.9), "presented": (0.82, 0.89, 0.98),
+    "scored": (0.82, 0.89, 0.98),
+}
+
+
+def summary_row(rows: list[dict[str, Any]]) -> list[str]:
+    """Row 1: totals per application status, so the sheet answers "how am I doing" at a glance."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        status = str(row.get("application_status") or "")
+        if status:
+            counts[status] = counts.get(status, 0) + 1
+    parts = [f"{len(rows)} jobs"] + [f"{n} {k}" for k, n in sorted(counts.items())]
+    return ["Summary: " + ", ".join(parts)] + [""] * (len(HEADERS) - 1)
+
+
+def _style_requests(sheet_id: int, rows: int) -> list[dict]:
+    """Conditional fills by status on the two status columns, and auto-sized columns."""
+    requests = []
+    for column in (HEADERS.index("Job Status"), HEADERS.index("Application Status")):
+        for status, (r, g, b) in STATUS_COLOURS.items():
+            requests.append({"addConditionalFormatRule": {"index": 0, "rule": {
+                "ranges": [{"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": rows + 2,
+                            "startColumnIndex": column, "endColumnIndex": column + 1}],
+                "booleanRule": {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": status}]},
+                                "format": {"backgroundColor": {"red": r, "green": g, "blue": b}}}}}})
+    requests.append({"autoResizeDimensions": {"dimensions": {
+        "sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": len(HEADERS)}}})
+    return requests
+
+
 def _row_values(row: dict[str, Any]) -> list[str]:
     score = row.get("fit_score")
     return [
@@ -128,7 +163,9 @@ class GoogleSheetsExporter:
             spreadsheet_id = str(spreadsheet_id).strip()
             if not spreadsheet_id:
                 raise ValueError("spreadsheet_id must not be empty")
+            created_here = False
         else:
+            created_here = True
             created = self.sheets.spreadsheets().create(
                 body={"properties": {"title": title}},
                 fields="spreadsheetId,sheets(properties(sheetId,title,hidden))",
@@ -161,7 +198,7 @@ class GoogleSheetsExporter:
                 raise ValueError("sheet_title does not identify exactly one visible tab")
             sheet_id = int(matches[0]["sheetId"])
 
-        values = [list(HEADERS), *[_row_values(row) for row in rows]]
+        values = [summary_row(rows), list(HEADERS), *[_row_values(row) for row in rows]]
         range_name = _a1(str(sheet_title), "A:J")
         self.sheets.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id, range=range_name, body={}
@@ -176,8 +213,14 @@ class GoogleSheetsExporter:
             spreadsheetId=spreadsheet_id,
             body={"requests": [
                 {"repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": 0,
-                              "endRowIndex": 1, "startColumnIndex": 0,
+                    "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                              "startColumnIndex": 0, "endColumnIndex": len(HEADERS)},
+                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "italic": True}}},
+                    "fields": "userEnteredFormat(textFormat)",
+                }},
+                {"repeatCell": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": 1,
+                              "endRowIndex": 2, "startColumnIndex": 0,
                               "endColumnIndex": len(HEADERS)},
                     "cell": {"userEnteredFormat": {
                         "backgroundColor": {"red": 0.12, "green": 0.47, "blue": 0.71},
@@ -188,9 +231,11 @@ class GoogleSheetsExporter:
                 }},
                 {"updateSheetProperties": {
                     "properties": {"sheetId": sheet_id,
-                                   "gridProperties": {"frozenRowCount": 1}},
+                                   "gridProperties": {"frozenRowCount": 2}},
                     "fields": "gridProperties.frozenRowCount",
                 }},
+                # colour rules are added once, when the sheet is created: repeating them on every export piles them up
+                *(_style_requests(sheet_id, len(rows)) if created_here else _style_requests(sheet_id, len(rows))[-1:]),
             ]},
         ).execute()
         self.drive.permissions().create(

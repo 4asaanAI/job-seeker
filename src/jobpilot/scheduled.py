@@ -115,13 +115,24 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory, tracker_t
             else:
                 if not any(s.id == cfg.fo_seeker_id for s in store.list_seekers()):
                     raise ValueError("[fo] seeker_id is not an active seeker")
-                send = fo_sender(fo_client)
+                send = fo_sender(fo_client, getattr(cfg, "notify_channel", "text"))
                 ids = {cfg.fo_seeker_id}
+                threshold = getattr(cfg, "notify_min_score", None)
+                if threshold is None:
+                    from .profiles import seeker_min_score
+                    threshold = seeker_min_score(store.get_seeker(cfg.fo_seeker_id).profile_path, home)
                 try:
-                    print(f"fo digests sent: {push_digests(store, send, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)}")
+                    print(f"fo digests sent: {push_digests(store, send, min_score=threshold, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)}")
                     print(f"fo follow-ups sent: {push_followups(store, send, render_fo_followups, channel='fo', seeker_ids=ids)}")
                     fo_id = cfg.fo_seeker_id
                 finally:
+                    if getattr(cfg, "email_scan", False):     # its own guard; only ever makes proposals
+                        try:
+                            from .tracking import scan_emails
+                            print(f"email scan: {scan_emails(store, cfg.fo_seeker_id, fo_client)}")
+                        except Exception as exc:  # noqa: BLE001
+                            store.record_event("delivery_error", f"email scan: {type(exc).__name__}", cfg.fo_seeker_id)
+                            print(f"email scan failed: {type(exc).__name__}: {exc}")
                     if cfg.google_enabled:         # its own guard: a failed digest must not skip the sheet
                         try:
                             from .google import send_tracker
@@ -216,6 +227,7 @@ def main() -> int:
         from .telegram_bot import Bot, _find_token
         home = jobpilot_home()
         store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
+        store.fresh_days = cfg.fresh_days
         try:
             store.migrate()
             if not args.deliver_only:
@@ -237,9 +249,30 @@ def main() -> int:
                 bot_factory=lambda: (lambda t: Bot(t, home, store) if t else None)(_find_token(home)),
                 fo_factory=lambda: make_fo_client(cfg, args.claude),
             )
+            nightly(store, cfg, home)
         finally:
             store.close()
     return returncode
+
+
+def nightly(store: Store, cfg, home: Path, *, tools_factory=None) -> None:
+    """After delivery: a CSV snapshot and database copy per seeker, and an interview prep brief for every application
+    newly at interview. Each step is guarded and reported; one failing never stops the others."""
+    from .extra_tools import interview_apps_needing_prep
+    from .server import build_tools
+    tools = (tools_factory or (lambda: build_tools(store, cfg.out_dir, operator_mode=True)))()
+    for seeker in store.list_seekers():
+        try:
+            out = tools["snapshot_tracker"](seeker.id)
+            print(f"snapshot seeker {seeker.id}: {out.get('rows', out.get('error'))}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"snapshot seeker {seeker.id} failed: {type(exc).__name__}: {exc}")
+        try:
+            for pid in interview_apps_needing_prep(store, seeker.id, cfg.out_dir):
+                out = tools["interview_prep"](seeker.id, pid)
+                print(f"interview prep seeker {seeker.id} job {pid}: {'written' if out.get('ok') else out.get('error')}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"interview prep seeker {seeker.id} failed: {type(exc).__name__}: {exc}")
 
 
 if __name__ == "__main__":

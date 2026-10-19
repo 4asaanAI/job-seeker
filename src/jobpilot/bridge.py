@@ -52,9 +52,11 @@ APPROVE = "JobPilot's approve_submit answers ok for this job"
 # Every place the normal apply request lets a plain "submit" or "I confirm" release a submit, and the bridge wording.
 SUBMIT_RULES = (
     ("If I reply 'submit', submit it once.",
-     "Do NOT submit because I said 'submit' or 'yes' in a message. To submit, ask me for the 6-digit code from my "
-     "authenticator app and call JobPilot's approve_submit tool with this job's id and that code; submit once only if it "
-     "answers ok."),
+     "Do NOT submit because I said 'submit' or 'yes' in a message. First call JobPilot's pre_submit_check with every "
+     "field of the filled form (label, required, value, kind); if it is not ready, show me its checklist and fix only "
+     "what I tell you. When it is ready, ask me for the 6-digit code from my authenticator app and call JobPilot's "
+     "approve_submit tool with this job's id and that code; submit once only if it answers ok. If you get stuck, call "
+     "report_blocked; if the submit fails, call report_submit_failed and do not submit again."),
     ("send it ONLY after I confirm", "send it ONLY after " + APPROVE),
     ("Do not submit anything until I confirm.", "Do not submit anything until " + APPROVE + "."),
     ("wait for my confirmation before submitting", "wait for " + APPROVE + " before submitting"),
@@ -94,10 +96,12 @@ def new_key(path: Path = KEY_PATH, rotate: bool = False) -> str:
 
 
 def key_matches(given: str, path: Path = KEY_PATH) -> bool:
-    """Read on every call, so rotating or deleting the file revokes access at once."""
+    """Read on every call, so rotating or deleting the file revokes access at once. A key older than
+    reliability.KEY_MAX_DAYS stops working (my_status warns two weeks before)."""
+    from .reliability import key_expired
     key = read_secret(path)
     try:
-        return bool(key) and hmac.compare_digest(given.encode(), key.encode())
+        return bool(key) and hmac.compare_digest(given.encode(), key.encode()) and not key_expired(path)
     except (TypeError, AttributeError):
         return False
 
@@ -312,6 +316,8 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
                     out = {"ok": False, "error": "JobPilot could not do that."}
                 if out.get("error"):              # JobPilot's own wording: hide paths, keep it to one short line
                     out["error"] = " ".join(str(out["error"]).replace(str(Path.home()), "~").split())[:200]
+                from .reliability import with_code
+                with_code(out)
                 shown = {k: ("<redacted>" if k in ("answers", "code", "notes") else v) for k, v in kwargs.items()}
                 audit(f"tool {name} {json.dumps(shown, default=str)[:300]} ok={bool(out.get('ok'))}")
                 return out
@@ -326,7 +332,7 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         apps = _apps()
         for e in _events(store, pin, "bridge_started", PENDING_HOURS):
             pid = int(e.get("posting_id", -1))
-            if apps.get(pid) == "started":
+            if apps.get(pid) == "started" and store.last_state(pin, pid) not in ("cancelled", "blocked"):
                 return pid
         return None
 
@@ -347,8 +353,14 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
     def my_status() -> dict:
         """How many jobs were found, scored, shown and applied to in the last 7 days."""
         out = inner["my_status"](pin)
-        keep = ("ok", "window", "found", "scored", "shown", "applied", "total_jobs", "error")
-        return {k: v for k, v in out.items() if k in keep}
+        keep = ("ok", "window", "found", "scored", "shown", "applied", "total_jobs", "error", "code",
+                "next_scheduled_refresh", "warnings", "in_flight", "parked_failures", "proposals_to_confirm")
+        kept = {k: v for k, v in out.items() if k in keep}
+        if out.get("ok"):                          # counts only: error details can hold paths and job text
+            kept["errors_last_24h"] = len(out.get("errors_last_24h") or [])
+            kept["last_run"] = {k: (out.get("last_run") or {}).get(k) for k in ("finished_at", "status")}
+            kept["waiting_for_user"] = [w["posting_id"] for w in out.get("waiting_for_user") or []]
+        return kept
 
     @guarded("my_tracker_link")
     def my_tracker_link() -> dict:
@@ -435,10 +447,65 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
                 return {"ok": False, "error": "this request cannot be sent through the bridge; apply in Claude Code"}
             for old, new in SUBMIT_RULES:
                 message = message.replace(old, new)
+            store.save_payload(pin, int(posting_id), message)   # a retry resends what Fo really got: the code rule
             store.record_application(pin, int(posting_id), "started", "bridge: request built; waiting for review")
             store.record_event("bridge_started", json.dumps({"posting_id": int(posting_id)}), pin, int(posting_id))
         return {"ok": True, "posting_id": int(posting_id), "message": message, "route": out.get("route"),
                 "note": "Send the user the review draft. Submit only after approve_submit answers ok."}
+
+    def _checked(posting_id: int) -> bool:
+        """The newest pre-submit check for this job, since its request was built, answered ready."""
+        for row in store.audit_log(pin, posting_id, 50):
+            if row["action"] == "pre_submit_check":
+                return row["outcome"] == "ready"
+            if row["action"] in ("request_built", "retry_built"):
+                return False
+        return False
+
+    @guarded("form_profile")
+    def form_profile() -> dict:
+        """The user's own form data (name, contact, current job, education, skills from their resume) and their saved
+        answers (work authorisation, notice period...). Fill forms from this and the request only."""
+        out = inner["form_profile"](pin)
+        return {k: v for k, v in out.items() if k in ("ok", "fields", "answers", "not_answered_yet", "note", "error", "code")}
+
+    @guarded("pre_submit_check")
+    def pre_submit_check(posting_id: int, fields: list[dict]) -> dict:
+        """Check the filled-in form before asking for the approval code: fields = [{label, required, value, kind}] for
+        every field (kind text, choice or file). Answers ready, or a checklist of what is missing or not the user's own."""
+        if _pending() != int(posting_id):
+            return {"ok": False, "error": "this job is not the one being applied to; build the request first"}
+        out = inner["pre_submit_check"](pin, int(posting_id), fields)
+        if out.get("checklist"):
+            out["checklist"] = [{**c, "field": clean(c["field"], 60)} for c in out["checklist"]]
+        return {k: v for k, v in out.items() if k in ("ok", "ready", "problems", "checklist", "note", "error", "code")}
+
+    @guarded("report_blocked")
+    def report_blocked(posting_id: int, kind: str, page_url: str | None = None, note: str = "") -> dict:
+        """Report that the application stopped at a step only the user can do (captcha, login, otp, upload, question,
+        manual, anti_bot, other). Never retry it yourself. Tell the user the tell_user text."""
+        out = inner["report_blocked"](pin, int(posting_id), kind, page_url, note)
+        return {k: v for k, v in out.items() if k in ("ok", "state", "tell_user", "error", "code")}
+
+    @guarded("record_progress")
+    def record_progress(posting_id: int, step: str, page_url: str | None = None, filled_fields: list[str] | None = None,
+                        board_login: str | None = None) -> dict:
+        """Save where the application stands (page reached, field names filled; board_login logged_in or needs_login),
+        so the next attempt continues from there."""
+        out = inner["record_progress"](pin, int(posting_id), step, page_url, filled_fields, board_login)
+        return {k: v for k, v in out.items() if k in ("ok", "saved", "error", "code")}
+
+    @guarded("report_submit_failed")
+    def report_submit_failed(posting_id: int, failure: str) -> dict:
+        """Report that submitting failed. Do not submit again: the user decides on the one retry."""
+        out = inner["report_submit_failed"](pin, int(posting_id), failure)
+        return {k: v for k, v in out.items() if k in ("ok", "state", "can_retry", "tell_user", "error", "code")}
+
+    @guarded("cancel_application")
+    def cancel_application(posting_id: int) -> dict:
+        """The user does not want to go on with this application. Nothing is submitted."""
+        out = inner["cancel_application"](pin, int(posting_id))
+        return {k: v for k, v in out.items() if k in ("ok", "error", "code")}
 
     @guarded("approve_submit")
     def approve_submit(posting_id: int, code: str) -> dict:
@@ -454,14 +521,17 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
             waiting = _pending()
             if waiting is None or waiting != int(posting_id):
                 return {"ok": False, "error": "this job is not the one waiting for approval; build the request first"}
+            if not _checked(int(posting_id)):
+                return {"ok": False, "code": "approval_required",
+                        "error": "call pre_submit_check with every field of the filled form first; ask for "
+                                 "the code only when it answers ready"}
             step = code_window(secret, code)
             if step is None:
                 store.record_event("bridge_code_event", "fail", pin, int(posting_id))
                 return {"ok": False, "error": "that code is wrong or expired; ask the user for the current one"}
-            if any(e.get("step") == step for e in _events(store, pin, "bridge_code_used", 2)):
+            if not store.spend_code_step(pin, int(posting_id), step):
                 return {"ok": False, "error": "that code was already used; ask the user for the next one"}
-            store.record_event("bridge_code_used", json.dumps({"step": step, "posting_id": int(posting_id)}), pin,
-                               int(posting_id))
+            store.audit(pin, int(posting_id), "approved", "authenticator_code")
         names = None
         for item in inner["my_matches"](pin, 50).get("items", []):
             if int(item["posting_id"]) == int(posting_id):
@@ -487,15 +557,18 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
     def update_tracker_row(posting_id: int) -> dict:
         """The request to update this one job's row in the user's tracker sheet. Do it yourself."""
         built = inner["build_fo_tracker_message"](pin, posting_id=int(posting_id))
-        return {k: v for k, v in built.items() if k in ("ok", "message", "error")}
+        return {k: v for k, v in built.items() if k in ("ok", "message", "error", "code")}
 
     return {f.__name__: f for f in (my_matches, apply_candidates, my_status, my_tracker_link, update_my_profile, refresh,
                                     refresh_status, build_fo_apply_message, approve_submit, record_application,
-                                    update_tracker_row)}
+                                    update_tracker_row, form_profile, pre_submit_check, report_blocked,
+                                    record_progress, report_submit_failed, cancel_application)}
 
 
 ALLOWED = ("my_matches", "apply_candidates", "my_status", "my_tracker_link", "update_my_profile", "refresh",
-           "refresh_status", "build_fo_apply_message", "approve_submit", "record_application", "update_tracker_row")
+           "refresh_status", "build_fo_apply_message", "approve_submit", "record_application", "update_tracker_row",
+           "form_profile", "pre_submit_check", "report_blocked", "record_progress", "report_submit_failed",
+           "cancel_application")
 
 
 # ---- serving ------------------------------------------------------------------------------------------------------------

@@ -19,7 +19,18 @@ from ..config import ATSConfig
 from ..store.models import Posting
 from .base import MAX_DESCRIPTION_CHARS, safe_url
 
+# Per-host pacing: many employer boards share one API host (boards-api.greenhouse.io, api.lever.co), so requests to
+# the same host are spaced at least this far apart across every source in the process.
+HOST_GAP_SECONDS = 1.0
+_last_request: dict[str, float] = {}
 
+
+def _pace(url: str, sleep=time.sleep, clock=time.monotonic) -> None:
+    host = (urlparse(url).hostname or "").lower()
+    wait = HOST_GAP_SECONDS - (clock() - _last_request.get(host, float("-inf")))
+    if wait > 0:
+        sleep(wait)
+    _last_request[host] = clock()
 
 
 def _retry_once(call):
@@ -36,6 +47,7 @@ def _retry_once(call):
 
 @_retry_once
 def _default_fetcher(url: str, timeout: float) -> object:
+    _pace(url)
     request = Request(url, headers={"User-Agent": "JobPilot/0.3"})
     with urlopen(request, timeout=timeout) as response:  # noqa: S310 - config URL
         if getattr(response, "status", 200) >= 400:
@@ -45,6 +57,7 @@ def _default_fetcher(url: str, timeout: float) -> object:
 
 @_retry_once
 def _default_poster(url: str, body: dict, timeout: float) -> object:
+    _pace(url)
     request = Request(url, data=json.dumps(body).encode(), headers={
         "User-Agent": "JobPilot/0.4", "Content-Type": "application/json",
         "Accept": "application/json"})

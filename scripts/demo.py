@@ -251,6 +251,7 @@ def offline(keep: bool) -> int:
     try:
         store = Store(tmp / "demo.db")
         store.migrate()
+        store.fresh_days = 3650          # recorded fixture postings keep their real (old) dates; do not age them out
         print("JobPilot R1 demo (offline: no internet, throwaway database)")
         print("Both seekers below are SYNTHETIC. The job sample is a real capture "
               "from Indeed US,\nplayed back by a stand-in scraper.")
@@ -396,6 +397,7 @@ def live(n_terms: int, keep: bool, input_fn, sleep, scraper, seekers_dir) -> int
         try:
             store = Store(tmp / "demo.db")
             store.migrate()
+            store.fresh_days = 3650
             seekers = [(f, store.add_seeker(f, None, f"data/seekers/{f}/profile.yaml"))
                        for f, _ in picked]
             targets = [SeekerTarget(sid, p) for (_, sid), (_, p) in zip(seekers, picked)]

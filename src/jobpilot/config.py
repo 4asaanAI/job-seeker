@@ -92,6 +92,14 @@ class Config:
     google_enabled: bool = False
     # Put a facts-only cover letter into applications whose form REQUIRES one (off unless the user turns it on).
     apply_cover_letters: bool = False
+    # The daily digest: "text" or "email" (through Fo, to the user's own number or address), and the score threshold
+    # (None = each seeker's own min_score).
+    # Each morning, ask Fo to read application emails and turn them into status / calendar proposals the user confirms.
+    email_scan: bool = False
+    notify_channel: str = "text"
+    notify_min_score: float | None = None
+    # Matches older than this many days (by posting date, else first sighting) leave matches, digests and the sheet.
+    fresh_days: int = 14
     llm: "LLMConfig" = field(default_factory=lambda: LLMConfig())
 
 
@@ -281,6 +289,22 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(apply_cover_letters, bool):
         raise ValueError('[apply] cover_letters must be true or false (no quotes)')
 
+    notify = raw.get("notify", {})
+    notify_channel = str(notify.get("channel", "text"))
+    if notify_channel not in ("text", "email"):
+        raise ValueError('[notify] channel must be "text" or "email"')
+    notify_min_score = notify.get("min_score")
+    if notify_min_score is not None:
+        notify_min_score = float(notify_min_score)
+        if not 0 <= notify_min_score <= 100:
+            raise ValueError("[notify] min_score must be between 0 and 100")
+    email_scan = fo.get("email_scan", False)
+    if not isinstance(email_scan, bool):
+        raise ValueError("[fo] email_scan must be true or false (no quotes)")
+    fresh_days = int(raw.get("freshness", {}).get("max_age_days", 14))
+    if not 1 <= fresh_days <= 365:
+        raise ValueError("[freshness] max_age_days must be between 1 and 365")
+
     base = home
     return Config(
         home=base,
@@ -296,6 +320,10 @@ def load_config(path: Path | None = None) -> Config:
         fo_transport=fo_transport,
         google_enabled=google_enabled,
         apply_cover_letters=apply_cover_letters,
+        email_scan=email_scan,
+        notify_channel=notify_channel,
+        notify_min_score=notify_min_score,
+        fresh_days=fresh_days,
         sites=sites,
         ats_sources=ats_sources,
         structured_sources=structured_sources,

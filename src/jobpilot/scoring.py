@@ -51,12 +51,20 @@ def load_rubric(profile_path: Path, rubric: str | None) -> str:
     return _read_rubric(str(_rubric_path(profile_path, rubric)))
 
 
-def _profile_summary(profile: Profile) -> str:
+def _profile_summary(profile: Profile, rejections: dict[str, int] | None = None) -> str:
     lines = [
         f"{profile.name} - {profile.headline}, based in {profile.location}.",
         f"Accounts personally handled: {', '.join(profile.accounts) or 'none listed'}.",
         f"Target employers: {', '.join(profile.target_companies) or 'none listed'}.",
     ]
+    if profile.seniority:
+        lines.append(f"Seniority wanted: {', '.join(profile.seniority)}.")
+    if profile.work_modes:
+        lines.append(f"Work arrangement wanted: {', '.join(profile.work_modes)}.")
+    if rejections:
+        # Only fixed category names (ranking.REJECTION_CATEGORIES) reach the prompt, never an employer's own words.
+        lines.append("Earlier rejections by reason: " + ", ".join(f"{k} {n}" for k, n in sorted(rejections.items()))
+                     + ". Score lower the jobs likely to fail the same way.")
     # Free-text facts the scorer must not miss: sponsorship, salary, notice
     # period, start date (spec 17.x; Task 8's second amendment).
     lines.extend(profile.notes)
@@ -101,7 +109,7 @@ def build_scoring_batch(
     return {
         "seeker_id": seeker_id,
         "rubric": load_rubric(resolved_profile_path, profile.rubric),
-        "profile_summary": _profile_summary(profile),
+        "profile_summary": _profile_summary(profile, store.rejection_summary(seeker_id)),
         "jobs": jobs,
         "note": UNTRUSTED_NOTE,
     }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JobPilot</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#1f3a5f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">JobPilot</div>
+  <nav>
+    <button class="tab is-on" data-view="board">Pipeline</button>
+    <button class="tab" data-view="inbox">To do <span id="todo-count" class="pill" hidden></span></button>
+    <button class="tab" data-view="profile">Search profile</button>
+  </nav>
+  <form method="post" action="/logout" class="logout"><button type="submit" class="link">Log out</button></form>
+</header>
+<section id="status" class="status" aria-live="polite"></section>
+<main>
+  <section id="view-board" class="view">
+    <div class="board" id="board"></div>
+  </section>
+  <section id="view-inbox" class="view" hidden></section>
+  <section id="view-profile" class="view" hidden></section>
+</main>
+<aside id="drawer" class="drawer" hidden aria-modal="true" role="dialog">
+  <div class="drawer-head">
+    <button class="link" id="drawer-close" aria-label="Close">&larr; Back</button>
+    <div id="drawer-title" class="drawer-title"></div>
+  </div>
+  <div id="drawer-body" class="drawer-body"></div>
+</aside>
+<div id="toast" class="toast" hidden></div>
+</body>
+</html>

@@ -10,6 +10,7 @@ import yaml
 # sources is required with no default: "every enabled source" would send a
 # US seeker through Naukri.
 REQUIRED = ("name", "headline", "location", "search_terms", "sources")
+WORK_MODES = ("remote", "hybrid", "onsite")
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,17 @@ class Profile:
     # Names a shared rubric under data/rubrics/<rubric>.md, used only when this
     # seeker has no data/seekers/<name>/rubric.md of their own (see scoring.py).
     rubric: str | None = None
+    # Match-time filters and lists (ranking.filter_reason). An unknown fact never filters a job out.
+    blacklist_companies: list[str] = field(default_factory=list)
+    whitelist_companies: list[str] = field(default_factory=list)
+    exclude_staffing_agencies: bool = True
+    salary_floor: float | None = None          # yearly, in salary_currency
+    salary_currency: str | None = None         # INR | USD | EUR | GBP
+    work_modes: list[str] = field(default_factory=list)       # any of remote, hybrid, onsite; empty = all
+    locations: list[str] = field(default_factory=list)        # place names a job's location must contain; empty = all
+    seniority: list[str] = field(default_factory=list)        # for the scorer, e.g. ["senior", "lead"]
+    source_weights: dict[str, float] = field(default_factory=dict)   # per-board score adjustment, -20..20
+    followup_days: int = 7                     # days of silence after applying before a follow-up draft is suggested
 
 
 @dataclass(frozen=True)
@@ -57,6 +69,16 @@ def load_profile(path: Path) -> Profile:
         notes=list(raw.get("notes") or []),
         also_search=list(raw.get("also_search") or []),
         rubric=raw.get("rubric") or "general",
+        blacklist_companies=[str(x) for x in raw.get("blacklist_companies") or []],
+        whitelist_companies=[str(x) for x in raw.get("whitelist_companies") or []],
+        exclude_staffing_agencies=bool(raw.get("exclude_staffing_agencies", True)),
+        salary_floor=float(raw["salary_floor"]) if raw.get("salary_floor") else None,
+        salary_currency=str(raw["salary_currency"]).upper() if raw.get("salary_currency") else None,
+        work_modes=[str(x).lower() for x in raw.get("work_modes") or [] if str(x).lower() in WORK_MODES],
+        locations=[str(x) for x in raw.get("locations") or []],
+        seniority=[str(x) for x in raw.get("seniority") or []],
+        source_weights={str(k): max(-20.0, min(20.0, float(v))) for k, v in (raw.get("source_weights") or {}).items()},
+        followup_days=max(1, min(60, int(raw.get("followup_days") or 7))),
     )
 
 
