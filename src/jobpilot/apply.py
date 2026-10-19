@@ -126,17 +126,17 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
     where = f"the two lines containing {marker}" if letter_text else "the markers"       # two fences need naming
     others = "ID, certificate, transcript, portfolio" if letter_text else "cover letter, ID, certificate, transcript, portfolio"
     file_rule = (
-        "7. If the application wants my resume as a FILE (an upload field, or an email attachment): create a Google Doc named "
+        "8. If the application wants my resume as a FILE (an upload field, or an email attachment): create a Google Doc named "
         '"JobPilot resume" in a folder "JobPilot Resumes" that I own in my Google Drive (ignore any same-named folder '
         'shared with me) whose body is EXACTLY the resume '
         f"text between {where}, export it as a PDF, and use that PDF for the resume or CV field only. Do not share the "
         f"document, change its sharing, or put it in a shared folder. Any OTHER file ({others}) is not in "
         "scope: stop and tell me what it asks, without submitting.\n") if attach_pdf else ""
     paste_rule = "" if attach_pdf else (
-        "7. If the application has a place to paste or type my resume (for example an 'enter manually' option), paste the resume "
+        "8. If the application has a place to paste or type my resume (for example an 'enter manually' option), paste the resume "
         "text there (the resume text that rule 2 points to). If it accepts only a file upload, stop and tell me, without "
         "submitting.\n")
-    nxt = 8                                              # the next free rule number after rule 7 (file or paste)
+    nxt = 9                                              # the next free rule number after rule 8 (file or paste)
     letter_rule, letter_block = "", ""
     if letter_text:
         letter_marker = secrets.token_hex(8)
@@ -179,9 +179,16 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
            "anything not in the resume, ask me. Do not submit anything until I confirm.\n") +
         "4. Do NOT create any calendar event, and do not call anyone, buy anything or send any other message. A "
         "calendar entry is made later, only if the company itself sends me an interview invitation.\n"
-        "5. If the page needs an account, a password or a one-time code that only my phone could receive, STOP right away "
-        "and tell me; do not create accounts, do not retry more than once, and do not use any other email or number.\n"
-        "6. Afterwards tell me exactly what you submitted and where. While filling a form, never press the Enter key inside a "
+        "5. If you get stuck on a step only a person can do (an account, a password, a captcha, a verification or a page "
+        "you cannot get past), STOP there and give me, in your reply, the exact link of that page, what it needs, and every "
+        "field you had already filled. If it is a one-time code sent to my email or phone, ask me for it and type in exactly "
+        "what I send. When I tell you the step is done, continue from that page. Do not create accounts, do not retry more "
+        "than once, and do not use any other email or number.\n"
+        + ("6. No review draft is needed for this job, because rule 3 applies.\n" if approved else
+           "6. Before anything is submitted, send me a review draft and wait: a screenshot of the fully filled page, the "
+           "page's link, and every field with what you put in it. If I reply 'submit', submit it once. If I say I will submit "
+           "it myself, do not submit: give me the form link and the exact values to enter.\n") +
+        "7. Afterwards tell me exactly what you submitted and where. While filling a form, never press the Enter key inside a "
         "field or a dropdown (it can submit the form early): choose with the mouse or Tab, and click the submit button only "
         "after I have confirmed. When you report back, never repeat my email, phone number or home address; say only that my contact "
         "details were filled in.\n"

@@ -1,4 +1,3 @@
-import pytest
 
 from jobpilot.sources.base import SourceStatus
 from jobpilot.sources.health import classify

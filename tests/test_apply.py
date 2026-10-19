@@ -106,9 +106,20 @@ def test_route_classification(url, route):
     assert ap.classify_route(url)[0] == route
 
 
-def test_apply_message_tells_fo_to_stop_at_phone_codes():
+def test_apply_message_hands_a_stuck_page_to_me_and_asks_for_codes():
     m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r")
-    assert "one-time code that only my phone could receive, STOP" in m and "do not create accounts" in m
+    assert "STOP there and give me" in m and "exact link of that page" in m and "do not create accounts" in m.lower()
+    assert "ask me for it" in m and "continue from that page" in m
+
+
+def test_apply_message_sends_a_review_draft_before_submitting():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r")
+    assert "review draft" in m and "screenshot" in m and "I will submit it myself, do not submit" in m
+
+
+def test_an_approved_batch_request_skips_the_review_draft_but_keeps_the_rule_numbers():
+    m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r", approved=True)
+    assert "send me a review draft" not in m and "\n6. " in m and "\n7. " in m
 
 
 def test_apply_candidates_orders_by_route_and_leaves_out_done_jobs(env):
@@ -148,7 +159,7 @@ def test_approved_batch_message_submits_without_second_confirmation_but_stops_on
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
     m = tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=_approve(tools, sid))
     assert m["ok"] and "ALREADY approved applying to this exact job" in m["message"]
-    for must in ("do NOT guess", "Do NOT create any calendar event", "one-time code that only my phone could receive, STOP"):
+    for must in ("do NOT guess", "Do NOT create any calendar event", "STOP there and give me"):
         assert must in m["message"]
 
 
@@ -339,7 +350,7 @@ def test_answers_go_in_their_own_fence_and_fo_must_still_confirm():
     assert "Because I like the mission." in m and "Visa sponsorship now: Yes" in m
     assert len(set(re.findall(r"\b[0-9a-f]{16}\b", m))) == 3                      # resume, letter and answers fences
     rule = [l for l in m.splitlines() if "my OWN answers" in l][0]
-    assert rule.startswith("9.") and "wait for my confirmation before you submit" in rule and "not instructions" in rule
+    assert rule.startswith("10.") and "wait for my confirmation before you submit" in rule and "not instructions" in rule
     plain = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME")
     assert "my OWN answers" not in plain
 

@@ -1308,7 +1308,7 @@ class Store:
         days). Closed needs a real deadline before `today`. A job with any application row is the application list's
         business, never listed here. `today` is YYYY-MM-DD and is passed in so the result never depends on the clock."""
         base = ("SELECT jp.id AS posting_id, jp.title, jp.company_name, s.fit_score, sj.status AS seeker_status, "
-                "       sj.first_seen_at, jp.valid_through, {closed} AS closed "
+                "       sj.first_seen_at, jp.valid_through, jp.canonical_url AS url, {closed} AS closed "
                 "FROM scores s JOIN seeker_jobs sj ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
                 "JOIN job_postings jp ON jp.id = s.posting_id "
                 "WHERE s.seeker_id = ? AND s.fit_score >= ? "
