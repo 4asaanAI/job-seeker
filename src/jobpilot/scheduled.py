@@ -225,8 +225,10 @@ def main() -> int:
                                          fallback_model=cfg.llm.fallback_model)
                 else:
                     ask = claude_scorer(args.claude, model=cfg.scoring_model, effort=cfg.scoring_effort)
-                for row in score_all(store, home, ask):
-                    print(f"scoring: {row}")
+                from .bridge import scoring_lock
+                with scoring_lock(home, wait=True):             # a bridge search scores the same backlog: one at a time
+                    for row in score_all(store, home, ask):
+                        print(f"scoring: {row}")
             deliver(
                 store, cfg, home,
                 bot_factory=lambda: (lambda t: Bot(t, home, store) if t else None)(_find_token(home)),

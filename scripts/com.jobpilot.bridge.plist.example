@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fo bridge (docs/BRIDGE.md). Copy to ~/Library/LaunchAgents/, replace YOU, HOSTNAME and the python path, then:
+     launchctl load ~/Library/LaunchAgents/com.jobpilot.bridge.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jobpilot.bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/miniforge3/envs/jobpilot/bin/python</string>
+    <string>-m</string><string>jobpilot.bridge</string>
+    <string>--host</string><string>HOSTNAME.ts.net</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>JOBPILOT_HOME</key><string>/Users/YOU/job-seeker</string>
+    <key>PYTHONPATH</key><string>/Users/YOU/job-seeker/src</string>
+    <key>HOME</key><string>/Users/YOU</string>
+    <key>PATH</key><string>/Users/YOU/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/job-seeker/data/bridge.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/job-seeker/data/bridge.out.log</string>
+</dict>
+</plist>
