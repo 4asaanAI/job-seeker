@@ -8,9 +8,9 @@ Counted from `data/runs.jsonl`, written by each real run or recorded right after
 | `apply_live` | 5 | 2 | 3 |
 | `apply_rehearsal` | 1 | 0 | 1 |
 | `refresh_deliver` | 5 | 5 | 0 |
-| `refresh_tracker` | 5 | 4 | 1 |
+| `refresh_tracker` | 6 | 5 | 1 |
 
-Total: 17 run(s), 11 succeeded, 6 failed.
+Total: 18 run(s), 12 succeeded, 6 failed.
 
 Failed runs (kept, not hidden):
 - 2026-10-18T22:44:13+00:00 `apply_rehearsal`: cause=rehearsal run against a live form, company=Turing, error=form submitted early when Enter was pressed in a dropdown; resume was not entered; an incomplete application was sent, job=1
