@@ -23,6 +23,23 @@ Run it with your Tailscale address so only your own devices can reach it:
 Open `http://100.x.y.z:8770` on the phone, log in with the token, and use "Add to Home Screen". Do not expose it to the
 public internet (no Funnel): it is meant for your own devices.
 
+## The screens
+
+- **Pipeline:** your jobs as a board (matches, started, applied, interview, closed) or as a sortable table (the Board / List
+  buttons). **Filters & sorting** narrow your matches by text, lowest score, work mode, place, job board, lowest salary (with a
+  currency), "only jobs that state a salary", posted within 2 days / a week / 2 weeks, and "closing within 48 hours"; sort by best
+  match, newest, closing soonest, highest salary (currencies compared at rough rates) or company / title A-Z. In the list, click a
+  column heading to sort. Your choices are remembered in this browser. A job that does not state a fact (no salary, no work mode)
+  is not removed by the filter for it.
+- **To do:** email suggestions to confirm, failed submissions, follow-ups due.
+- **My answers:** about 27 ready-made questions in groups (work eligibility, availability, compensation, location and work style,
+  about you, short written answers, voluntary). Answer once; applications are prefilled. Saving an answer writes a formal, polite
+  version for you to read; forms use it only after you approve it, word for word.
+  **Ask Fo to help me write it** opens a small chat: tell Fo the facts, or press "Draft it for me". Fo uses only your resume and what
+  you tell it, asks for a fact it lacks, and takes no other action. Its reply goes into the answer box only when you press "Use this
+  as my answer"; nothing is saved until you press Save.
+- **Search profile:** what JobPilot searches for and which jobs are hidden.
+
 ## What protects it
 
 - Every page and API call needs the login token (as a session cookie derived from it; `--new-token` logs everyone out).

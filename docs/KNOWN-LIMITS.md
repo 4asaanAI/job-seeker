@@ -72,3 +72,4 @@ spends your authenticator code only after the request was built (a build that fa
 the code usable); a failed text-inbox build spends no code and leaves no "started" record; importing history now turns a row that
 matches a job JobPilot already found into that job's application (never overwriting one); the nightly CSV snapshot and interview
 prep run even when the morning search failed.
+| The writing helper's replies are Fo's wording | Fo drafts from your resume and your notes and is told never to guess a fact, but a model can still slip. Its reply is only shown; you edit it, save it, and approve the formal version, so nothing reaches a form without you reading it. Up to 100 helper requests a day. | A person must read what goes to an employer. |

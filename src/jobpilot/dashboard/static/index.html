@@ -18,6 +18,7 @@
   <nav>
     <button class="tab is-on" data-view="board">Pipeline</button>
     <button class="tab" data-view="inbox">To do <span id="todo-count" class="pill" hidden></span></button>
+    <button class="tab" data-view="answers">My answers</button>
     <button class="tab" data-view="profile">Search profile</button>
   </nav>
   <form method="post" action="/logout" class="logout"><button type="submit" class="link">Log out</button></form>
@@ -25,9 +26,15 @@
 <section id="status" class="status" aria-live="polite"></section>
 <main>
   <section id="view-board" class="view">
+    <details class="filters" id="filters">
+      <summary>Filters &amp; sorting<span id="filter-active"></span> <span id="filter-count" class="note"></span></summary>
+      <div id="filters-body" class="filters-body"></div>
+    </details>
     <div class="board" id="board"></div>
+    <div class="list" id="list" hidden></div>
   </section>
   <section id="view-inbox" class="view" hidden></section>
+  <section id="view-answers" class="view" hidden></section>
   <section id="view-profile" class="view" hidden></section>
 </main>
 <aside id="drawer" class="drawer" hidden aria-modal="true" role="dialog">
