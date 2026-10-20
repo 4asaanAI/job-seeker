@@ -201,6 +201,12 @@ def _words(text: object) -> set[str]:
     return {w for w in re.findall(r"[a-z]+", str(text or "").lower()) if w not in _STOP and len(w) > 2}
 
 
+def _same_label(a: object, b: object) -> bool:
+    """Two questions that differ only in case, punctuation or a required-field star."""
+    na, nb = " ".join(re.findall(r"[a-z0-9]+", str(a or "").lower())), " ".join(re.findall(r"[a-z0-9]+", str(b or "").lower()))
+    return bool(na) and na == nb
+
+
 _KEY_STEMS = ("sponsor", "authori", "notice", "salary", "compens", "ctc", "relocat", "clearance", "disab", "veteran")
 
 
@@ -209,6 +215,9 @@ def matching_answer(label: str, answers: dict[str, str]) -> str | None:
     salary, relocation...) selects only the questions about that topic; otherwise the most words in common (at least
     two) wins. A tie is no match: never guess between two answers."""
     low = (label or "").lower()
+    exact = [a for q, a in answers.items() if _same_label(label, q)]   # the form asks the question as it was saved
+    if exact and len(set(exact)) == 1:
+        return exact[0]
     pool = list(answers.items())
     for stem in _KEY_STEMS:
         if stem in low:
