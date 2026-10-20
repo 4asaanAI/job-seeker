@@ -494,6 +494,55 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
     return Starlette(routes=routes)
 
 
+# ---- restarting itself when its code changes ---------------------------------------------------------------------------
+
+WATCH_EVERY = 5                                  # seconds between looks at the code
+_WATCHED = ("*.py", "static/*")
+
+
+def code_fingerprint(root: Path | None = None) -> float:
+    """The newest modification time of the dashboard's own code and files, and of the rest of the jobpilot package."""
+    package = Path(root) if root else Path(__file__).resolve().parents[1]
+    newest = 0.0
+    for pattern in ("*.py", "*/*.py", "dashboard/static/*"):
+        for path in package.glob(pattern):
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                continue
+    return newest
+
+
+def busy(dash) -> bool:
+    """True while something would be lost by restarting: a request being sent to Fo or a writing-helper turn."""
+    return any(v.get("state") in ("sending", "working") for v in [*dash.sends.values(), *dash.assists.values()])
+
+
+def restart_due(started_at: float, current: float, dash) -> bool:
+    """The code changed since this process started and nothing is in flight."""
+    return current > started_at and not busy(dash)
+
+
+def watch_code(dash, argv: list[str], *, interval: float = WATCH_EVERY, execv=os.execv, sleep=None) -> None:
+    """Restart this process in place (same arguments, same address) soon after the code changes on disk, so an update
+    shows up without anyone stopping and starting the dashboard. It waits while a send to Fo is running. Works when
+    started by hand and under launchd; a crash is restarted by launchd (KeepAlive)."""
+    import sys
+    import time
+    sleep = sleep or time.sleep
+    started = code_fingerprint()
+    while True:
+        sleep(interval)
+        try:
+            now = code_fingerprint()
+            if restart_due(started, now, dash):
+                print("dashboard: code changed, restarting", flush=True)
+                execv(sys.executable, [sys.executable, "-m", "jobpilot.dashboard", *argv])
+                return
+        except OSError as exc:  # noqa: BLE001 - a failed look is tried again
+            print(f"dashboard: restart check failed: {exc}", flush=True)
+
+
 def new_token(path: Path = TOKEN_PATH) -> str:
     token = secrets.token_urlsafe(24)
     write_secret(path, token, replace=True)
@@ -532,6 +581,9 @@ def main(argv: list[str] | None = None) -> int:
     hosts = ("127.0.0.1", "localhost") + ((args.host.lower(),) if args.host else ())
     app = make_app(dash, hosts=hosts)
     import uvicorn
+    if not os.environ.get("JOBPILOT_NO_AUTORELOAD"):
+        threading.Thread(target=watch_code, args=(dash, list(argv if argv is not None else __import__("sys").argv[1:])),
+                         name="dashboard-watch", daemon=True).start()
     bind = args.host or "127.0.0.1"
     print(f"JobPilot dashboard: http://{bind}:{args.port}/" + ("  (also http://127.0.0.1)" if args.host else ""))
     if args.host:

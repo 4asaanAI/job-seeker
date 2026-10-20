@@ -646,6 +646,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("drawer-close").addEventListener("click", closeDrawer);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
   refresh();
-  setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+  setInterval(() => { if (!document.hidden) refresh(); }, 8000);       // near real time: Fo's work shows within seconds
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 });

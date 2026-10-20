@@ -1134,3 +1134,45 @@ def test_the_dashboard_saves_the_countries_and_previews_an_answer(dash):
 def vault_q(key):
     from jobpilot import vault
     return vault.STANDARD_QUESTIONS[key]
+
+
+# ---- the dashboard restarts itself when its code changes -------------------------------------------------------------------
+
+def test_the_dashboard_restarts_only_when_the_code_changed_and_nothing_is_in_flight(dash, tmp_path):
+    from jobpilot.dashboard import app as dash_app
+    d, *_ = dash
+    pkg = tmp_path / "pkg"
+    (pkg / "dashboard" / "static").mkdir(parents=True)
+    (pkg / "a.py").write_text("x = 1")
+    first = dash_app.code_fingerprint(pkg)
+    assert dash_app.restart_due(first, dash_app.code_fingerprint(pkg), d) is False          # nothing changed
+    (pkg / "dashboard" / "static" / "app.js").write_text("//")
+    os.utime(pkg / "dashboard" / "static" / "app.js", (first + 50, first + 50))
+    changed = dash_app.code_fingerprint(pkg)
+    assert changed > first and dash_app.restart_due(first, changed, d) is True
+    d.sends[1] = {"state": "sending"}
+    assert dash_app.restart_due(first, changed, d) is False                                  # a send to Fo is running: wait
+    d.sends[1] = {"state": "complete"}
+    d.assists["t"] = {"state": "working"}
+    assert dash_app.restart_due(first, changed, d) is False                                  # so is a writing-helper turn
+    d.assists["t"] = {"state": "done"}
+    assert dash_app.restart_due(first, changed, d) is True
+
+
+def test_the_watcher_re_executes_with_the_same_arguments(dash, tmp_path, monkeypatch):
+    import sys
+    from jobpilot.dashboard import app as dash_app
+    d, *_ = dash
+    seen = []
+    prints = iter([1.0, 1.0, 9.0])
+    monkeypatch.setattr(dash_app, "code_fingerprint", lambda root=None: next(prints))
+
+    class Done(Exception):
+        pass
+
+    def fake_exec(path, args):
+        seen.append((path, args))
+        raise Done()
+    with pytest.raises(Done):
+        dash_app.watch_code(d, ["--host", "100.1.2.3"], interval=0, execv=fake_exec, sleep=lambda s: None)
+    assert seen == [(sys.executable, [sys.executable, "-m", "jobpilot.dashboard", "--host", "100.1.2.3"])]
