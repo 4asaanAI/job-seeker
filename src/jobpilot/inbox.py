@@ -1,4 +1,6 @@
-"""Text Fo, JobPilot answers.
+"""RETIRED (2026-10-20): Fo now calls JobPilot directly through the bridge (docs/BRIDGE.md). Kept for `--legacy` only.
+
+Text Fo, JobPilot answers.
 
 Wajo has not shipped an inbound-reply webhook, but Fo's MCP can READ the user's own conversation transcripts.
 This polls them through a headless `claude -p` relay (only the two read tools), accepts a tiny read-only command
@@ -449,12 +451,17 @@ def poll_once(store: Store, seeker_id: int, out_dir: Path, reader, send, state_p
 def main() -> int:
     from .config import load_config
     from .scheduled import make_fo_client
-    parser = argparse.ArgumentParser(description="Answer 'jp ...' texts sent to Fo (one poll)")
+    parser = argparse.ArgumentParser(description="Retired: answer 'jp ...' texts sent to Fo (one poll)")
     parser.add_argument("--once", action="store_true", required=True, help="poll once and exit")
+    parser.add_argument("--legacy", action="store_true", help="run the retired inbox anyway")
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--claude", default="claude")
     args = parser.parse_args()
+    if not args.legacy:
+        print("fo inbox: retired. Fo now calls JobPilot's tools directly through the bridge (docs/BRIDGE.md): just ask Fo. "
+              "Unload the old LaunchAgent: launchctl unload ~/Library/LaunchAgents/com.jobpilot.inbox.plist")
+        return 2
     cfg = load_config(args.config)
     if not cfg.fo_enabled or cfg.fo_seeker_id is None:
         print("fo inbox: needs [fo] enabled = true and seeker_id")

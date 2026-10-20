@@ -372,6 +372,12 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         out = inner["my_tracker_link"](pin)
         return {"ok": out.get("ok", False), "link": out.get("link")}
 
+    @guarded("forget_tracker_link")
+    def forget_tracker_link() -> dict:
+        """Forget the saved tracker sheet link; the next tracker refresh finds or creates the sheet again."""
+        store.reset_tracker_link(pin)
+        return {"ok": True, "note": "Forgot the saved sheet link. The next tracker refresh finds or creates the sheet again."}
+
     @guarded("update_my_profile")
     def update_my_profile(headline: str | None = None, location: str | None = None,
                           search_terms: list[str] | None = None, also_search: list[str] | None = None,
@@ -598,14 +604,15 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         return {k: v for k, v in built.items() if k in ("ok", "message", "error", "code")}
 
     from .bridge_more import build_more
-    base = {f.__name__: f for f in (my_matches, apply_candidates, my_status, my_tracker_link, update_my_profile, refresh,
+    base = {f.__name__: f for f in (my_matches, apply_candidates, my_status, my_tracker_link, forget_tracker_link,
+                                    update_my_profile, refresh,
                                     refresh_status, build_fo_apply_message, approve_submit, record_application,
                                     update_tracker_row, form_profile, pre_submit_check, report_blocked,
                                     record_progress, report_submit_failed, cancel_application, retry_failed)}
     return {**build_more(inner, pin, store, guarded), **base}
 
 
-ALLOWED = ("my_matches", "apply_candidates", "my_status", "my_tracker_link", "update_my_profile", "refresh",
+ALLOWED = ("my_matches", "apply_candidates", "my_status", "my_tracker_link", "forget_tracker_link", "update_my_profile", "refresh",
            "refresh_status", "build_fo_apply_message", "approve_submit", "record_application", "update_tracker_row",
            "form_profile", "pre_submit_check", "report_blocked", "record_progress", "report_submit_failed",
            "cancel_application", "retry_failed") + MORE_NAMES

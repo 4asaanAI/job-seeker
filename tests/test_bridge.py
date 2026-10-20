@@ -294,3 +294,11 @@ def test_off_switch_turns_the_bridge_off(client):
     (tmp_path / "d" / "data" / "bridge.off").write_text("")
     assert c.post("/mcp", json=BODY, headers={**HDRS, "authorization": f"Bearer {key}"}).status_code == 503
     os.remove(tmp_path / "d" / "data" / "bridge.off")
+
+
+def test_fo_can_forget_the_saved_tracker_link(env):
+    store, sid, ids, tools, *_ = env
+    store.pin_tracker_link(sid, "https://docs.google.com/spreadsheets/d/abc123/edit")
+    assert store.tracker_link(sid)
+    assert tools["forget_tracker_link"]()["ok"]
+    assert store.tracker_link(sid) is None

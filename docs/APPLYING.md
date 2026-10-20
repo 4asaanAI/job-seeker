@@ -73,18 +73,12 @@ Jobs on login boards are listed separately for you to apply to by hand.
    submits anything. Fo may ask you questions; answer them in the session.
 4. When Fo reports it submitted, Claude calls `record_application(status="applied")`.
 
-## 3b. Apply from your phone (text Fo)
+## 3b. Apply from your phone (ask Fo)
 
-With the inbox running (`python -m jobpilot.inbox --once`), text Fo `jp matches`, then `jp apply <id>`. JobPilot replies with
-the job, a note that your resume is tailored to it, and a one-time code. Reply `jp yes <code>` and Fo applies with the
-tailored resume. The code is random, tied to that one job, works once and expires in two hours; at most 3 are open at a time.
-Login-gated boards are refused (apply by hand). The job is marked `started` the
-moment the request is built (so it can never go out twice); tell Claude the result to mark it `applied`.
-
-**Who submits.** While review mode is on (the default), Fo fills the form and asks you in its own chat before it submits.
-Only if you turned review mode off (`set_review_mode(false)`) does Fo submit straight after your `jp yes`, stopping at
-anything not in your resume. Be aware: the inbox reads your Fo transcripts through a headless model, and the code is
-texted to the same chat, so a manipulated relay could in principle echo it. Review mode on is the safe setting.
+With the bridge connected ([BRIDGE.md](BRIDGE.md)), text Fo "show my matches", then "apply to <id>". Fo builds the vetted
+request (`build_fo_apply_message`), shows you its filled-in review draft, and submits only after you give it the current code
+from your authenticator app (`approve_submit`). The old `jp apply` / `jp yes` text commands are retired: their code was texted
+into the same chat the relay read, while the authenticator code never passes through Fo's transcripts before you type it.
 
 ## 3c. Google Sheets and Docs through Fo
 
@@ -92,24 +86,24 @@ Fo has native Google Sheets and Docs tools on your connected Google account. Job
 it builds vetted requests that name one file, pass only cleaned text between random markers, and forbid sharing, email,
 calendar events and following instructions found in the data.
 
-- **Tracker sheet.** `build_fo_tracker_message` (or text `jp sync`) asks Fo to keep a sheet called "JobPilot Tracker" in your
+- **Tracker sheet.** `build_fo_tracker_message` (Fo: `refresh_tracker_sheet`) asks Fo to keep a sheet called "JobPilot Tracker" in your
   Drive: one row per application and good open match (ID, job, company, status, fit score, dates), updated by ID, never
   deleting rows. Cells are written as plain text, never formulas.
-- **Tailored resume in Google Docs.** `build_fo_resume_doc_message` (or text `jp doc <id>`) asks Fo to create a Google Doc
+- **Tailored resume in Google Docs.** `build_fo_resume_doc_message` (Fo: `build_fo_resume_doc_message`) asks Fo to create a Google Doc
   "Resume - <company> - <title> (job <id>)" in a "JobPilot Resumes" folder, containing exactly your facts-only tailored
   text (bullets reordered for that job, nothing added). Review or edit it in Docs, and export to PDF yourself.
 - **Formatting.** The tracker is styled by instruction: bold coloured frozen header, status dropdown, colours per status, a Summary
   tab with a chart. The resume Doc uses real Title / Heading 1 / Heading 2 styles, real bullets and one clean font, with no tables or
-  columns so applicant systems can read it. `jp deck` (or `build_fo_deck_message`) asks for a themed Google Slides progress deck:
+  columns so applicant systems can read it. `build_fo_deck_message` asks for a themed Google Slides progress deck:
   pipeline chart, top matches table, next steps, using only your vetted numbers. Pass `export_xlsx`, `export_docx` or `export_pptx`
   to also get Excel, Word or PowerPoint copies in a "JobPilot Exports" folder (never emailed or shared). Fo confirmed it can do all
   of this except a Sheets filter view; it is Fo's own claim, not yet seen end to end.
 - **Resume files for applications.** With `[google] enabled`, every apply request also tells Fo to create the tailored resume as a Doc, export a PDF and use it for a resume/CV upload field or email attachment, so jobs that need a file become possible. Other files (ID, certificates; a cover letter unless you turned letters on, below) still stop it. It may not share the Doc.
-- **Cover letters.** `jp letter <id>` (or `build_fo_cover_letter_message`) asks Fo for a Google Doc named "JobPilot cover letter - job <id>". JobPilot builds the letter from your own saved resume: your two best-matching bullets copied exactly (with their employer), the skills of yours the job mentions, your summary, and the company name. No model writes it and the job title and description are not copied into it. With `[apply] cover_letters = true` (off by default), applications carry the same letter, and Fo uses it only where the form REQUIRES a cover letter: it leaves optional fields empty, answers every other question from the resume text only, and (with Google on) uploads it as a PDF from a new Doc named with the job id. `jp apply` says when a letter will be used.
-- **The job record.** The "JobPilot Tracker" sheet is refreshed every morning (when `[fo]` and `[google]` are on), by `jp sync`, and once after a batch of outcome texts (at most 5 a day). It lists, in one request of up to 100 rows: your newest 50 applications, up to 15 jobs whose deadline passed in the last 14 days (`deadline passed`), then your best open matches at or above your own `min_score` (profile, between 50 and 100, default 70), with First seen and Deadline columns. Fo is told to match columns by header name, add the two new columns if missing, never move a status backwards, never delete rows, and to write everything in one update. `stale` means a match that is no longer listed. Fo's first reply gives the sheet link; JobPilot saves it, opens the sheet by id from then on, and adds "Your job tracker: <link>" to every digest and `jp` reply (`jp link` shows it, `jp link reset` forgets it; Claude can read it with `my_tracker_link`). `python -m jobpilot.refresh --deliver` searches, scores, texts the new matches and refreshes the sheet in one go. The sheet cannot write back: to record an outcome text `jp applied|interview|rejected|withdrawn <id>`.
-- **Safety limits.** Fo is told to use only files and folders you OWN (ignoring same-named ones shared with you), to treat anything it reads in Drive as data, and never to share. The Doc is named "JobPilot resume - job <id>" (job titles are kept out of names). `jp sync` / `jp doc` are capped at 10 a day. One residual risk: Fo finds the sheet by name, so check once that it is yours.
+- **Cover letters.** `build_fo_cover_letter_message` asks Fo for a Google Doc named "JobPilot cover letter - job <id>". JobPilot builds the letter from your own saved resume: your two best-matching bullets copied exactly (with their employer), the skills of yours the job mentions, your summary, and the company name. No model writes it and the job title and description are not copied into it. With `[apply] cover_letters = true` (off by default), applications carry the same letter, and Fo uses it only where the form REQUIRES a cover letter: it leaves optional fields empty, answers every other question from the resume text only, and (with Google on) uploads it as a PDF from a new Doc named with the job id. `build_fo_apply_message` says when a letter will be used.
+- **The job record.** The "JobPilot Tracker" sheet is refreshed every morning (when `[fo]` and `[google]` are on), and whenever Fo calls `refresh_tracker_sheet`. It lists, in one request of up to 100 rows: your newest 50 applications, up to 15 jobs whose deadline passed in the last 14 days (`deadline passed`), then your best open matches at or above your own `min_score` (profile, between 50 and 100, default 70), with First seen and Deadline columns. Fo is told to match columns by header name, add the two new columns if missing, never move a status backwards, never delete rows, and to write everything in one update. `stale` means a match that is no longer listed. Fo's first reply gives the sheet link; JobPilot saves it, opens the sheet by id from then on, and adds "Your job tracker: <link>" to every digest (`my_tracker_link` shows it, `forget_tracker_link` forgets it). `python -m jobpilot.refresh --deliver` searches, scores, texts the new matches and refreshes the sheet in one go. The sheet cannot write back: to record an outcome ask Fo (`record_application`) or use the dashboard.
+- **Safety limits.** Fo is told to use only files and folders you OWN (ignoring same-named ones shared with you), to treat anything it reads in Drive as data, and never to share. The Doc is named "JobPilot resume - job <id>" (job titles are kept out of names). One residual risk: Fo finds the sheet by name, so check once that it is yours.
 - **Automatic.** Put `[google] enabled = true` in `config.local.toml` (with `[fo]` enabled). The daily run then refreshes the
-  tracker, and one refresh follows a batch of outcome or `jp yes` texts (after their replies, at most 5 a day). Nothing else is automatic.
+  tracker. Nothing else is automatic.
 - Fo's own claim, confirmed by asking it on 2026-10-18; not exercised end to end here. The first run is a supervised pilot.
 
 ## 4. Calendar: only when the company writes back

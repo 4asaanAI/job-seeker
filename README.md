@@ -51,10 +51,8 @@ item: [docs/BUILD-LIST.md](docs/BUILD-LIST.md); the dashboard: [docs/DASHBOARD.m
   login with only Fo's send/poll tools.
 - **Tailored resumes, facts-only.** `tailor_resume` ranks your own bullets and skills against a job and lists the
   job terms your resume lacks. `render_resume` can only keep and reorder what your resume already says.
-- **Text Fo, JobPilot answers.** Wajo has no inbound webhook yet, but Fo's MCP can read your own conversation
-  transcripts. `python -m jobpilot.inbox --once` polls them through a headless relay, accepts a strict read-only
-  grammar (`jp matches`, `jp status`, `jp tailor <id>`) re-checked in Python, runs JobPilot locally and replies
-  through Fo. Commands never apply, email or change a job's status. Design: [docs/superpowers/specs/2026-10-18-fo-inbox-design.md](docs/superpowers/specs/2026-10-18-fo-inbox-design.md).
+- **Text Fo, JobPilot answers.** Fo calls JobPilot's tools directly through the bridge ([docs/BRIDGE.md](docs/BRIDGE.md)), so you
+  just ask Fo in plain English from any chat. (The earlier `jp ...` text commands and their polling inbox are retired.)
 - **"Apply to all my new jobs".** `plan_apply_batch` lists the jobs Fo can plausibly complete; you give one yes; each
   application is a vetted request that stops at anything not in your resume. Max 10 a day.
 - **Applying through Fo, on your yes.** `build_fo_apply_message` builds one vetted request per job (safe link, your resume text,
@@ -65,7 +63,7 @@ item: [docs/BUILD-LIST.md](docs/BUILD-LIST.md); the dashboard: [docs/DASHBOARD.m
   in every digest. Ask Fo in iMessage for the link and it texts it; on-demand refreshes text one update line with the link. Statuses
   (match, started, applied, interview, rejected, offer, deadline passed, stale) are kept current, never deleted.
 - **Google Docs through Fo.** Each
-  job's tailored resume as a Google Doc (`jp doc <id>`) or a facts-only cover letter (`jp letter <id>`). Details in [docs/APPLYING.md](docs/APPLYING.md).
+  job's tailored resume as a Google Doc (`build_fo_resume_doc_message`) or a facts-only cover letter (`build_fo_cover_letter_message`). Details in [docs/APPLYING.md](docs/APPLYING.md).
 - **Real-server test.** The MCP server is started over stdio and driven like Claude would, including seeker pinning.
 
 ```mermaid
@@ -90,7 +88,7 @@ diff it yourself: [all changes since the last pre-hackathon commit](https://gith
 | Facts-only resume tailoring | `src/jobpilot/resume/tailor.py` |
 | Search, score and list on demand | `src/jobpilot/refresh.py` |
 | One-command setup, resume builder, facts-only cover letter | `src/jobpilot/setup.py`, `resume/build.py`, `resume/letter.py` |
-| Text-Fo inbox (experimental; texts typed in iMessage are NOT visible to it, see KNOWN-LIMITS; includes jp apply / jp yes, jp replies and outcome commands) | `src/jobpilot/inbox.py` |
+| Text-Fo inbox (retired: Fo uses the bridge; `--legacy` only) | `src/jobpilot/inbox.py` |
 | Injection attack demo and fictional-data demo | `scripts/injection_demo.py`, `scripts/fo_demo.py` |
 | Real-server MCP tests (listing, pinning, malformed and hostile input) | `tests/test_mcp_judge.py`, `tests/test_mcp_stdio.py` |
 | Two independent code reviews, fixes and known limits | `docs/KNOWN-LIMITS.md` |
@@ -106,7 +104,7 @@ About 20,000 lines of code, tests and scripts in 190+ commits; 897 tests.
 | `ask_fo` | Apply to a job on my yes: resume text, optional PDF from a Google Doc | One request per job, safe link, Fo asks before submitting, no calendar event |
 | `ask_fo` | Resume and cover-letter Docs, reply check, calendar entry only when a company sends an invite | Each request is built and vetted in Python; every `ask_fo` passes Claude Code's permission prompt |
 | `get_fo_reply` | Wait for a long Fo turn to finish ("working" to "complete") | Only `complete` counts as delivered |
-| `list_fo_conversations`, `get_fo_conversation` | Read-only: the polling inbox looks for `jp ...` texts | Re-checked in Python; cannot see iMessage texts (see KNOWN-LIMITS) |
+| `list_fo_conversations`, `get_fo_conversation` | Read-only: used only by the retired `jp` inbox (`--legacy`) | Re-checked in Python; cannot see iMessage texts (see KNOWN-LIMITS) |
 | `start_fo_call` | Not used, and explicitly denied to the relays | Calls are never needed |
 
 ## Honest status
@@ -115,7 +113,7 @@ About 20,000 lines of code, tests and scripts in 190+ commits; 897 tests.
 |---|---|
 | Claude -> Fo texts and calendar create/delete | Applying end to end: the form fill, a PDF upload into a form, a company-sent interview invite |
 | Direct Fo **API** with a Wajo key, and the headless `claude` relay | Google Docs, Slides, cover letters and the one-command setup wizard (tested with a fake Fo) |
-| A real search of Indeed, foundit and Himalayas (216 + 289 + 114 jobs), scoring, a digest texted by Fo | `jp ...` texts answering from iMessage: **not possible today**, Fo's transcript API returns only Fo's own messages in SMS threads, never yours (checked live; needs Wajo's inbound webhook) |
+| A real search of Indeed, foundit and Himalayas (216 + 289 + 114 jobs), scoring, a digest texted by Fo | Replaced by the bridge: Fo calls JobPilot directly, so texts from iMessage work without a transcript poller |
 | Fo built the Google Sheet job record (82 real rows) and handed back its link; Fo texted the link when asked in iMessage | |
 
 More: [docs/FO-DEMO.md](docs/FO-DEMO.md) (demo and safety choices) · [docs/APPLYING.md](docs/APPLYING.md) (using it for your own search).

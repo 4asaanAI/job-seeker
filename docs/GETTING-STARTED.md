@@ -50,16 +50,11 @@ It runs `scripts/daily.sh`, which runs `jobpilot.doctor` first and stops if anyt
 Delivery goes through Fo when `[fo] enabled = true` (one Fo account serves one person), otherwise Telegram. Put personal settings such as
 `[fo]` in a git-ignored `config.local.toml`; it is layered over `config.toml`, so the shared file stays clean.
 
-### Text Fo from your phone (optional, macOS)
+### Text Fo from your phone
 
-A second launchd job polls your Fo texts every 10 minutes so `jp matches`, `jp apply <id>`, `jp sync`, `jp deck`, `jp replies` (Fo checks your email for replies), `jp interview|rejected|applied|withdrawn <id>` (you record the outcome) and the rest get answered.
-
-```bash
-sed -e "s#/path/to/jobpilot#$PWD#g" -e "s#/path/to/claude#$(command -v claude)#" scripts/com.jobpilot.inbox.plist.example > ~/Library/LaunchAgents/com.jobpilot.inbox.plist
-launchctl load ~/Library/LaunchAgents/com.jobpilot.inbox.plist     # stop with launchctl unload
-```
-
-Logs: `data/inbox.log`. Each poll runs one small headless Claude session, so a shorter interval costs more.
+Connect Fo to JobPilot through the bridge ([BRIDGE.md](BRIDGE.md)) and just ask Fo in plain English, from any chat with Fo
+(SMS, iMessage, email or the Fo app). The old `jp ...` text commands and their 10-minute inbox poller are retired; if you
+loaded it before, stop it with `launchctl unload ~/Library/LaunchAgents/com.jobpilot.inbox.plist`.
 
 ## 4. Web tools through a shared Wigolo (optional)
 

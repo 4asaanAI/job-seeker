@@ -354,3 +354,9 @@ def test_a_failed_build_does_not_burn_the_code(demo):
     store.conn.commit()
     run(demo, Reader([msg(f"jp yes {code}", at="2026-10-18T05:02:00Z")]), sent, apply_client=fo)
     assert len(fo.messages) == 1 and [a["status"] for a in store.applications(sid)] == ["started"]
+
+
+def test_the_inbox_is_retired_unless_asked_for_legacy(monkeypatch, capsys):
+    from jobpilot import inbox
+    monkeypatch.setattr("sys.argv", ["inbox", "--once"])
+    assert inbox.main() == 2 and "retired" in capsys.readouterr().out

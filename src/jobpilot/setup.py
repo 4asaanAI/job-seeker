@@ -275,7 +275,7 @@ def run(say=input, *, home: Path | None = None, claude: str = "claude", py: str 
         for ok, what, fix in results:
             print(("OK   " if ok else "FIX  ") + what + ("" if ok else f"  ->  {fix}"))
         print("\nBy hand: run `claude` once to log in" + ("; log in to Fo with /mcp inside Claude Code" if fo else "")
-              + ". Background jobs (daily digest, phone inbox) are optional: see docs/GETTING-STARTED.md.")
+              + ". Background jobs (daily digest, Fo bridge) are optional: see docs/GETTING-STARTED.md.")
         return 0 if all(ok for ok, _, _ in results) else 1
     finally:
         store.close()
