@@ -21,6 +21,7 @@ import threading
 from pathlib import Path
 
 from ..bridge import CODE_PATH, code_window, codes_locked, read_secret, write_secret
+from ..fo import display_title
 
 PORT = 8770
 TOKEN_PATH = Path.home() / ".config" / "jobpilot" / "dashboard_token"
@@ -53,7 +54,8 @@ class Dashboard:
         columns: dict[str, list[dict]] = {"match": [], "started": [], "applied": [], "interview": [], "rejected": []}
         for m in self.store.best_matches(sid, 300, open_only=True):
             columns["match"].append({
-                "posting_id": m["posting_id"], "title": m["title"], "company": m["company_name"], "score": m["fit_score"],
+                "posting_id": m["posting_id"], "title": display_title(m["title"]), "company": display_title(m["company_name"]),
+                "score": m["fit_score"],
                 "deadline_soon": m["deadline_soon"], "work_mode": m["work_mode"], "location": m["location"],
                 "salary_min": m["salary_min"], "salary_max": m["salary_max"], "salary_currency": m["salary_currency"],
                 "posted_on": m["posted_on"], "first_seen": (m["first_seen_at"] or "")[:10],
@@ -61,7 +63,8 @@ class Dashboard:
         for a in self.store.applications(sid, 500):
             column = {"offer": "interview", "withdrawn": "rejected"}.get(a["status"], a["status"])
             if column in columns:
-                columns[column].append({"posting_id": a["posting_id"], "title": a["title"], "company": a["company_name"],
+                columns[column].append({"posting_id": a["posting_id"], "title": display_title(a["title"]),
+                                        "company": display_title(a["company_name"]),
                                         "status": a["status"], "applied_at": a["applied_at"],
                                         "response_at": a["response_at"]})
         status = t["my_status"](sid)
@@ -76,6 +79,7 @@ class Dashboard:
         detail = t["posting_detail"](sid, posting_id)
         if not detail.get("ok"):
             return detail
+        detail["title"], detail["company"] = display_title(detail["title"]), display_title(detail["company"])
         app = next((a for a in self.store.applications(sid, 500) if a["posting_id"] == posting_id), None)
         review = None
         if app is None or app["status"] == "withdrawn":

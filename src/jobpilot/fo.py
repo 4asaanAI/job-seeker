@@ -299,19 +299,39 @@ _SAFE = re.compile(r"[^A-Za-z0-9 .,&()-]")
 _INSTRUCTION = re.compile(
     r"ignore|instruction|previous|forget|disregard|system\s*(prompt|message|instruction)|\bnew\s+prompt|\bfo\b|"
     r"e-?mail\s+(me|my|your|the|this|that|resume|cv|to|it|them|us)|\bcall\s+(me|us|now|the|\+|\d)|\bbuy\b|purchas|"
-    r"\bsend\b|forward|\btext\s+(me|my|us|them|this|to)|\bpay\s+(me|us|to|\d|\$|into|now)|transfer|"
-    r"password|secret|delete|\breply|\bplease\b|\bmust\b|\bnow\b|http|www|"
-    r"\bwire\b|venmo|zelle|paypal|crypto|bitcoin|wallet|\bdial\b|\bvisit\b|\bclick\b|download|install|"
-    r"invoice|credential|\bssn\b|\botp\b|gift\s*cards?|\bacct\b|\bbank\b", re.I)
+    r"\bsend\b|forward|\btext\s+(me|my|us|them|this|to)|\bpay\s+(me|us|to|\d|\$|into|now)|"
+    r"\btransfer\s+(money|funds|\$|\d|all|everything|to)\b|"
+    r"password|secret|delete|\breply|\bplease\b|\bmust\b|http|www|"
+    r"\bwire\b|venmo|zelle|crypto|bitcoin|\bdial\b|\bvisit\s+(this|the|my|our|us|now|link|site|page)\b|\bclick\b|"
+    r"download|install|invoice|credential|\bssn\b|\botp\b|gift\s*cards?|\bacct\b|"
+    r"\bbank\s+(account|acct|details?|number|transfer|login|password|info)", re.I)
 _DOMAIN = re.compile(r"[a-z0-9]\.[a-z]{2,}", re.I)
 _TECH_DOTS = re.compile(r"\.(js|net|ts|py|io)\b", re.I)       # Node.js, ASP.NET, Next.js are job titles, not domains
 _SQUEEZED = re.compile(r"ignore|instruction|email|send|forward|password|previous")
 
 
+_REQ_CODE = re.compile(r"(?:[_\s]+\d{3,}\b)+(?:[_\s]+[A-Z]{2,4}\b)?\s*$")       # "..._0408_1288_1083469", "..._0627_1780_1023011_HRR"
+_TLD = r"(?:com|in|io|co|org|ai|live|fit|photo|group|app|dev|tech|xyz|me|us|uk|tv|so|gg|ly|sh|health|money|work|jobs)"      # not .net/.js: ASP.NET, Node.js
+_DOMAIN_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9&'-]*)\.(" + _TLD + r")\b(?!\.[A-Za-z])", re.I)    # only a NAME that starts with it        # goodads.ai, Amazon.com
+_ABBREV_DOT = re.compile(r"(?<=[A-Za-z0-9])\.(?=[A-Z][a-z])")                 # "Sr.Associate" -> "Sr. Associate"
+
+
+def _tidy(raw: str) -> str:
+    """Make a real title screenable without letting anything through: a trailing requisition code is dropped, an
+    underscore becomes a space, a web address loses its suffix (Amazon.com -> Amazon, goodads.ai -> goodads, so no address survives),
+    and a dot before a capitalised word becomes '. ' (a lower-case domain is untouched and is still withheld)."""
+    out = _REQ_CODE.sub("", raw.replace("_", " ")).strip() if "_" in raw or _REQ_CODE.search(raw) else raw
+    out = out.replace("_", " ")
+    # A company that is its own web address (the text STARTS with it) keeps its name, never the address; an address in the middle of
+    # a sentence is still withheld: Amazon.com -> Amazon, Sugar.fit -> Sugar fit.
+    out = _DOMAIN_NAME.sub(lambda m: m.group(1) if m.group(2).lower() in ("com", "in", "co", "org") else f"{m.group(1)} {m.group(2)}", out)
+    return _ABBREV_DOT.sub(". ", out)
+
+
 def clean(text: object, limit: int = 50) -> str:
     """Short, allow-listed characters only. Anything that reads like an instruction, a domain, a long number, or a
     spelled-out evasion is replaced by a placeholder; a merely long title is cut at a word boundary."""
-    raw = " ".join(str(text).replace("/", " ").split())
+    raw = _tidy(" ".join(str(text).replace("/", " ").split()))
     out = _SAFE.sub("", raw).strip()
     if not out:
         return "[withheld]"
@@ -398,3 +418,10 @@ def fo_sender(client, channel: str = "text"):
             raise FoError(f"Fo did not complete the send ({result.status})")
         return result.response  # kept in the ledger so the run can be audited
     return send
+
+
+def display_title(text: object) -> str:
+    """A job title or company for the user's own screens (dashboard, sheet): the same tidying as clean() - a trailing
+    requisition code dropped, underscores to spaces - without the safety placeholder, because the user reads this text
+    themselves and nothing here is handed to an agent."""
+    return " ".join(_tidy(" ".join(str(text or "").replace("/", " / ").split())).split()).replace(" / ", " / ")
