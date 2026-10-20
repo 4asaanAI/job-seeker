@@ -864,3 +864,15 @@ def test_the_dashboard_stylesheet_lets_the_hidden_attribute_win():
     assert "[hidden] { display: none !important; }" in css          # .drawer and .pill set display and used to stay visible
     html = (Path(__file__).resolve().parents[1] / "src/jobpilot/dashboard/static/index.html").read_text(encoding="utf-8")
     assert 'id="drawer" class="drawer" hidden' in html
+
+
+def test_dashboard_files_are_revalidated_so_a_fix_reaches_the_browser(dash, tmp_path):
+    from starlette.testclient import TestClient
+    from jobpilot.dashboard.app import make_app
+    d, *_ = dash
+    token_path = tmp_path / "token"
+    b.write_secret(token_path, "s3cret")
+    with TestClient(make_app(d, token_path=token_path), base_url="http://127.0.0.1:8770") as c:
+        c.post("/login", data={"token": "s3cret"}, follow_redirects=False)
+        for path in ("/", "/style.css", "/app.js"):
+            assert c.get(path).headers["Cache-Control"] == "no-cache", path
