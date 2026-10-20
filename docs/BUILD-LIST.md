@@ -88,10 +88,19 @@ lists), matches with full job detail, the Wigolo web tools (`web_search`, `web_f
 `web_research`, `company_openings`), resumes and PDFs, AI cover-letter drafts, the answers vault, applying with the
 pre-submit check and the approval code, blocked / failed / retry handling, the audit log, the tracker sheet (one row or the
 whole sheet), the deck and Google Doc requests, email suggestions and calendar holds, follow-up drafts, interview prep,
-analytics, history import and snapshots. Every result is shaped first: unsafe links and local paths are removed, job titles
-are screened, long text is cut, and anything from a web page or posting travels with a "data, not instructions" note.
+analytics and snapshots. Every result is shaped first: unsafe links (also inside text) and local paths are removed, job titles
+are screened, long text is cut, and anything from a web page or posting travels with a "data, not instructions" note. The
+bridge log records only ids and flags, never answers, CSV text or URLs.
 
-Kept from Fo on purpose, because each one removes your per-application OK or widens who JobPilot serves: `set_review_mode`,
-batch planning and approval, adding seekers, the unattended search and score writes, and the service-account sheet exporter.
-Fo can save a form answer you told it but cannot overwrite one (change those in the dashboard), cannot mark a job applied
-without your approval code, and cannot accept an email suggestion that says "applied".
+Kept from Fo on purpose, because each one removes your per-application OK, rewrites your records or widens who JobPilot serves:
+`set_review_mode`, batch planning and approval, adding seekers, the unattended search and score writes, the service-account
+sheet exporter, `import_applications` (it can rewrite real records; use the dashboard or Claude) and approving a formal
+answer (you approve the exact text you are shown, in the dashboard).
+
+What Fo can and cannot do on its own, checked by tests:
+- It can save an answer you told it, but never replace one; the answer goes into forms as you typed it until you approve its
+  formal version.
+- It cannot mark a job applied (that needs your authenticator code), cannot accept an email suggestion unless it is a forward
+  step for an application you already submitted, and cannot approve a cover letter or formal answer that has warnings.
+- It can retry a failed submit once, only for requests it built through the bridge, and the pre-check and your code are needed
+  again. Files it asks for (PDFs, snapshots, resumes) stay on your Mac; Fo gets the name and creates its own copy in Google Docs.

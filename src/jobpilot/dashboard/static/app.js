@@ -302,7 +302,7 @@ async function renderProfile() {
       h("button", { class: "btn", onclick: async () => { toast("Writing the formal version…");
         report(await api("/api/answer/formal", { question: x.question, action: "draft" }), "Formal version written"); renderProfile(); } }, x.formal ? "Rewrite" : "Write formal version"),
       x.formal && !x.formal.approved ? h("button", { class: "btn primary", onclick: async () => {
-        report(await api("/api/answer/formal", { question: x.question, action: "approve" }), "Approved"); renderProfile(); } }, "Approve") : null,
+        report(await api("/api/answer/formal", { question: x.question, action: "approve", text: x.formal.text }), "Approved"); renderProfile(); } }, "Approve") : null,
       h("button", { class: "btn danger", onclick: async () => { report(await api("/api/answer", { question: x.question, answer: "" }), "Removed"); renderProfile(); } }, "Remove"))),
     (p.not_answered_yet || []).length ? h("p", { class: "note" }, `Not answered yet: ${p.not_answered_yet.join(" · ")}`) : null,
     h("datalist", { id: "std-q" }, (p.not_answered_yet || []).map((x) => h("option", { value: x }))),

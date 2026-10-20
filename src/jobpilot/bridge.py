@@ -29,11 +29,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .apply import safe_title_company
+from .bridge_more import FORWARD
 from .bridge_more import NAMES as MORE_NAMES
 from .fo import clean
 from .paths import jobpilot_home
 
 PORT = 8765
+LOGGED_ARGS = ("posting_id", "proposal_id", "limit", "accept", "user_confirmed", "weeks", "status", "kind", "export_xlsx")
 MAX_BODY = 64 * 1024
 FAIL_LIMIT, FAIL_WINDOW = 10, 600              # failed key checks per client IP before it is blocked for the window
 MAX_TRACKED_IPS = 1000
@@ -43,7 +45,6 @@ PENDING_HOURS = 2                              # how long one bridge application
 LOG_MAX = 5 * 1024 * 1024
 DAILY_WAIT = 3600                              # how long the 08:00 run waits for a bridge search to finish scoring
 CODE_STEP = 30
-FORWARD = {"started": {"applied"}, "applied": {"interview", "rejected"}, "interview": {"rejected", "offer"}}
 CONFIG_DIR = Path.home() / ".config" / "jobpilot"
 KEY_PATH = CONFIG_DIR / "fo_bridge_key"
 CODE_PATH = CONFIG_DIR / "fo_bridge_totp"
@@ -319,7 +320,8 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
                     out["error"] = " ".join(str(out["error"]).replace(str(Path.home()), "~").split())[:200]
                 from .reliability import with_code
                 with_code(out)
-                shown = {k: ("<redacted>" if k in ("answers", "code", "notes") else v) for k, v in kwargs.items()}
+                # only ids and flags are logged: the rest (answers, CSV text, URLs, salary...) is the user's private data
+                shown = {k: (v if k in LOGGED_ARGS else "<redacted>") for k, v in kwargs.items()}
                 audit(f"tool {name} {json.dumps(shown, default=str)[:300]} ok={bool(out.get('ok'))}")
                 return out
             return call
@@ -527,6 +529,20 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         out = inner["cancel_application"](pin, int(posting_id))
         return {k: v for k, v in out.items() if k in ("ok", "error", "code")}
 
+    @guarded("retry_failed")
+    def retry_failed(posting_id: int, user_confirmed: bool = False) -> dict:
+        """The ONE retry of a failed submit, after the user said yes to retrying THIS job (user_confirmed=true). Do the
+        request again, then the pre-check and the approval code are needed once more. Only requests built through this
+        bridge can be retried here; others are retried by the user in the dashboard."""
+        item = store.retry_item(pin, int(posting_id))
+        if item is not None and APPROVE not in item["payload"]:
+            return {"ok": False, "code": "approval_required",
+                    "error": "this request was not built through the bridge, so the user retries it in the dashboard"}
+        out = inner["retry_failed"](pin, int(posting_id), bool(user_confirmed))
+        if out.get("ok"):
+            store.record_event("bridge_started", json.dumps({"posting_id": int(posting_id)}), pin, int(posting_id))
+        return {k: v for k, v in out.items() if k in ("ok", "message", "note", "error", "code")}
+
     @guarded("approve_submit")
     def approve_submit(posting_id: int, code: str) -> dict:
         """Check the 6-digit code from the user's authenticator app for the job waiting for approval. Submit only if this
@@ -583,14 +599,14 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
     base = {f.__name__: f for f in (my_matches, apply_candidates, my_status, my_tracker_link, update_my_profile, refresh,
                                     refresh_status, build_fo_apply_message, approve_submit, record_application,
                                     update_tracker_row, form_profile, pre_submit_check, report_blocked,
-                                    record_progress, report_submit_failed, cancel_application)}
+                                    record_progress, report_submit_failed, cancel_application, retry_failed)}
     return {**build_more(inner, pin, store, guarded), **base}
 
 
 ALLOWED = ("my_matches", "apply_candidates", "my_status", "my_tracker_link", "update_my_profile", "refresh",
            "refresh_status", "build_fo_apply_message", "approve_submit", "record_application", "update_tracker_row",
            "form_profile", "pre_submit_check", "report_blocked", "record_progress", "report_submit_failed",
-           "cancel_application") + MORE_NAMES
+           "cancel_application", "retry_failed") + MORE_NAMES
 
 
 # ---- serving ------------------------------------------------------------------------------------------------------------

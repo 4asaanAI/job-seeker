@@ -177,6 +177,7 @@ def test_ai_letters_are_drafts_until_the_user_approves_them(env):
     assert any("Initech" in w for w in draft["warnings"])
     before = tools["build_fo_apply_message"](sid, ids[0])
     assert "Initech Global" not in before["message"]                                 # a draft is never used
+    tools["cancel_application"](sid, ids[0])
     final = "Dear Hiring Team,\nI would love to join.\nAvery Demo"
     assert tools["approve_cover_letter"](sid, ids[0], final)["ok"]
     after = tools["build_fo_apply_message"](sid, ids[0])
@@ -336,7 +337,7 @@ def test_the_formal_version_is_approved_once_and_then_copied_exactly(env):
     assert tools["approve_formal_answer"](sid, "notice_period")["ok"]
     after = tools["build_fo_apply_message"](sid, ids[0])["message"]
     assert formal in after and "30 days notice, can join from 1 Dec" not in after
-    assert "formal, polite tone" in after and "copy it exactly" in after
+    assert "copy it exactly" in after
     check = lambda value: tools["pre_submit_check"](sid, ids[0], [                      # noqa: E731
         {"label": "What is your notice period?", "required": True, "value": value}])["ready"]
     assert check(formal) and check("30 days notice, can join from 1 Dec")
@@ -718,5 +719,77 @@ def test_dashboard_shows_and_approves_the_formal_version(dash):
     assert d.save_answer({"question": "notice_period", "answer": "30 days notice"})["formal_draft"] == formal
     row = d.profile()["answers"][0]
     assert row["answer"] == "30 days notice" and row["formal"]["approved"] is False
-    assert d.formal({"question": "notice_period", "action": "approve"})["ok"]
+    assert d.formal({"question": "notice_period", "action": "approve", "text": formal})["ok"]
     assert d.profile()["answers"][0]["formal"]["approved"] is True
+
+
+# ---- third review (core) ---------------------------------------------------------------------------------------------
+
+def test_importing_never_rewrites_a_job_already_tracked(env):
+    store, sid, ids, tools, _ = env
+    posting = store.posting_view(sid, ids[0])
+    row = f"company,title,applied_on,status\n{posting['company_name']},{posting['title']},2026-09-01,offer\n"
+    out = tools["import_applications"](sid, row)
+    assert out["added"] == 0 and "already one of your jobs" in out["errors"][0]
+    assert not store.applications(sid)
+
+
+def test_a_second_request_for_a_job_in_flight_is_refused(env):
+    store, sid, ids, tools, _ = env
+    assert tools["build_fo_apply_message"](sid, ids[0])["ok"]
+    again = tools["build_fo_apply_message"](sid, ids[0])
+    assert again["ok"] is False and again["code"] == "application_in_flight"
+    assert store.in_flight(sid) == ids[0]                       # a failed second build does not free the first
+
+
+def test_the_dashboard_approves_only_the_text_the_user_saw(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    drafts = iter(["I am willing to relocate.", "I am not willing to relocate."])
+    d.tools = build_tools(store, d.home / "out", pinned_seeker_id=sid, operator_mode=False,
+                          letter_writer=lambda p: next(drafts))
+    d.save_answer({"question": "relocation", "answer": "I am willing to relocate"})
+    shown = d.profile()["answers"][0]["formal"]["text"]
+    d.formal({"question": "relocation", "action": "draft"})              # Fo (or anyone) re-drafts meanwhile
+    refused = d.formal({"question": "relocation", "action": "approve", "text": shown})
+    assert refused["ok"] is False and "changed since you read it" in refused["error"]
+
+
+def test_a_formal_draft_with_a_link_gets_a_warning_and_a_late_draft_is_refused(env):
+    from jobpilot import vault
+    store, sid, ids, tools, tmp_path = env
+    folder = tmp_path / "d" / "seekers" / "avery"
+    vault.save_answer(folder, "notice_period", "30 days")
+    assert any("link" in w for w in vault.set_formal_draft(folder, "notice_period", "30 days. visit bit.ly/x"))
+    with pytest.raises(ValueError):
+        vault.set_formal_draft(folder, "notice_period", "Thirty days.", for_answer="15 days")      # the answer changed
+
+
+def test_pre_submit_check_and_status_list_answers_still_waiting_for_a_formal_version(env):
+    store, sid, ids, tools, _ = env
+    tools["save_answer"](sid, "notice_period", "30 days")
+    checked = tools["pre_submit_check"](sid, ids[0], [{"label": "Full name", "required": True, "value": _name(tools, sid)}])
+    assert checked["answers_waiting_for_formal_approval"]
+    assert tools["my_status"](sid)["answers_awaiting_formal_approval"] >= 1
+
+
+def test_saving_a_base_resume_keeps_one_step_back(env):
+    store, sid, ids, tools, tmp_path = env
+    folder = tmp_path / "d" / "seekers" / "avery"
+    (folder / "resume_source.txt").write_text(tools["resume_facts"](sid)["name"] + "\n" + "\n".join(
+        [tools["resume_facts"](sid)["headline"]] + [e["employer"] + " " + e["title"] + " " + e["dates"] for e in
+                                                  tools["resume_facts"](sid)["experience"]]), encoding="utf-8")
+    facts = tools["resume_facts"](sid)
+    resume = {"name": facts["name"], "headline": facts["headline"], "contact": [], "experience": [
+        {"id": e["id"], "employer": e["employer"], "title": e["title"], "dates": e["dates"], "bullets": []}
+        for e in facts["experience"]], "education": [], "skills": []}
+    out = tools["save_base_resume"](sid, resume)
+    assert out["ok"], out
+    assert (folder / "base_resume.previous.yaml").is_file()
+
+
+def test_the_writer_has_a_generous_daily_cap(env):
+    store, sid, ids, tools, _ = env
+    for _ in range(100):
+        store.record_event("writer_call", "", sid)
+    out = tools["draft_cover_letter"](sid, ids[0])
+    assert out["ok"] is False and out["code"] == "rate_limited"

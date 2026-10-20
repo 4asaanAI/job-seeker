@@ -1595,13 +1595,37 @@ class Store:
             self.conn.execute("BEGIN IMMEDIATE")
             try:
                 busy = self.in_flight(seeker_id)
-                if busy is not None and busy != int(posting_id):
+                if busy is not None:
                     raise ValueError(f"job {busy} is still in flight (one application at a time): record its outcome, "
                                      "report_blocked or cancel_application first")
                 self.conn.execute(
                     "INSERT INTO submit_audit (seeker_id, posting_id, action, outcome, detail, created_at) "
                     "VALUES (?,?,?,?,?,?)",
                     (int(seeker_id), int(posting_id), "request_built", outcome[:40], detail[:500], _now()))
+                self.conn.execute("COMMIT")
+            except BaseException:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                raise
+
+    def begin_retry(self, seeker_id: int, posting_id: int) -> None:
+        """The one retry of a parked failure: take the in-flight slot, mark the item retried and record retry_built, as ONE
+        write transaction. Raises ValueError when another job is in flight or the item is not parked."""
+        with self._lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                busy = self.in_flight(seeker_id)
+                if busy is not None and busy != int(posting_id):
+                    raise ValueError(f"job {busy} is still in flight; finish or cancel it first")
+                moved = self.conn.execute(
+                    "UPDATE retry_queue SET state = 'retried', retried_at = ? WHERE seeker_id = ? AND posting_id = ? "
+                    "AND state = 'parked'", (_now(), int(seeker_id), int(posting_id))).rowcount
+                if moved != 1:
+                    raise ValueError("there is no parked failure to retry for this job (it was never parked, or it was "
+                                     "already retried)")
+                self.conn.execute(
+                    "INSERT INTO submit_audit (seeker_id, posting_id, action, outcome, detail, created_at) "
+                    "VALUES (?,?,?,?,?,?)", (int(seeker_id), int(posting_id), "retry_built", "user_confirmed", "", _now()))
                 self.conn.execute("COMMIT")
             except BaseException:
                 if self.conn.in_transaction:

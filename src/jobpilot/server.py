@@ -520,6 +520,11 @@ def build_tools(
                                    for a in store.audit_log(sid, limit=50) if a["action"] == "blocked"][:5]
         out["parked_failures"] = len(store.retry_items(sid, ("parked",)))
         out["proposals_to_confirm"] = len(store.proposals(sid))
+        try:
+            out["answers_awaiting_formal_approval"] = len(vault.awaiting_formal(_base_resume_path(sid).parent))
+            out["answers_saved_by_fo_7d"] = store.event_count_since(sid, "answer_saved_by_fo", 24 * 7)
+        except (OSError, ValueError):
+            pass
         return out
 
     def my_sources(seeker_id: int) -> dict:
@@ -919,7 +924,7 @@ def build_tools(
                 # form and asks the user in Fo's own chat before it submits.
                 auto_submit = not store.get_seeker(sid).review_required
             busy = store.in_flight(sid)
-            if busy is not None and busy != int(posting_id):
+            if busy is not None:
                 raise ValueError(f"job {busy} is still in flight (one application at a time): record its outcome, "
                                  "report_blocked or cancel_application first")
             host = (urlsplit(link).hostname or "").lower()
@@ -1333,6 +1338,8 @@ def build_tools(
                     return {"ok": False, "error": "these values are not in the uploaded "
                             "resume; copy them exactly or leave them out",
                             "unverified": missing}
+                if target.is_file():                    # one step back if a save drops or reorders something
+                    (target.parent / "base_resume.previous.yaml").write_bytes(target.read_bytes())
                 draft.replace(target)
             finally:
                 draft.unlink(missing_ok=True)

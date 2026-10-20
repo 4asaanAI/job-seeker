@@ -7,6 +7,8 @@ reworded); the vault holds only what the user typed (the tool and the dashboard 
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import os
 import re
 import tempfile
@@ -80,6 +82,19 @@ def load_answers(folder: Path) -> dict[str, str]:
     return {str(q): str(a) for q, a in data.items() if str(q).strip() and str(a).strip()}
 
 
+@contextlib.contextmanager
+def vault_lock(folder: Path):
+    """One writer at a time across processes (Claude, the bridge and the dashboard share these files)."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    with open(folder / ".vault.lock", "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def _write(folder: Path, answers: dict[str, str]) -> None:
     path = Path(folder) / VAULT_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,21 +109,25 @@ def _write(folder: Path, answers: dict[str, str]) -> None:
         raise
 
 
-def save_answer(folder: Path, question: object, answer: object) -> tuple[str, dict[str, str]]:
-    """Store one answer exactly as the user typed it (an empty answer removes the question). Raises ValueError."""
+def save_answer(folder: Path, question: object, answer: object, overwrite: bool = True) -> tuple[str, dict[str, str]]:
+    """Store one answer exactly as the user typed it (an empty answer removes the question). overwrite=False refuses to
+    change an answer that already exists. Raises ValueError."""
     q, a = _clean_question(question), str(answer or "").strip()
     if not q:
         raise ValueError("the question must not be empty")
     if len(q) > MAX_QUESTION or len(a) > MAX_ANSWER:
         raise ValueError(f"a question is limited to {MAX_QUESTION} characters and an answer to {MAX_ANSWER}")
-    answers = load_answers(folder)
-    if a:
-        if q not in answers and len(answers) >= MAX_ANSWERS:
-            raise ValueError(f"at most {MAX_ANSWERS} saved answers; remove one first")
-        answers[q] = a
-    else:
-        answers.pop(q, None)
-    _write(folder, answers)
+    with vault_lock(folder):
+        answers = load_answers(folder)
+        if not overwrite and (q in answers or not a):
+            raise ValueError("that question already has a saved answer; the user changes it in the dashboard (Search profile)")
+        if a:
+            if q not in answers and len(answers) >= MAX_ANSWERS:
+                raise ValueError(f"at most {MAX_ANSWERS} saved answers; remove one first")
+            answers[q] = a
+        else:
+            answers.pop(q, None)
+        _write(folder, answers)
     return q, answers
 
 
@@ -275,32 +294,46 @@ def _write_formal(folder: Path, data: dict) -> None:
         raise
 
 
-def set_formal_draft(folder: Path, question: str, formal: str) -> list[str]:
-    """Store a formal version for a saved answer, unapproved. Returns its warnings."""
+def _bad_text(text: str) -> bool:
+    return bool(re.search(r"https?://|www\.|\b[\w-]+\.(?:com|in|io|ly|me|co|net|org)\b|[\w.+-]+@[\w-]+\.", text or "", re.I))
+
+
+def set_formal_draft(folder: Path, question: str, formal: str, for_answer: str | None = None) -> list[str]:
+    """Store a formal version for a saved answer, unapproved. Returns its warnings. for_answer: the answer the writer was
+    given; if the saved answer changed meanwhile, the draft is refused."""
     q = _clean_question(question)
-    raw = load_answers(folder).get(q)
-    if raw is None:
-        raise ValueError("no saved answer for that question")
-    text = " ".join(str(formal or "").split())[:MAX_ANSWER]
-    warnings = formal_warnings(raw, text)
-    data = load_formal(folder)
-    data[q] = {"for": raw, "text": text, "approved": False, "warnings": warnings}
-    _write_formal(folder, data)
+    with vault_lock(folder):
+        raw = load_answers(folder).get(q)
+        if raw is None:
+            raise ValueError("no saved answer for that question")
+        if for_answer is not None and raw != for_answer:
+            raise ValueError("the answer changed while the formal version was being written; write it again")
+        text = " ".join(str(formal or "").split())[:MAX_ANSWER]
+        warnings = formal_warnings(raw, text)
+        if _bad_text(text) and not _bad_text(raw):
+            warnings.append("it contains a link or an address that your answer does not")
+        data = load_formal(folder)
+        data[q] = {"for": raw, "text": text, "approved": False, "warnings": warnings}
+        _write_formal(folder, data)
     return warnings
 
 
-def approve_formal(folder: Path, question: str, require_clean: bool = False) -> str:
-    """Approve the stored formal version exactly as it is. require_clean refuses a draft that has warnings."""
+def approve_formal(folder: Path, question: str, require_clean: bool = False, expected_text: str | None = None) -> str:
+    """Approve the stored formal version exactly as it is. require_clean refuses a draft that has warnings. expected_text:
+    the text the user was shown; approval happens only if the stored draft is still exactly that (checked in one read)."""
     q = _clean_question(question)
-    entry = load_formal(folder).get(q)
-    if entry is None or entry.get("for") != load_answers(folder).get(q):
-        raise ValueError("no current formal draft for that answer: draft one first")
-    if require_clean and entry.get("warnings"):
-        raise ValueError("the draft has warnings (" + "; ".join(entry["warnings"][:3]) + "); the user approves it in the "
-                         "dashboard after reading them")
-    data = load_formal(folder)
-    data[q]["approved"] = True
-    _write_formal(folder, data)
+    with vault_lock(folder):
+        formal = load_formal(folder)
+        entry = formal.get(q)
+        if entry is None or entry.get("for") != load_answers(folder).get(q):
+            raise ValueError("no current formal draft for that answer: draft one first")
+        if expected_text is not None and " ".join(str(expected_text).split()) != entry["text"]:
+            raise ValueError("the formal version changed since you read it; read the new one first")
+        if require_clean and entry.get("warnings"):
+            raise ValueError("the draft has warnings (" + "; ".join(entry["warnings"][:3]) + "); the user approves it in the "
+                             "dashboard after reading them")
+        formal[q]["approved"] = True
+        _write_formal(folder, formal)
     return entry["text"]
 
 
@@ -312,6 +345,12 @@ def effective_answers(folder: Path) -> dict[str, str]:
         if entry.get("approved") and q in raw and entry.get("for") == raw[q]:
             out[q] = entry["text"]
     return out
+
+
+def awaiting_formal(folder: Path) -> list[str]:
+    """Saved answers that have no approved formal version yet (they go into forms exactly as typed)."""
+    ok = approved_formal(folder)
+    return [q for q in load_answers(folder) if q not in ok]
 
 
 def approved_formal(folder: Path) -> dict[str, str]:

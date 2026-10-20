@@ -296,6 +296,9 @@ def import_history(store, seeker_id: int, csv_text: str) -> dict:
         if pid in existing:
             skipped += 1
             continue
+        if store.is_linked(seeker_id, pid):            # the row matched a job JobPilot already tracks: never rewrite it
+            errors.append(f"row {n}: {company[:40]} / {title[:40]} is already one of your jobs; use record_application")
+            continue
         store.link_posting(seeker_id, pid)
         store.record_application(seeker_id, pid, "applied", row.get("notes", "")[:500], applied_at=applied_on)
         if status != "applied":

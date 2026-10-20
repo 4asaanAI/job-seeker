@@ -229,7 +229,7 @@ class Dashboard:
         """Write a formal version of a saved answer, or approve the one on screen (the user has read its warnings)."""
         question = str(body.get("question") or "")
         if body.get("action") == "approve":
-            return self.tools["approve_formal_answer"](self.sid, question, True)
+            return self.tools["approve_formal_answer"](self.sid, question, True, str(body.get("text") or ""))
         return self.tools["draft_formal_answer"](self.sid, question)
 
 

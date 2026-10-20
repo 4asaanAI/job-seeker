@@ -273,6 +273,7 @@ def test_review_mode_is_the_default_and_blocks_batch_approval_until_the_user_tur
     out = tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=plan)
     assert out["ok"] is False and "review mode" in out["error"]
     assert tools["build_fo_apply_message"](sid, ids[1])["ok"]                 # per-job confirmation path still works
+    tools["cancel_application"](sid, ids[1])                                  # one application at a time
     assert tools["set_review_mode"](sid, False)["review_required"] is False
     assert tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=plan)["ok"]
     assert tools["set_review_mode"](sid + 9, True)["ok"] is False
@@ -374,6 +375,7 @@ def test_apply_tool_takes_answers_and_refuses_bad_ones(env):
     https_link(store, ids[0])
     ok = tools["build_fo_apply_message"](sid, ids[0], answers={"Visa sponsorship now": "Yes"})
     assert ok["ok"] and "Visa sponsorship now: Yes" in ok["message"]
+    tools["cancel_application"](sid, ids[0])
     bad = tools["build_fo_apply_message"](sid, ids[0], answers={"q": "a" * 3001})
     assert bad["ok"] is False and "limited to" in bad["error"]
     assert "my OWN answers" not in tools["build_fo_apply_message"](sid, ids[0])["message"]
@@ -417,6 +419,7 @@ def test_apply_tool_lets_the_caller_choose_pdf_or_paste(env):
     https_link(store, ids[0])
     off = tools["build_fo_apply_message"](sid, ids[0], resume_file=False)
     assert off["ok"] and "paste or type my resume" in off["message"] and off["resume_pdf_via_google_docs"] is False
+    tools["cancel_application"](sid, ids[0])
     on = tools["build_fo_apply_message"](sid, ids[0], resume_file=True)
     assert on["ok"] and "export it as a PDF" in on["message"] and on["resume_pdf_via_google_docs"] is True
 
