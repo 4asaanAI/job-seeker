@@ -886,7 +886,7 @@ def build_tools(
             earlier = next((a for a in store.applications(sid, 500) if a["posting_id"] == int(posting_id)), None)
             resumable = (earlier is not None and earlier["status"] == "started"
                          and store.last_state(sid, int(posting_id)) == "blocked" and not phone_code and not batch_approved)
-            if earlier is not None and earlier["status"] != "withdrawn" and not resumable:
+            if earlier is not None and earlier["status"] != "withdrawn" and not resumable and not preview:
                 raise ValueError("an application for this job is already recorded")
             parked = store.retry_item(sid, int(posting_id))
             if parked and parked["state"] in ("parked", "retried", "failed"):
@@ -923,7 +923,7 @@ def build_tools(
                 # Fo submits without asking again ONLY when the user has turned review mode off; otherwise Fo fills the
                 # form and asks the user in Fo's own chat before it submits.
                 auto_submit = not store.get_seeker(sid).review_required
-            busy = store.in_flight(sid)
+            busy = None if preview else store.in_flight(sid)       # a preview builds nothing, so it may run any time
             if busy is not None:
                 raise ValueError(f"job {busy} is still in flight (one application at a time): record its outcome, "
                                  "report_blocked or cancel_application first")
@@ -954,26 +954,12 @@ def build_tools(
                                     posting_id=int(posting_id),
                                     answers=vetted_answers or None)
             message = _resume_notes(sid, int(posting_id), host) + message
-            claimed = False
+            claimed = started_here = False
             if not preview:                                # one in flight: claim the slot atomically, across processes
                 store.begin_application(sid, int(posting_id), "batch" if batch_approved else "phone" if phone_code
                                         else "dashboard" if user_approved else "single", host)
                 claimed = True
             try:
-                if phone_code:
-                    with store._lock:                       # only now, with the message built: check, consume and mark started as one step
-                        if not _phone_approval_ok(sid, int(posting_id), phone_code):
-                            raise ValueError("that approval code is not valid for this job, was already used, or has expired")
-                        if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
-                               for a in store.applications(sid, 500)):
-                            raise ValueError("an application for this job is already recorded")
-                        store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
-                        store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
-                if batch_approved or phone_code:
-                    store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
-                    # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
-                    if batch_approved:
-                        store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
                 if preview:
                     return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "route": classify_route(link)[0],
                             "job_terms_missing_from_resume": gaps, "cover_letter_if_required": letter is not None,
@@ -989,7 +975,25 @@ def build_tools(
                     if len(shown) <= 2000:
                         store.record_event("apply_answers", shown, sid, int(posting_id))
                 _save_text_version(sid, int(posting_id), text, experience_order, skills, bullet_order)
+                if phone_code:
+                    with store._lock:                       # only now, with the message built: check, consume and mark started as one step
+                        if not _phone_approval_ok(sid, int(posting_id), phone_code):
+                            raise ValueError("that approval code is not valid for this job, was already used, or has expired")
+                        if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
+                               for a in store.applications(sid, 500)):
+                            raise ValueError("an application for this job is already recorded")
+                        store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                        started_here = True
+                        store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
+                if batch_approved or phone_code:
+                    store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
+                    # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
+                    if batch_approved:
+                        store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                        started_here = True
             except BaseException:
+                if started_here:                          # the request never reached Fo: do not leave a phantom "started"
+                    store.record_application(sid, int(posting_id), "withdrawn", "request could not be built")
                 if claimed:
                     store.audit(sid, int(posting_id), "cancelled", "build failed")     # free the slot: nothing was sent
                 raise

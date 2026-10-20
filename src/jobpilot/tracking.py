@@ -273,7 +273,7 @@ def import_history(store, seeker_id: int, csv_text: str) -> dict:
     fields = {f.strip().lower() for f in reader.fieldnames or []}
     if not {"company", "title", "applied_on"} <= fields:
         raise ValueError("the CSV needs the columns company, title and applied_on (status, url, location, notes optional)")
-    added, skipped, errors = 0, 0, []
+    added, skipped, matched, errors = 0, 0, 0, []
     existing = {a["posting_id"] for a in store.applications(seeker_id, 500)}
     for n, raw in enumerate(reader, start=2):
         if n > 1001:
@@ -296,17 +296,18 @@ def import_history(store, seeker_id: int, csv_text: str) -> dict:
         if pid in existing:
             skipped += 1
             continue
-        if store.is_linked(seeker_id, pid):            # the row matched a job JobPilot already tracks: never rewrite it
-            errors.append(f"row {n}: {company[:40]} / {title[:40]} is already one of your jobs; use record_application")
-            continue
+        # A row that matches a job JobPilot already found becomes that job's application (an application already on
+        # it is never touched). Import is not offered to Fo, so this is always the user's own list.
+        matched_existing = store.is_linked(seeker_id, pid)
         store.link_posting(seeker_id, pid)
         store.record_application(seeker_id, pid, "applied", row.get("notes", "")[:500], applied_at=applied_on)
         if status != "applied":
             store.record_application(seeker_id, pid, status)
         existing.add(pid)
         added += 1
+        matched += matched_existing
     store.record_event("history_import", f"added {added}, skipped {skipped}", seeker_id)
-    return {"added": added, "skipped": skipped, "errors": errors[:20]}
+    return {"added": added, "skipped": skipped, "matched_jobs_already_found": matched, "errors": errors[:20]}
 
 
 # ---- the funnel -------------------------------------------------------------------------------------------------------------

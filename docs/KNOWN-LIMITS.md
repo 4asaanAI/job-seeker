@@ -65,6 +65,10 @@ What remains, honestly:
 | Formal-version warnings are not proof | JobPilot flags a formal draft that changes a number, unit, limit word, refusal, yes/no or adds a name, but a person must still read it before approving; a clean list does not prove every fact was kept. Fo cannot approve a draft that has warnings. | Only a human can confirm the meaning. |
 | One application at a time is a database rule | The slot is claimed in one database transaction, so Claude, the bridge, the dashboard and the text inbox cannot both start. A crash after the claim frees itself after 2 hours, or by `cancel_application`. | |
 | The email scan needs the direct Fo API | With only the headless relay (no `FO_API_KEY`), the daily email scan is skipped, because the relay's model would read Fo's reply, which carries email text, while holding the power to message Fo. | Wajo's API key is the safe route. |
-| The morning snapshot and interview prep run only after a good run | If the unattended search itself fails, tonight's CSV snapshot and interview prep wait for the next good run. | |
 | An answer typed once goes in as typed until approved | If you have not approved a formal version, the answer reaches the employer exactly as you wrote it (casual wording included). `pre_submit_check` and `my_status` list the answers still waiting. | A model's wording cannot be proven fact-for-fact; only you can approve it. |
-| A crash after a phone code is used | A disk error between spending the text-inbox code and saving the request leaves the code spent and the job marked started with no saved request; `cancel_application` clears it. | Rare; the in-flight slot itself is released. |
+
+Fixed on 2026-10-19 (side effects of the stricter rules): a dashboard preview works while another job is in flight; the dashboard
+spends your authenticator code only after the request was built (a build that fails, or a route that took the slot first, leaves
+the code usable); a failed text-inbox build spends no code and leaves no "started" record; importing history now turns a row that
+matches a job JobPilot already found into that job's application (never overwriting one); the nightly CSV snapshot and interview
+prep run even when the morning search failed.

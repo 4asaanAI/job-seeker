@@ -725,13 +725,16 @@ def test_dashboard_shows_and_approves_the_formal_version(dash):
 
 # ---- third review (core) ---------------------------------------------------------------------------------------------
 
-def test_importing_never_rewrites_a_job_already_tracked(env):
+def test_importing_a_job_already_found_records_its_application_but_never_overwrites_one(env):
     store, sid, ids, tools, _ = env
     posting = store.posting_view(sid, ids[0])
-    row = f"company,title,applied_on,status\n{posting['company_name']},{posting['title']},2026-09-01,offer\n"
+    row = f"company,title,applied_on,status\n{posting['company_name']},{posting['title']},2026-09-01,rejected\n"
     out = tools["import_applications"](sid, row)
-    assert out["added"] == 0 and "already one of your jobs" in out["errors"][0]
-    assert not store.applications(sid)
+    assert out["added"] == 1 and out["matched_jobs_already_found"] == 1 and not out["errors"]
+    assert {a["posting_id"]: a["status"] for a in store.applications(sid)}[ids[0]] == "rejected"
+    again = tools["import_applications"](sid, row.replace("rejected", "offer"))
+    assert again["added"] == 0 and again["skipped"] == 1                  # an application already there is never touched
+    assert {a["posting_id"]: a["status"] for a in store.applications(sid)}[ids[0]] == "rejected"
 
 
 def test_a_second_request_for_a_job_in_flight_is_refused(env):
@@ -795,3 +798,62 @@ def test_the_writer_has_a_generous_daily_cap(env):
         store.record_event("writer_call", "", sid)
     out = tools["draft_cover_letter"](sid, ids[0])
     assert out["ok"] is False and out["code"] == "rate_limited"
+
+
+# ---- the side effects of the stricter rules ---------------------------------------------------------------------------
+
+def test_a_job_in_flight_can_still_be_previewed_in_the_dashboard(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    assert tools["build_fo_apply_message"](sid, ids[0])["ok"]
+    assert d.job(ids[1])["review"]["message"]                            # another job's drawer still opens
+    assert store.in_flight(sid) == ids[0]                                # and the preview changed nothing
+
+
+def test_the_dashboard_code_is_not_used_up_when_the_build_fails(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    code = b.totp(secret)
+    store.audit(sid, ids[0], "request_built", "single", "")             # another route took the slot just now
+    out = d.approve(ids[1], code)
+    assert out["ok"] is False
+    store.audit(sid, ids[0], "cancelled", "test")
+    assert d.approve(ids[1], code)["ok"]                                 # the same code still works
+
+
+def test_a_failed_phone_build_spends_no_code_and_leaves_no_started_record(env):
+    import json as _json
+    store, sid, ids, tools, tmp_path = env
+    core = tools["_apply_core"]
+    store.record_event("phone_apply", _json.dumps({"code": "abc123", "posting_id": ids[0]}), sid, ids[0])
+    orig = store.save_payload
+    store.save_payload = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
+    out = core(sid, ids[0], phone_code="abc123")
+    store.save_payload = orig
+    assert out["ok"] is False
+    assert not store.recent_event_details(sid, "phone_apply_used", 3, 5)
+    assert not store.applications(sid) and store.in_flight(sid) is None
+    assert core(sid, ids[0], phone_code="abc123")["ok"]                  # the code still works afterwards
+
+
+def test_the_nightly_backup_runs_even_when_the_search_fails(tmp_path, monkeypatch):
+    from jobpilot import scheduled
+    seen = []
+    monkeypatch.setattr(scheduled, "nightly", lambda store, cfg, home, **k: seen.append("nightly"))
+    monkeypatch.setattr(scheduled, "run_once", lambda **k: scheduled.ScheduledResult(1, 1, "search failed"))
+    monkeypatch.setenv("JOBPILOT_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text((Path(__file__).resolve().parents[1] / "config.toml").read_text(encoding="utf-8"),
+                                          encoding="utf-8")
+    (tmp_path / "data").mkdir()
+    import sys
+    monkeypatch.setattr(sys, "argv", ["x", "--mcp-config", str(tmp_path / "m.json"), "--db", str(tmp_path / "data" / "j.db")])
+    assert scheduled.main() == 1 and seen == ["nightly"]
+
+
+def test_a_refused_dashboard_retry_does_not_use_up_the_code(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    assert tools["build_fo_apply_message"](sid, ids[0])["ok"]
+    tools["report_submit_failed"](sid, ids[0], "boom")                      # parked: the slot is free
+    assert tools["build_fo_apply_message"](sid, ids[1])["ok"]               # another job now holds the slot
+    code = b.totp(secret)
+    assert d.retry(ids[0], code)["ok"] is False
+    tools["cancel_application"](sid, ids[1])
+    assert d.retry(ids[0], code)["ok"]                                       # the same code still works

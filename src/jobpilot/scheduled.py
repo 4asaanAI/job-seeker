@@ -262,6 +262,18 @@ def main() -> int:
             nightly(store, cfg, home)
         finally:
             store.close()
+    else:
+        # the search itself failed: delivery and scoring are skipped, but the backup and interview prep still happen
+        home = jobpilot_home()
+        store = Store(Path(args.db or os.environ.get("JOBPILOT_DB", home / "data" / "jobpilot.db")))
+        try:
+            store.migrate()
+            store.fresh_days = cfg.fresh_days
+            nightly(store, cfg, home)
+        except Exception as exc:  # noqa: BLE001
+            print(f"nightly failed: {type(exc).__name__}: {exc}")
+        finally:
+            store.close()
     return returncode
 
 

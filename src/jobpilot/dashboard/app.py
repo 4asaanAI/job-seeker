@@ -119,23 +119,31 @@ class Dashboard:
             return t["interview_prep"](sid, posting_id)
         return {"ok": False, "code": "invalid_argument", "error": "unknown document"}
 
-    def _code_ok(self, posting_id: int, code: str) -> dict | None:
-        """None when the authenticator code is right and unused (it is then spent); else the refusal."""
+    def _code_check(self, posting_id: int, code: str) -> tuple[dict | None, int | None]:
+        """(refusal, None) or (None, step): is the authenticator code right? Nothing is spent yet."""
         secret = read_secret(self.code_path)
         if not secret:
             return {"ok": False, "code": "not_configured",
-                    "error": "approval codes are not set up: run python -m jobpilot.bridge --setup-code"}
+                    "error": "approval codes are not set up: run python -m jobpilot.bridge --setup-code"}, None
         with self.store._lock:
             if codes_locked(self.store, self.sid):
                 return {"ok": False, "code": "approval_required",
-                        "error": "too many wrong codes; run python -m jobpilot.bridge --unlock-codes on the Mac"}
+                        "error": "too many wrong codes; run python -m jobpilot.bridge --unlock-codes on the Mac"}, None
             step = code_window(secret, code)
             if step is None:
                 self.store.record_event("bridge_code_event", "fail", self.sid, posting_id)
-                return {"ok": False, "code": "approval_required", "error": "that code is wrong or expired"}
+                return {"ok": False, "code": "approval_required", "error": "that code is wrong or expired"}, None
+        return None, step
+
+    def _code_spend(self, posting_id: int, step: int) -> dict | None:
         if not self.store.spend_code_step(self.sid, posting_id, step):
             return {"ok": False, "code": "approval_required", "error": "that code was already used; wait for the next one"}
         return None
+
+    def _code_ok(self, posting_id: int, code: str) -> dict | None:
+        """None when the authenticator code is right and unused (it is then spent); else the refusal."""
+        refused, step = self._code_check(posting_id, code)
+        return refused or self._code_spend(posting_id, step)
 
     def approve(self, posting_id: int, code: str) -> dict:
         """The user reviewed the drawer and typed their code: build the approved request and send it through Fo."""
@@ -145,27 +153,38 @@ class Dashboard:
         if busy is not None:
             return {"ok": False, "code": "application_in_flight",
                     "error": f"job {busy} is still in flight; finish it (mark its outcome, blocked or cancel) first"}
-        refused = self._code_ok(posting_id, code)
+        refused, step = self._code_check(posting_id, code)
         if refused:
             return refused
+        # Build first: if another route took the slot meanwhile, or the build fails, the user's code is not used up.
         built = self.tools["_apply_core"](self.sid, posting_id, user_approved=True)
         if not built.get("ok"):
             return built
+        refused = self._code_spend(posting_id, step)
+        if refused:                                   # the same code was spent elsewhere in that instant: nothing is sent
+            self.store.audit(self.sid, posting_id, "cancelled", "code already used")
+            return refused
         self.store.audit(self.sid, posting_id, "approved", "dashboard_code")
         self._send(posting_id, built["message"])
         return {"ok": True, "posting_id": posting_id, "state": "sending",
                 "note": "Sent to Fo. Fo fills and submits the form, and stops for anything not in your resume."}
 
     def retry(self, posting_id: int, code: str) -> dict:
-        """The one retry of a parked failure, approved with a code; the identical request is sent again."""
+        """The one retry of a parked failure, approved with a code; the identical request is sent again. The code is
+        spent only after the retry was set up, so a refused retry (another job in flight) costs the user no code."""
         if self.fo_factory is None:
             return {"ok": False, "code": "not_configured", "error": "Fo is not set up here"}
-        refused = self._code_ok(posting_id, code)
+        refused, step = self._code_check(posting_id, code)
         if refused:
             return refused
         out = self.tools["_retry_with_code"](self.sid, posting_id)
-        if out.get("ok"):
-            self._send(posting_id, out["message"])
+        if not out.get("ok"):
+            return out
+        refused = self._code_spend(posting_id, step)
+        if refused:                                   # the same code was spent elsewhere in that instant: nothing is sent
+            self.store.audit(self.sid, posting_id, "cancelled", "code already used")
+            return refused
+        self._send(posting_id, out["message"])
         return out
 
     def _send(self, posting_id: int, message: str) -> None:
