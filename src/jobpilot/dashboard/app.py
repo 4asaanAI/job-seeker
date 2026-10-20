@@ -45,15 +45,19 @@ class Dashboard:
         self.tools = tools or build_tools(store, out_dir, pinned_seeker_id=sid, operator_mode=False)
         self.fo_factory = fo_factory
         self.sends: dict[int, dict] = {}
+        self.assists: dict[str, dict] = {}
 
     # ---- reads ---------------------------------------------------------------------------------------------------------
     def board(self) -> dict:
         t, sid = self.tools, self.sid
         columns: dict[str, list[dict]] = {"match": [], "started": [], "applied": [], "interview": [], "rejected": []}
-        for m in self.store.best_matches(sid, 60, open_only=True):
-            columns["match"].append({"posting_id": m["posting_id"], "title": m["title"], "company": m["company_name"],
-                                     "score": m["fit_score"], "deadline_soon": m["deadline_soon"],
-                                     "work_mode": m["work_mode"], "location": m["location"]})
+        for m in self.store.best_matches(sid, 300, open_only=True):
+            columns["match"].append({
+                "posting_id": m["posting_id"], "title": m["title"], "company": m["company_name"], "score": m["fit_score"],
+                "deadline_soon": m["deadline_soon"], "work_mode": m["work_mode"], "location": m["location"],
+                "salary_min": m["salary_min"], "salary_max": m["salary_max"], "salary_currency": m["salary_currency"],
+                "posted_on": m["posted_on"], "first_seen": (m["first_seen_at"] or "")[:10],
+                "closes": m["valid_through"], "sources": (m["sources"] or "").split(",") if m["sources"] else []})
         for a in self.store.applications(sid, 500):
             column = {"offer": "interview", "withdrawn": "rejected"}.get(a["status"], a["status"])
             if column in columns:
@@ -230,8 +234,12 @@ class Dashboard:
                     "formal": ({"text": f["text"], "approved": bool(f.get("approved")), "warnings": f.get("warnings", [])}
                                if (f := formal.get(q)) and f.get("for") == a else None)}
                    for q, a in vault.load_answers(folder).items()]
+        saved = {a["question"]: a for a in answers}
+        catalog = [{**q, "saved": saved.get(q["question"])} for q in vault.QUESTION_CATALOG]
+        custom = [a for a in answers if a["question"] not in vault.STANDARD_QUESTIONS.values()]
         return {"ok": True, "profile": {k: data.get(k) for k in keys},
-                "answers": answers, "not_answered_yet": form.get("not_answered_yet", []),
+                "answers": answers, "catalog": catalog, "custom_answers": custom,
+                "not_answered_yet": form.get("not_answered_yet", []),
                 "sources_available": [s["source"] for s in self.tools["available_sources"]()]}
 
     def save_profile(self, body: dict) -> dict:
@@ -243,6 +251,52 @@ class Dashboard:
 
     def save_answer(self, body: dict) -> dict:
         return self.tools["save_answer"](self.sid, str(body.get("question") or ""), str(body.get("answer") or ""))
+
+    # ---- the Fo writing helper ----------------------------------------------------------------------------------
+    def assist_start(self, body: dict) -> dict:
+        """Ask Fo to help draft one answer (a vetted request, replies only). Poll assist_state(id) for the result."""
+        from .. import assist, vault
+        from ..resume import load_base_resume, render_text
+        if self.fo_factory is None:
+            return {"ok": False, "code": "not_configured", "error": "Fo is not set up here ([fo] enabled with a seeker)"}
+        question = " ".join(str(body.get("question") or "").split())[:vault.MAX_QUESTION]
+        if not question:
+            return {"ok": False, "code": "invalid_argument", "error": "choose a question first"}
+        if self.store.event_count_since(self.sid, "assist_call", 24) >= assist.MAX_DAILY_CALLS:
+            return {"ok": False, "code": "rate_limited", "error": "daily limit of writing-helper requests reached"}
+        folder = self.tools["_vault_folder"](self.sid)
+        try:
+            resume = render_text(load_base_resume(folder / "base_resume.yaml"))
+        except (OSError, ValueError):
+            resume = ""
+        meta = next((q for q in vault.QUESTION_CATALOG if q["question"] == question), {})
+        message = assist.build_message(
+            question, str(body.get("notes") or ""), str(body.get("current") or ""), resume,
+            body.get("history") if isinstance(body.get("history"), list) else [], hint=meta.get("hint", ""),
+            words=60 if meta.get("kind") == "text" else 150)
+        self.store.record_event("assist_call", "", self.sid)
+        token = secrets.token_hex(6)
+        self.assists[token] = {"state": "working"}
+
+        def run():
+            try:
+                client = self.fo_factory()
+                if client is None:
+                    raise RuntimeError("no Fo transport available")
+                result = client.send(message)
+                reply = assist.clean_reply(result.reply or result.response)
+                if result.status == "complete" and reply:
+                    self.assists[token] = {"state": "done", "reply": reply}
+                else:
+                    self.assists[token] = {"state": "failed", "error": f"Fo did not finish ({result.status}); try again"}
+            except Exception as exc:  # noqa: BLE001 - shown to the user; nothing is saved from a failed turn
+                self.assists[token] = {"state": "failed", "error": f"{type(exc).__name__}: could not reach Fo"}
+        threading.Thread(target=run, name="dashboard-assist", daemon=True).start()
+        return {"ok": True, "id": token, "state": "working"}
+
+    def assist_state(self, token: str) -> dict:
+        state = self.assists.get(token)
+        return {"ok": True, **state} if state else {"ok": False, "code": "not_found", "error": "unknown request"}
 
     def formal(self, body: dict) -> dict:
         """Write a formal version of a saved answer, or approve the one on screen (the user has read its warnings)."""
@@ -378,6 +432,14 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
         data = await body(request)
         return lambda: dash.formal(data)
 
+    async def api_assist(request: Request):
+        data = await body(request)
+        return lambda: dash.assist_start(data)
+
+    async def api_assist_state(request: Request):
+        token = str(request.path_params["token"])
+        return lambda: dash.assist_state(token)
+
     routes = [
         Route("/login", guard(login_page, api=False, public=True), methods=["GET"]),
         Route("/login", guard(login, api=False, public=True), methods=["POST"]),
@@ -399,6 +461,8 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
         Route("/api/profile", guard(api_profile), methods=["GET", "POST"]),
         Route("/api/answer", guard(api_answer), methods=["POST"]),
         Route("/api/answer/formal", guard(api_formal), methods=["POST"]),
+        Route("/api/assist", guard(api_assist), methods=["POST"]),
+        Route("/api/assist/{token}", guard(api_assist_state)),
     ]
     return Starlette(routes=routes)
 

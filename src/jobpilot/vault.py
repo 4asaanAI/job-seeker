@@ -20,16 +20,68 @@ from .resume.engine import BaseResume
 
 VAULT_FILE = "answers.yaml"
 MAX_FIELDS = 100
-MAX_ANSWERS, MAX_QUESTION, MAX_ANSWER = 20, 120, 3000   # the same caps as apply.vet_answers
-# Suggested keys for the answers most forms ask; any other question text is allowed too.
-STANDARD_QUESTIONS = {
-    "work_authorization": "Are you legally authorised to work in the country of the job?",
-    "sponsorship": "Will you now or in the future need visa sponsorship?",
-    "notice_period": "What is your notice period / when can you start?",
-    "salary_expectation": "What are your salary expectations?",
-    "relocation": "Are you willing to relocate?",
-    "current_ctc": "What is your current compensation?",
-}
+MAX_ANSWERS, MAX_QUESTION, MAX_ANSWER = 60, 120, 3000   # per-request answers are capped by apply.vet_answers
+MAX_TOTAL_ANSWER_CHARS = 40_000
+YES_NO_CHOICES = ["Yes", "No"]
+# The ready-made questions the dashboard offers (group, kind, options, hint). kind: choice | text | long. Any other
+# question text is allowed too; these are only the ones most forms ask.
+QUESTION_CATALOG = [
+    {"key": "work_authorization", "group": "Work eligibility", "kind": "choice", "options": YES_NO_CHOICES,
+     "question": "Are you legally authorised to work in the country of the job?",
+     "hint": "Answer for the country you are applying in."},
+    {"key": "sponsorship", "group": "Work eligibility", "kind": "choice", "options": YES_NO_CHOICES,
+     "question": "Will you now or in the future need visa sponsorship?"},
+    {"key": "over_18", "group": "Work eligibility", "kind": "choice", "options": YES_NO_CHOICES,
+     "question": "Are you at least 18 years old?"},
+    {"key": "background_check", "group": "Work eligibility", "kind": "choice", "options": YES_NO_CHOICES,
+     "question": "Do you consent to a background check?"},
+    {"key": "notice_period", "group": "Availability", "kind": "text",
+     "question": "What is your notice period / when can you start?",
+     "hint": "For example: 30 days, or the date you can join."},
+    {"key": "interview_availability", "group": "Availability", "kind": "text",
+     "question": "When are you available for interviews?", "hint": "Days, times and your time zone."},
+    {"key": "non_compete", "group": "Availability", "kind": "text",
+     "question": "Are you bound by a non-compete or any agreement that limits who you can work for?"},
+    {"key": "salary_expectation", "group": "Compensation", "kind": "text",
+     "question": "What are your salary expectations?", "hint": "A figure or range, with currency and per year or month."},
+    {"key": "current_ctc", "group": "Compensation", "kind": "text",
+     "question": "What is your current compensation?", "hint": "Fixed and variable, with currency."},
+    {"key": "relocation", "group": "Location and work style", "kind": "choice", "options": YES_NO_CHOICES,
+     "question": "Are you willing to relocate?"},
+    {"key": "work_mode_pref", "group": "Location and work style", "kind": "choice",
+     "options": ["Remote", "Hybrid", "On-site", "Flexible"],
+     "question": "Do you prefer remote, hybrid or on-site work?"},
+    {"key": "current_location", "group": "Location and work style", "kind": "text",
+     "question": "Where are you currently located?"},
+    {"key": "travel", "group": "Location and work style", "kind": "choice", "options": ["Yes", "No", "Occasionally"],
+     "question": "Are you willing to travel for work?"},
+    {"key": "years_experience", "group": "About you", "kind": "text",
+     "question": "How many years of professional experience do you have?"},
+    {"key": "highest_education", "group": "About you", "kind": "text",
+     "question": "What is your highest level of education?"},
+    {"key": "languages", "group": "About you", "kind": "text",
+     "question": "Which languages do you speak, and how well?"},
+    {"key": "linkedin", "group": "About you", "kind": "text", "question": "What is your LinkedIn profile URL?"},
+    {"key": "portfolio", "group": "About you", "kind": "text", "question": "Do you have a portfolio or website? Please share the link."},
+    {"key": "references", "group": "About you", "kind": "choice", "options": ["Yes", "No", "On request"],
+     "question": "Can you provide professional references?"},
+    {"key": "why_role", "group": "Short written answers", "kind": "long",
+     "question": "Why are you interested in this role and company?"},
+    {"key": "strengths", "group": "Short written answers", "kind": "long", "question": "What are your key strengths?"},
+    {"key": "achievement", "group": "Short written answers", "kind": "long",
+     "question": "Describe your proudest professional achievement."},
+    {"key": "why_leaving", "group": "Short written answers", "kind": "long",
+     "question": "Why are you looking for a new role?"},
+    {"key": "how_heard", "group": "Short written answers", "kind": "text", "question": "How did you hear about this job?"},
+    {"key": "gender", "group": "Voluntary (optional)", "kind": "choice",
+     "options": ["Male", "Female", "Non-binary", "Prefer not to say"], "question": "What is your gender? (voluntary)",
+     "hint": "Optional. Many forms ask; \"Prefer not to say\" is always allowed."},
+    {"key": "disability", "group": "Voluntary (optional)", "kind": "choice",
+     "options": ["Yes", "No", "Prefer not to say"], "question": "Do you have a disability? (voluntary)"},
+    {"key": "veteran", "group": "Voluntary (optional)", "kind": "choice",
+     "options": ["Yes", "No", "Prefer not to say"], "question": "Are you a protected veteran? (voluntary)"},
+]
+STANDARD_QUESTIONS = {q["key"]: q["question"] for q in QUESTION_CATALOG}
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _PHONE = re.compile(r"\+?\(?\+?\d[\d ()\-]{7,}\d")
@@ -124,6 +176,8 @@ def save_answer(folder: Path, question: object, answer: object, overwrite: bool 
         if a:
             if q not in answers and len(answers) >= MAX_ANSWERS:
                 raise ValueError(f"at most {MAX_ANSWERS} saved answers; remove one first")
+            if sum(len(v) for k, v in answers.items() if k != q) + len(a) > MAX_TOTAL_ANSWER_CHARS:
+                raise ValueError("the saved answers are too long in total (40,000 characters); shorten or remove one")
             answers[q] = a
         else:
             answers.pop(q, None)

@@ -72,7 +72,7 @@ already had it before this list; those items were checked and extended where the
 | local dashboard | Built | `python -m jobpilot.dashboard` (see docs/DASHBOARD.md): pipeline board (match, started, applied, interview, closed) sorted by score, quick actions. |
 | review drawer | Built | Prefilled fields, saved answers, the resume text, the exact request Fo will get, and **Approve and apply** with the 6-digit authenticator code. |
 | resume_preview | Built | Resume text, PDF, AI letter draft and approved letter in the drawer. |
-| search profile UI | Built | Search profile tab: roles, cities, seniority, filters, company lists, threshold, and the answers vault. |
+| search profile UI | Built | Search profile tab: roles, cities, seniority, filters, company lists, threshold. My answers tab: ready-made questions, formal versions and the Fo writing helper. Pipeline tab: filters, sorting and a list view. |
 | phone approvals | Built | The same page, phone layout, installable (web app manifest), over Tailscale with `--host`. Not yet tried on a real phone. |
 | notifications | Built | `[notify] channel = "text"` or `"email"` (Fo sends to your own number or address only) and `min_score`. |
 

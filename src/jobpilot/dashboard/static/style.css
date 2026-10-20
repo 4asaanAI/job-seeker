@@ -57,7 +57,7 @@ main { padding: 0 16px 32px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
 pre.text { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
            font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 340px; overflow: auto; margin: 0; }
-textarea, input[type=text], input[type=number], select { width: 100%; padding: 9px 10px; border: 1px solid var(--line);
+textarea, input[type=text], input[type=number], input[type=search], select { width: 100%; padding: 9px 10px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--bg); color: var(--ink); font: inherit; }
 textarea { min-height: 180px; }
 .approve { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
@@ -77,3 +77,39 @@ textarea { min-height: 180px; }
   .board { grid-auto-flow: row; grid-auto-columns: auto; }
   .drawer { width: 100vw; }
 }
+
+/* ---- filters, sorting and the list view */
+.filters { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin: 4px 0 12px; }
+.filters summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
+.filters summary .note { font-weight: 400; margin-left: 8px; }
+.filters-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 14px; padding: 0 14px 12px; }
+.filters-body .field.wide { grid-column: span 2; }
+.filters-body .field { margin-bottom: 6px; }
+.filters-body .pair { display: grid; grid-template-columns: 1fr 5.5em; gap: 6px; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.check { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; color: var(--ink); }
+.check input { width: auto; }
+.field.row, .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+         overflow: hidden; font-size: 14px; }
+.table th, .table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+.table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.table th.sortable { cursor: pointer; } .table th.on { color: var(--ink); }
+.table tbody tr { cursor: pointer; } .table tbody tr:hover { background: var(--chip); }
+.table td.warn { color: var(--warn); font-weight: 600; }
+.list { overflow-x: auto; }
+/* ---- my answers and the Fo writing helper */
+.qcard { border-top: 1px solid var(--line); padding: 12px 0; }
+.qcard:first-of-type { border-top: 0; }
+.qhead { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.qtext { font-weight: 600; overflow-wrap: anywhere; }
+.badge.ok { background: color-mix(in srgb, var(--good) 20%, transparent); color: var(--good); }
+.qcard select, .qcard input, .qcard textarea { margin: 8px 0 4px; }
+.formal { margin-top: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.formal .text, .msg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.assist-log { max-height: 46vh; overflow-y: auto; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.msg { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.msg.me { align-self: flex-end; background: var(--chip); max-width: 90%; }
+.msg.fo { align-self: flex-start; max-width: 95%; }
+.msg .who { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+@media (max-width: 640px) { .filters-body .field.wide { grid-column: auto; } .table { font-size: 13px; } }
