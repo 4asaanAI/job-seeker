@@ -40,6 +40,10 @@ class Profile:
     seniority: list[str] = field(default_factory=list)        # for the scorer, e.g. ["senior", "lead"]
     source_weights: dict[str, float] = field(default_factory=dict)   # per-board score adjustment, -20..20
     followup_days: int = 7                     # days of silence after applying before a follow-up draft is suggested
+    # Where the user can work without sponsorship, and where they would relocate (canonical lower-case country names):
+    # per-job answers to "authorised to work?", "need sponsorship?" and "willing to relocate?" come from these (eligibility.py).
+    work_authorized_countries: list[str] = field(default_factory=list)
+    relocation_countries: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,8 @@ def load_profile(path: Path) -> Profile:
         seniority=[str(x) for x in raw.get("seniority") or []],
         source_weights={str(k): max(-20.0, min(20.0, float(v))) for k, v in (raw.get("source_weights") or {}).items()},
         followup_days=max(1, min(60, int(raw.get("followup_days") or 7))),
+        work_authorized_countries=[str(x).lower() for x in raw.get("work_authorized_countries") or []],
+        relocation_countries=[str(x).lower() for x in raw.get("relocation_countries") or []],
     )
 
 

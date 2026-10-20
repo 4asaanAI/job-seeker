@@ -883,9 +883,10 @@ def test_dashboard_files_are_revalidated_so_a_fix_reaches_the_browser(dash, tmp_
 def test_the_catalog_has_the_standard_questions_with_kinds_options_and_groups():
     from jobpilot import vault
     keys = [q["key"] for q in vault.QUESTION_CATALOG]
-    assert len(keys) == len(set(keys)) >= 25
+    assert len(keys) == len(set(keys)) == 10                       # only the questions forms nearly always ask
     assert {"work_authorization", "sponsorship", "notice_period", "salary_expectation", "current_ctc", "relocation",
-            "why_role", "strengths", "gender"} <= set(keys)
+            "years_experience", "linkedin", "why_role", "why_leaving"} == set(keys)
+    assert {q["key"] for q in vault.QUESTION_CATALOG if q.get("derived")} == {"work_authorization", "sponsorship", "relocation"}
     for q in vault.QUESTION_CATALOG:
         assert q["kind"] in ("choice", "text", "long") and q["group"] and len(q["question"]) <= vault.MAX_QUESTION
         assert (q["kind"] != "choice") or len(q["options"]) >= 2
@@ -899,7 +900,7 @@ def test_the_profile_view_lists_every_question_with_its_saved_state(dash):
     d.save_answer({"question": "A question of my own", "answer": "Because."})
     prof = d.profile()
     rows = {q["key"]: q for q in prof["catalog"]}
-    assert len(rows) >= 25 and rows["sponsorship"]["saved"]["answer"] == "No" and rows["notice_period"]["saved"] is None
+    assert len(rows) == 10 and rows["sponsorship"]["saved"]["answer"] == "No" and rows["notice_period"]["saved"] is None
     assert [a["question"] for a in prof["custom_answers"]] == ["A question of my own"]
 
 
@@ -1006,3 +1007,111 @@ def test_the_helper_endpoints_need_login_and_the_header(dash, tmp_path):
         c.post("/login", data={"token": "s3cret"}, follow_redirects=False)
         assert c.post("/api/assist", json={"question": "q"}).status_code == 403
         assert c.post("/api/assist", json={"question": "Why?"}, headers={"X-JobPilot": "1"}).json()["ok"]
+
+
+# ---- per-job answers from the countries the user records -------------------------------------------------------------------
+
+@pytest.mark.parametrize("location,expected", [
+    ("Gurugram, HR, IN", {"india"}), ("Austin, TX, US", {"united states"}), ("London, UK", {"united kingdom"}),
+    ("Remote (India)", {"india"}), ("Remote - USA", {"united states"}), ("Toronto, ON, Canada", {"canada"}),
+    ("Remote (Afghanistan, Bangladesh, Bhutan, India)", {"bangladesh", "india"}), ("Bengaluru", {"india"}),
+    ("San Jose, CA", {"united states"}), ("Berlin, Germany", {"germany"}), ("Remote", set()), ("", set()), (None, set()),
+    ("Anywhere", set()), ("Dubai", {"united arab emirates"}),
+])
+def test_a_jobs_countries_are_read_from_its_location(location, expected):
+    from jobpilot.eligibility import countries_of
+    assert countries_of(location) == expected
+
+
+def test_countries_the_user_types_are_normalised():
+    from jobpilot.eligibility import normalize_list
+    assert normalize_list(["India", "USA", "U.K.", "india", "Narnia", "IN"]) == ["india", "united states", "united kingdom", "narnia"]
+
+
+def test_authorisation_and_sponsorship_are_worked_out_per_job():
+    from jobpilot import vault
+    from jobpilot.eligibility import derive
+    auth_q, spon_q, reloc_q = (vault.STANDARD_QUESTIONS[k] for k in ("work_authorization", "sponsorship", "relocation"))
+    india = derive(["India"], ["United Kingdom"], "Gurugram, HR, IN")
+    assert india["answers"] == {auth_q: "Yes", spon_q: "No"}
+    us = derive(["India"], ["United Kingdom"], "Austin, TX, US")
+    assert us["answers"] == {auth_q: "No", spon_q: "Yes"}
+    uk = derive(["India"], ["United Kingdom"], "London, UK")
+    assert uk["answers"][reloc_q] == "Yes" and uk["answers"][auth_q] == "No"
+    multi = derive(["India"], [], "Remote (Bangladesh, India)")
+    assert multi["answers"][auth_q] == "Yes"                                 # open in a country the user can work in
+    unknown = derive(["India"], [], "Remote")
+    assert unknown["answers"] == {} and unknown["unsure"] == [auth_q, spon_q]
+    assert derive([], [], "Austin, TX, US") == {"answers": {}, "unsure": [], "basis": "no work-eligibility countries recorded"}
+
+
+def _set_countries(tools, sid, authorised, relocation=()):
+    out = tools["update_my_profile"](sid, work_authorized_countries=list(authorised), relocation_countries=list(relocation))
+    assert out["ok"], out
+
+
+def test_the_apply_request_carries_the_answer_for_that_jobs_country(env):
+    store, sid, ids, tools, _ = env
+    tools["save_answer"](sid, "sponsorship", "Yes")                      # an old fixed answer must not win
+    _set_countries(tools, sid, ["India"])
+    store.conn.execute("UPDATE job_postings SET location = 'Austin, TX, US' WHERE id = ?", (ids[0],))
+    store.conn.execute("UPDATE job_postings SET location = 'Gurugram, HR, IN' WHERE id = ?", (ids[1],))
+    store.conn.commit()
+    us = tools["build_fo_apply_message"](sid, ids[0])["message"]
+    assert "legally authorised to work in the country of the job?: No" in us
+    assert "need visa sponsorship?: Yes" in us
+    tools["cancel_application"](sid, ids[0])
+    india = tools["build_fo_apply_message"](sid, ids[1])["message"]
+    assert "legally authorised to work in the country of the job?: Yes" in india
+    assert "need visa sponsorship?: No" in india                          # derived beats the saved "Yes"
+
+
+def test_a_job_whose_country_is_unclear_is_never_guessed(env):
+    store, sid, ids, tools, _ = env
+    tools["save_answer"](sid, "work_authorization", "Yes")
+    _set_countries(tools, sid, ["India"])
+    store.conn.execute("UPDATE job_postings SET location = 'Remote' WHERE id = ?", (ids[0],))
+    store.conn.commit()
+    message = tools["build_fo_apply_message"](sid, ids[0])["message"]
+    assert "legally authorised to work in the country of the job?: Yes" not in message       # the saved answer is withheld
+    assert "depend on the job's country" in message and "stop and ask me" in message
+    check = tools["pre_submit_check"](sid, ids[0], [{"label": "Are you authorised to work in this country?",
+                                                    "required": True, "value": "Yes", "kind": "choice"}])
+    assert check["ready"] is False                                          # the check cannot confirm a guess
+
+
+def test_the_pre_submit_check_uses_the_per_job_answer(env):
+    store, sid, ids, tools, _ = env
+    _set_countries(tools, sid, ["India"])
+    store.conn.execute("UPDATE job_postings SET location = 'Austin, TX, US' WHERE id = ?", (ids[0],))
+    store.conn.commit()
+    tools["build_fo_apply_message"](sid, ids[0])
+
+    def check(value):
+        return tools["pre_submit_check"](sid, ids[0], [{"label": "Are you legally authorised to work in the country of the job?",
+                                                       "required": True, "value": value, "kind": "choice"}])["ready"]
+    assert check("No") and not check("Yes")                                   # in the US the user is not authorised
+
+
+def test_only_the_user_sets_the_countries_never_fo(env, tmp_path):
+    import inspect
+    store, sid, ids, tools, _ = env
+    bridge_tools = b.build_bridge_tools(store, sid, tmp_path / "o", tmp_path / "d", code_path=tmp_path / "t")
+    assert not {"work_authorized_countries", "relocation_countries"} & set(inspect.signature(bridge_tools["update_my_profile"]).parameters)
+
+
+def test_the_dashboard_saves_the_countries_and_previews_an_answer(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    out = d.save_profile({"work_authorized_countries": ["India", "USA"], "relocation_countries": ["Canada"]})
+    assert out["ok"] and out["profile"]["work_authorized_countries"] == ["india", "united states"]
+    assert d.profile()["eligibility"] == {"work_authorized_countries": ["india", "united states"],
+                                          "relocation_countries": ["canada"]}
+    try_ = d.eligibility_try("Toronto, ON, Canada")
+    assert try_["countries"] == ["canada"] and try_["answers"][vault_q("work_authorization")] == "No"
+    assert try_["answers"][vault_q("relocation")] == "Yes"
+    assert d.eligibility_try("Remote")["ask_me"]
+
+
+def vault_q(key):
+    from jobpilot import vault
+    return vault.STANDARD_QUESTIONS[key]

@@ -36,7 +36,7 @@ from .resume.letter import build_letter
 from .resume.tailor import matching_skills, top_bullets
 from .resume.tailor import suggest as suggest_tailoring
 from .scoring import build_scoring_batch
-from . import google, vault
+from . import eligibility, google, vault
 from .sheets import GoogleSheetsExporter, load_google_services
 from .sources.ats_json import ATSJsonSource
 from .sources.finder import find_feed, normalise
@@ -934,6 +934,14 @@ def build_tools(
             given = dict(vet_answers(answers))          # this job's own answers keep the per-request limits
             vetted_answers = list((vault.merged_answers(vault.effective_answers(_base_resume_path(sid).parent), given)
                                    or {}).items())
+            # Answers that depend on the job's country come from the countries the user recorded, never from a guess; when
+            # the job's country is unclear, the vault answer is withheld and Fo is told to ask.
+            elig = eligibility.for_posting(_profile_for(sid)[2], posting)
+            merged = dict(vetted_answers)
+            for question in elig["unsure"]:
+                merged.pop(question, None)
+            merged.update(elig["answers"])
+            vetted_answers = list(merged.items())
             base = load_base_resume(_base_resume_path(sid))
             tailored = experience_order is None and skills is None and bullet_order is None
             experience_order, skills, bullet_order, gaps = _selection(base, posting, experience_order, skills, bullet_order)
@@ -952,7 +960,7 @@ def build_tools(
                                     or (user_approved and not store.get_seeker(sid).review_required),
                                     attach_pdf=(_google_on() if resume_file is None else bool(resume_file)), letter_text=letter,
                                     posting_id=int(posting_id),
-                                    answers=vetted_answers or None)
+                                    answers=vetted_answers or None, ask_questions=elig["unsure"] or None)
             message = _resume_notes(sid, int(posting_id), host) + message
             claimed = started_here = False
             if not preview:                                # one in flight: claim the slot atomically, across processes
@@ -964,6 +972,7 @@ def build_tools(
                     return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "route": classify_route(link)[0],
                             "job_terms_missing_from_resume": gaps, "cover_letter_if_required": letter is not None,
                             "message": message, "answers": dict(vetted_answers), "resume_text": text,
+                            "answers_basis": elig["basis"], "ask_me": elig["unsure"],
                             "letter_text": letter, "preview": True, "note": "A check only: nothing was built for sending."}
                 if user_approved:                              # approved in the dashboard with an authenticator code
                     store.record_application(sid, int(posting_id), "started", "approved in the dashboard; outcome unknown")
@@ -1469,6 +1478,11 @@ def build_tools(
         return _base_resume_path(_check(seeker_id)).parent
 
     tools["_vault_folder"] = _vault_folder
+    def _profile_private(seeker_id: int):
+        """Private (never an MCP tool): (seeker, path, profile) for the dashboard."""
+        return _profile_for(_check(seeker_id))
+
+    tools["_profile"] = _profile_private
     tools.update(build_extra_tools(
         store, out_dir, home, check=_check, profile_for=_profile_for, resume_path=_base_resume_path,
         selection=_selection, fo_guard=_fo_seeker_guard,
@@ -1646,8 +1660,14 @@ def build_tools(
         source_weights: dict[str, float] | None = None,
         min_score: float | None = None,
         followup_days: int | None = None,
+        work_authorized_countries: list[str] | None = None,
+        relocation_countries: list[str] | None = None,
     ) -> dict:
         """Change this seeker's own search profile; only the fields given change.
+
+        work_authorized_countries: where the user can work without sponsorship; relocation_countries: where they would
+        relocate. Per-job answers to "authorised to work?", "need sponsorship?" and "willing to relocate?" are worked out
+        from these (never from a model). Only the user sets them (dashboard, My answers); Fo cannot.
 
         Search: headline, location (one city), search_terms (roles), also_search (more cities), seniority.
         Match-time filters (a job that does not state a fact is never filtered out for it): work_modes (remote,
@@ -1715,6 +1735,11 @@ def build_tools(
             data["min_score"] = max(50.0, min(100.0, float(min_score)))
         if followup_days is not None:
             data["followup_days"] = max(1, min(60, int(followup_days)))
+        from . import eligibility
+        if work_authorized_countries is not None:
+            data["work_authorized_countries"] = eligibility.normalize_list(work_authorized_countries)[:30]
+        if relocation_countries is not None:
+            data["relocation_countries"] = eligibility.normalize_list(relocation_countries)[:30]
         feed_report = {}
         if target_companies is not None:
             data["target_companies"] = _clean(target_companies, 20, 80)
@@ -1731,7 +1756,8 @@ def build_tools(
             "headline", "location", "search_terms", "sources",
             "exclude_keywords", "target_companies", "also_search", "seniority", "work_modes", "locations",
             "salary_floor", "salary_currency", "blacklist_companies", "whitelist_companies",
-            "exclude_staffing_agencies", "source_weights", "min_score", "followup_days")},
+            "exclude_staffing_agencies", "source_weights", "min_score", "followup_days",
+            "work_authorized_countries", "relocation_countries")},
             "target_companies": feed_report, "reweighted": weights}
 
     def _web(sid: int, action) -> dict:

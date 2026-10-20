@@ -480,10 +480,13 @@ function formalBlock(q, saved) {
         "Approve this formal version") : null, redo));
 }
 
+let derivedOn = false;
+
 function answerCard(q) {
   const saved = q.saved;
   const field = answerField(q, saved);
-  const state_ = !saved ? h("span", { class: "badge" }, "Not answered")
+  const state_ = q.derived && derivedOn ? h("span", { class: "badge ok" }, "Worked out per job")
+    : !saved ? h("span", { class: "badge" }, "Not answered")
     : saved.formal && saved.formal.approved ? h("span", { class: "badge ok" }, "Approved")
     : h("span", { class: "badge warn" }, "Saved, formal not approved");
   return h("div", { class: "qcard" },
@@ -508,6 +511,7 @@ async function renderAnswers() {
   const el = document.getElementById("view-answers");
   if (!p.ok) { el.replaceChildren(h("p", {}, p.error || "Cannot read your answers")); return; }
   for (const k of Object.keys(fieldRefs)) delete fieldRefs[k];
+  derivedOn = ((p.eligibility || {}).work_authorized_countries || []).length > 0;
   const catalog = p.catalog || [], custom = (p.custom_answers || []).map((a) => ({
     question: a.question, kind: "long", options: [], hint: "", saved: a }));
   const all = [...catalog, ...custom];
@@ -531,9 +535,40 @@ async function renderAnswers() {
     h("div", { class: "panel" }, h("h2", {}, "My answers"),
       h("p", {}, `${answered} of ${all.length} answered, ${approved} formal versions approved.`),
       h("p", { class: "note" }, "Answer once; every application is prefilled from these. When you save an answer, a formal, polite version is written for you to read. Forms use it only after you approve it, word for word; until then your answer goes in exactly as you typed it. Stuck? Press “Ask Fo to help me write it”: Fo uses only your resume and what you tell it.")),
+    eligibilityPanel(p),
     ...groups.map((g) => h("div", { class: "panel" }, h("h2", {}, g.name), g.items.map((q) => answerCard(q)))),
     custom.length ? h("div", { class: "panel" }, h("h2", {}, "Your own questions"), custom.map((q) => answerCard(q))) : null,
     addCard].filter(Boolean));
+}
+
+function eligibilityPanel(p) {
+  const el = p.eligibility || {};
+  const cap = (c) => c.replace(/\b\w/g, (x) => x.toUpperCase());
+  const list = (v) => v.split(",").map((x) => x.trim()).filter(Boolean);
+  const auth = h("input", { type: "text", "aria-label": "Countries you can work in", placeholder: "e.g. India" });
+  auth.value = (el.work_authorized_countries || []).map(cap).join(", ");
+  const reloc = h("input", { type: "text", "aria-label": "Countries you would relocate to", placeholder: "e.g. United Kingdom, Canada" });
+  reloc.value = (el.relocation_countries || []).map(cap).join(", ");
+  const trial = h("input", { type: "text", "aria-label": "A job location to try", placeholder: "e.g. Austin, TX, US   or   London, UK   or   Remote" });
+  const result = h("div", { class: "formal" }); result.hidden = true;
+  const tryIt = async () => {
+    const r = await api(`/api/eligibility?location=${encodeURIComponent(trial.value)}`);
+    if (!r.ok) { report(r); return; }
+    result.hidden = false;
+    result.replaceChildren(
+      h("div", { class: "note" }, `For a job at “${r.location}”: ${r.basis}.`),
+      ...Object.entries(r.answers).map(([q, a]) => h("div", {}, h("b", {}, a), ` — ${q}`)),
+      r.ask_me.length ? h("div", { class: "check-bad" }, "Not clear from the location, so Fo will stop and ask you before answering: " + r.ask_me.join(" | ")) : null);
+  };
+  return h("div", { class: "panel" }, h("h2", {}, "Where can you work?"),
+    h("p", { class: "note" }, "Some answers depend on the country of each job. Tell JobPilot where you can work without sponsorship and where you would relocate, and it answers “authorised to work?”, “need sponsorship?” and “willing to relocate?” for each job from the job's location. When a job's country is not clear (a plain “Remote”), Fo stops and asks you instead of guessing."),
+    h("div", { class: "field" }, h("label", {}, "Countries where you can work without sponsorship (comma separated)"), auth),
+    h("div", { class: "field" }, h("label", {}, "Countries you would relocate to (comma separated, optional)"), reloc),
+    h("div", { class: "row" }, h("button", { class: "btn primary", onclick: async () => {
+      report(await api("/api/profile", { work_authorized_countries: list(auth.value), relocation_countries: list(reloc.value) }), "Saved");
+      rerenderAnswers(); } }, "Save countries")),
+    h("div", { class: "field" }, h("label", {}, "Try it on a job location"), trial),
+    h("div", { class: "row" }, h("button", { class: "btn", onclick: tryIt }, "What would JobPilot answer?")), result);
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
