@@ -8,6 +8,7 @@
           --accent-ink: #0d1520; --good: #6fcf97; --warn: #f2b45a; --bad: #f28b82; --chip: #242c3a; }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* a display rule below must never keep a hidden drawer, badge or toast on screen */
 body { margin: 0; background: var(--bg); color: var(--ink);
        font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 button { font: inherit; cursor: pointer; }

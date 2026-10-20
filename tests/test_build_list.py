@@ -857,3 +857,10 @@ def test_a_refused_dashboard_retry_does_not_use_up_the_code(dash):
     assert d.retry(ids[0], code)["ok"] is False
     tools["cancel_application"](sid, ids[1])
     assert d.retry(ids[0], code)["ok"]                                       # the same code still works
+
+
+def test_the_dashboard_stylesheet_lets_the_hidden_attribute_win():
+    css = (Path(__file__).resolve().parents[1] / "src/jobpilot/dashboard/static/style.css").read_text(encoding="utf-8")
+    assert "[hidden] { display: none !important; }" in css          # .drawer and .pill set display and used to stay visible
+    html = (Path(__file__).resolve().parents[1] / "src/jobpilot/dashboard/static/index.html").read_text(encoding="utf-8")
+    assert 'id="drawer" class="drawer" hidden' in html
