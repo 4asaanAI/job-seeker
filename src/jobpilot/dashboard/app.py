@@ -90,7 +90,15 @@ class Dashboard:
                 "letter": self.store.letter(sid, posting_id),
                 "resumes": t["my_resumes"](sid, posting_id).get("items", [])[:5],
                 "audit": self.store.audit_log(sid, posting_id, 20),
-                "send": self.sends.get(posting_id)}
+                "send": self.sends.get(posting_id) or self._last_send(posting_id)}
+
+    def _last_send(self, posting_id: int) -> dict | None:
+        """Fo's last answer from the submit audit, so a restarted dashboard still shows it."""
+        row = next((r for r in self.store.audit_log(self.sid, posting_id, 20) if r["action"] == "sent"), None)
+        if row is None:
+            return None
+        state = row["outcome"].removeprefix("fo_")
+        return {"state": state, "error": row["detail"]} if state == "unknown" else {"state": state, "reply": row["detail"]}
 
     # ---- writes --------------------------------------------------------------------------------------------------------
     def action(self, posting_id: int, action: str, body: dict) -> dict:
@@ -204,7 +212,7 @@ class Dashboard:
                 result = client.send(message)
                 from ..fo import clean
                 reply = clean(result.reply or result.response, 300) if (result.reply or result.response) else ""
-                self.store.audit(self.sid, posting_id, "sent", "fo_" + result.status)
+                self.store.audit(self.sid, posting_id, "sent", "fo_" + result.status, reply)
                 self.sends[posting_id] = {"state": result.status, "reply": reply}
             except Exception as exc:  # noqa: BLE001 - logged and shown; never retried silently
                 self.store.audit(self.sid, posting_id, "sent", "unknown", f"{type(exc).__name__}: {str(exc)[:120]}")

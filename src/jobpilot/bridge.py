@@ -595,7 +595,16 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
             return {"ok": False, "error": "this job was never approved with a code; the user must confirm it was sent"}
         store.record_event("bridge_status", json.dumps({"posting_id": int(posting_id), "from": current, "to": status}), pin)
         out = inner["record_application"](pin, int(posting_id), status, clean(notes, 200) if notes else "")
-        return {"ok": out.get("ok", False), "posting_id": int(posting_id), "status": status, "error": out.get("error")}
+        result = {"ok": out.get("ok", False), "posting_id": int(posting_id), "status": status, "error": out.get("error")}
+        if result["ok"]:                      # keep the tracker sheet current, as the retired jp outcome texts did
+            try:
+                row = inner["build_fo_tracker_message"](pin, posting_id=int(posting_id))
+            except Exception:  # noqa: BLE001 - the outcome is recorded either way; the sheet catches up next morning
+                row = {}
+            if row.get("ok"):
+                result["next"] = "Now update this job's row in the user's tracker sheet with tracker_message. Do it yourself."
+                result["tracker_message"] = row["message"]
+        return result
 
     @guarded("update_tracker_row")
     def update_tracker_row(posting_id: int) -> dict:

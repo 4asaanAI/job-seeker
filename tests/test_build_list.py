@@ -620,6 +620,8 @@ def test_dashboard_approval_needs_a_fresh_code_and_sends_once(dash):
     out = d.approve(ids[0], code)
     assert out["ok"], out
     assert _wait(d, ids[0])["state"] == "complete" and len(fo.messages) == 1
+    d.sends.clear()                                                           # a restarted dashboard still shows Fo's answer
+    assert d.job(ids[0])["send"] == {"state": "complete", "reply": "Submitted the application."}
     # review mode on (the default): Fo still shows its review draft and waits before submitting
     assert "Do not submit anything until I confirm" in fo.messages[0]
     assert d.approve(ids[1], code)["code"] in ("approval_required", "application_in_flight")   # one in flight; code single use
@@ -1044,6 +1046,23 @@ def test_authorisation_and_sponsorship_are_worked_out_per_job():
     assert unknown["answers"] == {} and unknown["unsure"] == [auth_q, spon_q]
     assert derive([], [], "Austin, TX, US") == {"answers": {}, "unsure": [], "basis": "no work-eligibility countries recorded"}
 
+
+
+def test_a_citizenship_or_clearance_requirement_in_the_description_makes_fo_ask():
+    from types import SimpleNamespace
+    from jobpilot import vault
+    from jobpilot.eligibility import for_posting
+    auth_q, spon_q = (vault.STANDARD_QUESTIONS[k] for k in ("work_authorization", "sponsorship"))
+    profile = SimpleNamespace(work_authorized_countries=["United States"], relocation_countries=[])
+    plain = for_posting(profile, {"location": "Austin, TX, US", "description": "SQL and dashboards."})
+    assert plain["answers"][auth_q] == "Yes" and not plain["unsure"]
+    for text in ("Must be a US citizen.", "Active security clearance required.", "Green card holders only."):
+        out = for_posting(profile, {"location": "Austin, TX, US", "description": text})
+        assert auth_q not in out["answers"] and spon_q not in out["answers"], text
+        assert out["unsure"] == [auth_q, spon_q] and "description mentions" in out["basis"]
+    nobody = for_posting(SimpleNamespace(work_authorized_countries=[], relocation_countries=[]),
+                         {"location": "Austin, TX, US", "description": "US citizenship required"})
+    assert nobody["unsure"] == [auth_q, spon_q]                             # no fixed vault answer slips through
 
 def _set_countries(tools, sid, authorised, relocation=()):
     out = tools["update_my_profile"](sid, work_authorized_countries=list(authorised), relocation_countries=list(relocation))

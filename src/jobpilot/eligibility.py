@@ -161,7 +161,27 @@ def derive(authorised: list[str], relocation: list[str], location: object) -> di
     return {"answers": answers, "unsure": [], "basis": basis}
 
 
+# Requirements that the user's work-eligibility countries cannot answer (being authorised to work is not citizenship).
+_RESTRICTED = re.compile(r"\b(?:citizens?(?:hip)?|security clearance|clearance (?:is )?required|green card|permanent residen(?:t|cy)"
+                         r"|itar|export control)\b", re.I)
+
+
+def restriction(description: object) -> str | None:
+    """The first citizenship or clearance requirement named in a job description, as found (cut short), or None."""
+    m = _RESTRICTED.search(str(description or "")[:20000])
+    return m.group(0).lower()[:40] if m else None
+
+
 def for_posting(profile, posting: dict | None) -> dict:
-    """derive() for a stored posting (its location text)."""
-    return derive(getattr(profile, "work_authorized_countries", []) or [], getattr(profile, "relocation_countries", []) or [],
-                  (posting or {}).get("location"))
+    """derive() for a stored posting (its location text). When the description names a citizenship or clearance
+    requirement, the authorisation and sponsorship answers are not given: Fo is told to stop and ask."""
+    out = derive(getattr(profile, "work_authorized_countries", []) or [], getattr(profile, "relocation_countries", []) or [],
+                 (posting or {}).get("location"))
+    found = restriction((posting or {}).get("description"))
+    if found:
+        for key in ("work_authorization", "sponsorship"):
+            out["answers"].pop(_q(key), None)
+            if _q(key) not in out["unsure"]:
+                out["unsure"].append(_q(key))
+        out["basis"] += f"; the job description mentions \"{found}\", which your recorded countries cannot answer"
+    return out

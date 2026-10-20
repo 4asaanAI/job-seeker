@@ -189,7 +189,9 @@ def test_record_application_moves_forward_only_and_never_withdraws(env):
     assert tools["approve_submit"](ids[1], b.totp(secret))["ok"]
     assert tools["record_application"](ids[1], "applied")["ok"]
     assert not tools["record_application"](ids[1], "started")["ok"]
-    assert tools["record_application"](ids[1], "interview")["ok"]
+    out = tools["record_application"](ids[1], "interview")
+    assert out["ok"]
+    assert "JobPilot Tracker" in out["tracker_message"] and out["next"].startswith("Now update")   # the sheet row follows
 
 
 def test_refresh_runs_once_at_a_time_and_counts_toward_the_daily_cap(env, monkeypatch):
