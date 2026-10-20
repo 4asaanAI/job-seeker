@@ -40,3 +40,4 @@ class SeekerJob:
     fit_score: float | None = None
     reasoning: str | None = None
     location: str | None = None
+    deadline_soon: bool = False

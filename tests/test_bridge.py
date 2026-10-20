@@ -34,6 +34,14 @@ def env(tmp_path, monkeypatch):
     store.close()
 
 
+def _checked(tools, pid):
+    """The pre-submit check Fo runs before asking for the code: one required field, filled with the user's own name."""
+    name = tools["form_profile"]()["fields"]["full_name"]
+    out = tools["pre_submit_check"](pid, [{"label": "Full name", "required": True, "value": name}])
+    assert out["ok"] and out["ready"], out
+    return out
+
+
 # ---- secrets ------------------------------------------------------------------------------------------------------------
 
 def test_key_is_private_compared_safely_and_revoked_by_rotation(tmp_path):
@@ -66,6 +74,17 @@ def test_totp_matches_the_standard_and_accepts_one_step_of_drift():
 
 
 # ---- tools --------------------------------------------------------------------------------------------------------------
+
+def test_a_failed_check_blocks_approval_and_lists_what_is_wrong(env):
+    store, sid, ids, tools, secret, _ = env
+    assert tools["build_fo_apply_message"](ids[1])["ok"]
+    out = tools["pre_submit_check"](ids[1], [{"label": "Salary expectation", "required": True, "value": "40 LPA"},
+                                             {"label": "Resume", "required": True, "value": "", "kind": "file"}])
+    assert out["ok"] and not out["ready"] and out["problems"] == 2
+    refused = tools["approve_submit"](ids[1], b.totp(secret))
+    assert not refused["ok"] and refused["code"] == "approval_required" and "pre_submit_check" in refused["error"]
+    assert not tools["pre_submit_check"](ids[2], [{"label": "x", "value": "y"}])["ok"]   # only the job in progress
+
 
 def test_only_the_allowed_tools_exist_and_none_takes_a_seeker_id(env):
     import inspect
@@ -111,6 +130,7 @@ def test_one_application_waits_for_a_code_at_a_time_and_a_code_only_fits_that_jo
     blocked = tools["build_fo_apply_message"](ids[2])
     assert not blocked["ok"] and "waiting for its approval code" in blocked["error"]
     assert not tools["approve_submit"](ids[2], b.totp(secret))["ok"]          # a code cannot be spent on another job
+    _checked(tools, ids[1])
     ok = tools["approve_submit"](ids[1], b.totp(secret))
     assert ok["ok"] and ok["approved"]
 
@@ -118,6 +138,7 @@ def test_one_application_waits_for_a_code_at_a_time_and_a_code_only_fits_that_jo
 def test_wrong_codes_lock_approval_until_the_user_unlocks(env):
     store, sid, ids, tools, secret, _ = env
     tools["build_fo_apply_message"](ids[1])
+    _checked(tools, ids[1])
     wrong = "000000" if b.totp(secret) != "000000" else "111111"
     for _ in range(b.MAX_CODE_FAILS):
         assert not tools["approve_submit"](ids[1], wrong)["ok"]
@@ -151,6 +172,8 @@ def test_approve_submit_checks_the_code_once_and_only_for_a_started_job(env):
     assert tools["build_fo_apply_message"](ids[1])["ok"]
     assert not tools["approve_submit"](ids[1], "12345x")["ok"]
     code = b.totp(secret)
+    assert "pre_submit_check" in tools["approve_submit"](ids[1], code)["error"]   # the form is checked first
+    _checked(tools, ids[1])
     assert tools["approve_submit"](ids[1], code)["ok"]
     assert not tools["approve_submit"](ids[1], code)["ok"]                    # single use
     assert all(code not in line for line in lines)                            # the audit log never holds a code
@@ -162,6 +185,7 @@ def test_record_application_moves_forward_only_and_never_withdraws(env):
     tools["build_fo_apply_message"](ids[1])
     assert not tools["record_application"](ids[1], "withdrawn")["ok"]
     assert not tools["record_application"](ids[1], "applied")["ok"]           # ...and an approval code
+    _checked(tools, ids[1])
     assert tools["approve_submit"](ids[1], b.totp(secret))["ok"]
     assert tools["record_application"](ids[1], "applied")["ok"]
     assert not tools["record_application"](ids[1], "started")["ok"]

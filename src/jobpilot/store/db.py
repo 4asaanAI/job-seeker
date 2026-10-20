@@ -23,6 +23,14 @@ JOB_STATUSES = {
     "skipped", "deferred", "expired",
 }
 LOCATION_REPAIR_VERSION = 1
+# A match older than this (by its posting date, else first sighting) no longer reaches matches, digests or the sheet.
+FRESH_DAYS = 14
+IN_FLIGHT_HOURS = 2
+# The last audit action of an application that is still being worked on (anything else ends it).
+_IN_FLIGHT_ACTIONS = ("request_built", "approved", "retry_built", "sent")
+# Audit rows that change an application's state; informational rows (pre_submit_check) never start or end one.
+_ENDING_ACTIONS = ("submitted", "outcome", "cancelled", "failed", "blocked")
+_STATE_ACTIONS = _IN_FLIGHT_ACTIONS + _ENDING_ACTIONS
 
 APPLICATION_STATUSES = {
     "started", "applied", "withdrawn", "rejected", "interview", "offer",
@@ -35,6 +43,28 @@ _LOCATION_COLUMNS = ("location_city", "location_region", "location_country")
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# A posting's age: its own posting date when the board gave one, else when JobPilot first saw it. Bind f"-{days} days".
+_FRESH = "COALESCE(jp.posted_on, substr(jp.first_seen_at, 1, 10)) >= date('now', ?)"
+# Closes within 48 hours (today or the next two days).
+_DEADLINE_SOON = "(jp.valid_through IS NOT NULL AND jp.valid_through <= date('now', '+2 days'))"
+# The same role (same title at the same company, under another posting id) already has an application.
+_TWIN_APPLIED = (
+    "NOT EXISTS (SELECT 1 FROM job_postings twin JOIN applications ta ON ta.posting_id = twin.id "
+    "AND ta.seeker_id = sj.seeker_id AND ta.status != 'withdrawn' WHERE twin.id != jp.id "
+    "AND twin.normalized_title = jp.normalized_title AND lower(twin.company_name) = lower(jp.company_name))")
+
+
+def _one_per_role(rows: list) -> list:
+    """Keep the first (best) row of each role: boards list one job under several cities or ids."""
+    seen, out = set(), []
+    for r in rows:
+        key = (r["normalized_title"], normalize_company(r["company_name"]))
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
 
 
 _COMPANY_SUFFIXES = {"pvt", "ltd", "limited", "private", "inc", "plc", "llp", "india"}
@@ -90,6 +120,7 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._lock = threading.RLock()
+        self.fresh_days = FRESH_DAYS
 
     def close(self) -> None:
         with self._lock:
@@ -106,6 +137,32 @@ class Store:
                 self.conn.execute(f"PRAGMA user_version = {int(LOCATION_REPAIR_VERSION)}")
             self._add_missing_columns("seekers", {"review_required": "INTEGER NOT NULL DEFAULT 1"})
             self._add_missing_columns("job_postings", {"valid_through": "TEXT"})
+            if "posted_on" in self._add_missing_columns("job_postings", {
+                    "salary_min": "REAL", "salary_max": "REAL", "salary_currency": "TEXT", "work_mode": "TEXT",
+                    "posted_on": "TEXT"}):
+                self._backfill_facts()           # once: postings stored before these columns existed
+            self._add_missing_columns("scores", {
+                "model_score": "REAL", "adjust": "REAL NOT NULL DEFAULT 0", "adjust_notes": "TEXT NOT NULL DEFAULT ''"})
+            self.conn.execute("UPDATE scores SET model_score = fit_score WHERE model_score IS NULL")
+            self._add_missing_columns("applications", {"rejection_reason": "TEXT", "rejection_category": "TEXT"})
+
+    def _backfill_facts(self) -> None:
+        """Read salary, work mode and posting date once for postings stored before those columns existed."""
+        from ..ranking import facts_for
+        for r in self.conn.execute("SELECT id, title, location, description, posted_at FROM job_postings").fetchall():
+            self._write_facts(r["id"], facts_for(r["title"], r["location"], r["description"], r["posted_at"]))
+
+    def _write_facts(self, posting_id: int, facts) -> None:
+        self.conn.execute(
+            "UPDATE job_postings SET salary_min = COALESCE(?, salary_min), salary_max = COALESCE(?, salary_max), "
+            "salary_currency = COALESCE(?, salary_currency), work_mode = COALESCE(?, work_mode), "
+            "posted_on = COALESCE(?, posted_on) WHERE id = ?",
+            (facts.salary_min, facts.salary_max, facts.salary_currency, facts.work_mode, facts.posted_on, posting_id))
+
+    def set_posting_facts(self, posting_id: int, facts) -> None:
+        """Facts read from a posting (ranking.facts_for); a fact that is unknown now never erases one known before."""
+        with self._lock, self.conn:
+            self._write_facts(int(posting_id), facts)
 
     def _add_missing_columns(self, table: str, columns: dict[str, str]) -> list[str]:
         """Add any of `columns` (name -> SQL type/default) missing from `table`.
@@ -283,18 +340,28 @@ class Store:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT jp.id AS posting_id, jp.title, jp.company_name, jp.location, "
-                "       jp.canonical_url AS url, s.fit_score, s.reasoning, sj.status "
+                "       jp.canonical_url AS url, s.fit_score, s.reasoning, sj.status, jp.valid_through, "
+                f"       jp.normalized_title, {_DEADLINE_SOON} AS deadline_soon, jp.work_mode, "
+                "       jp.salary_min, jp.salary_max, jp.salary_currency "
                 "FROM scores s JOIN seeker_jobs sj "
                 "  ON sj.seeker_id = s.seeker_id AND sj.posting_id = s.posting_id "
                 "JOIN job_postings jp ON jp.id = s.posting_id "
                 "WHERE s.seeker_id = ? AND (jp.valid_through IS NULL OR jp.valid_through >= date('now')) "
-                "AND jp.last_seen_at >= date('now', '-45 days') "
+                f"AND jp.last_seen_at >= date('now', '-45 days') AND {_FRESH} "
                 + ("AND sj.status NOT IN ('skipped', 'applied', 'expired') AND NOT EXISTS (SELECT 1 FROM applications a "
                    "WHERE a.seeker_id = s.seeker_id AND a.posting_id = s.posting_id AND a.status != 'withdrawn') "
+                   f"AND {_TWIN_APPLIED} "
                    if open_only else "")
                 + "ORDER BY s.fit_score DESC, s.scored_at DESC LIMIT ?",
-                (seeker_id, int(limit))).fetchall()
-        return [dict(r) for r in rows]
+                (seeker_id, f"-{int(self.fresh_days)} days", int(limit) * 3)).fetchall()
+        rows = _one_per_role(rows) if open_only else rows
+        out = []
+        for r in rows[:int(limit)]:
+            item = dict(r)
+            item.pop("normalized_title", None)
+            item["deadline_soon"] = bool(item["deadline_soon"])
+            out.append(item)
+        return out
 
     def merge_seekers(self, keep: int, drop: int) -> dict[str, int]:
         """Fold seeker `drop` into `keep` (same person, two profiles).
@@ -315,7 +382,7 @@ class Store:
                 "SELECT name FROM sqlite_master WHERE type = 'table'")]
             for table in tables:  # internal names from sqlite_master, not caller input
                 columns = {c["name"] for c in self.conn.execute(f"PRAGMA table_info({table})")}
-                if "seeker_id" not in columns or table == "seekers":
+                if "seeker_id" not in columns or table in ("seekers", "submit_audit"):   # the audit is append-only
                     continue
                 cur = self.conn.execute(
                     f"UPDATE OR IGNORE {table} SET seeker_id = ? WHERE seeker_id = ?", (keep, drop))
@@ -682,17 +749,19 @@ class Store:
                     f"posting {posting_id} is not linked to seeker {seeker_id}; "
                     "refusing to write a score that no query would ever see"
                 )
+            # fit_score is the model's score plus this job's learned adjustment (see ranking.reweight), kept in 0..100.
             self.conn.execute(
                 """
-                INSERT INTO scores (seeker_id, posting_id, fit_score, reasoning, model, scored_at)
-                VALUES (?,?,?,?,?,?)
+                INSERT INTO scores (seeker_id, posting_id, fit_score, reasoning, model, scored_at, model_score)
+                VALUES (?,?,?,?,?,?,?)
                 ON CONFLICT(seeker_id, posting_id) DO UPDATE SET
-                    fit_score = excluded.fit_score,
+                    model_score = excluded.model_score,
+                    fit_score = MIN(100, MAX(0, excluded.model_score + scores.adjust)),
                     reasoning = excluded.reasoning,
                     model     = excluded.model,
                     scored_at = excluded.scored_at
                 """,
-                (seeker_id, posting_id, float(fit_score), clean, model, _now()),
+                (seeker_id, posting_id, float(fit_score), clean, model, _now(), float(fit_score)),
             )
             self.conn.execute(
                 "UPDATE seeker_jobs SET status = 'scored' "
@@ -716,6 +785,7 @@ class Store:
                 WHERE sj.seeker_id = ? AND s.posting_id IS NULL AND jp.last_seen_at >= ?
                   AND sj.status NOT IN ('skipped', 'applied', 'expired')
                   AND (jp.valid_through IS NULL OR jp.valid_through >= date('now'))
+                  AND """ + _TWIN_APPLIED + """
                 ORDER BY sj.posting_id DESC
                 LIMIT ?
                 """,
@@ -774,7 +844,7 @@ class Store:
                 """
                 SELECT sj.seeker_id, sj.posting_id, sj.status, jp.title,
                        jp.company_name, jp.canonical_url AS url,
-                       s.fit_score, s.reasoning
+                       s.fit_score, s.reasoning, jp.normalized_title, {deadline_soon} AS deadline_soon
                 FROM seeker_jobs sj
                 JOIN job_postings jp ON jp.id = sj.posting_id
                 JOIN scores s
@@ -784,16 +854,23 @@ class Store:
                   AND sj.status NOT IN ('skipped', 'applied', 'expired')
                   AND (jp.valid_through IS NULL OR jp.valid_through >= date('now'))
                   AND jp.last_seen_at >= date('now', '-45 days')
+                  AND {fresh} AND {twin_applied}
                   AND NOT EXISTS (
                         SELECT 1 FROM notifications n
                         WHERE n.seeker_id = sj.seeker_id
                           AND n.posting_id = sj.posting_id
                           AND n.kind = 'first'
                   )
+                  AND NOT EXISTS (
+                        SELECT 1 FROM job_postings twin JOIN notifications tn ON tn.posting_id = twin.id
+                        WHERE tn.seeker_id = sj.seeker_id AND tn.kind = 'first' AND twin.id != jp.id
+                          AND twin.normalized_title = jp.normalized_title
+                          AND lower(twin.company_name) = lower(jp.company_name)
+                  )
                 ORDER BY s.fit_score DESC, sj.posting_id
                 LIMIT ?
-                """,
-                (seeker_id, min_score, limit),
+                """.format(fresh=_FRESH, twin_applied=_TWIN_APPLIED, deadline_soon=_DEADLINE_SOON),
+                (seeker_id, min_score, f"-{int(self.fresh_days)} days", limit * 3),
             ).fetchall()
         return [
             SeekerJob(
@@ -801,8 +878,9 @@ class Store:
                 status=r["status"], title=r["title"],
                 company_name=r["company_name"], url=r["url"],
                 fit_score=r["fit_score"], reasoning=r["reasoning"],
+                deadline_soon=bool(r["deadline_soon"]),
             )
-            for r in rows
+            for r in _one_per_role(rows)[:limit]
         ]
 
     # --- source health -------------------------------------------------
@@ -1126,7 +1204,7 @@ class Store:
                 f"posting {posting_id} is not linked to seeker {seeker_id}; "
                 "refusing to record a resume for an unrelated job"
             )
-        if format not in ("docx", "pdf"):
+        if format not in ("docx", "pdf", "txt"):
             raise ValueError(f"unsupported resume format: {format}")
         with self._lock, self.conn:
             cur = self.conn.execute(
@@ -1238,10 +1316,15 @@ class Store:
         status: str,
         notes: str = "",
         resume_version_id: int | None = None,
+        reason: str = "",
+        applied_at: str | None = None,
     ) -> None:
+        """reason: why a rejection happened, when the company said (kept, and its category feeds scoring).
+        applied_at: only for importing history (an ISO date the user gave); otherwise the time of this call."""
         if status not in APPLICATION_STATUSES:
             raise ValueError(f"unknown application status: {status}")
         clean_notes = " ".join(str(notes or "").split())[:1000]
+        clean_reason = " ".join(str(reason or "").split())[:300]
         with self._lock, self.conn:
             if not self.is_linked(seeker_id, posting_id):
                 raise ValueError(
@@ -1260,7 +1343,10 @@ class Store:
                 (seeker_id, posting_id)).fetchone()
             if existing and existing["status"] in ("interview", "offer", "rejected") and status in ("started", "applied"):
                 return                          # a later outcome is never rolled back to an earlier stage
-            applied_at = _now() if status == "applied" else None
+            if applied_at is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(T[0-9:.+-]+)?", applied_at):
+                raise ValueError("applied_at must be an ISO date such as 2026-09-30")
+            happened = applied_at or _now()          # an imported application keeps its own date in the history too
+            applied_at = applied_at or (_now() if status == "applied" else None)
             response_at = _now() if status in ("interview", "offer", "rejected") else None
             self.conn.execute(
                 "INSERT INTO applications "
@@ -1274,6 +1360,12 @@ class Store:
                 "notes=CASE WHEN excluded.notes = '' THEN applications.notes ELSE excluded.notes END",
                 (seeker_id, posting_id, status, resume_version_id, applied_at, clean_notes, response_at),
             )
+            if status == "rejected" and clean_reason:
+                from ..ranking import rejection_category
+                self.conn.execute(
+                    "UPDATE applications SET rejection_reason = ?, rejection_category = ? "
+                    "WHERE seeker_id = ? AND posting_id = ?",
+                    (clean_reason, rejection_category(clean_reason), seeker_id, posting_id))
             if status == "applied":
                 self.conn.execute(
                     "UPDATE seeker_jobs SET status = 'applied' "
@@ -1283,7 +1375,7 @@ class Store:
             self.conn.execute(
                 "INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) "
                 "VALUES (?,?,?,?,?)",
-                (seeker_id, posting_id, "application", status, _now()),
+                (seeker_id, posting_id, "application", status, happened),
             )
 
     def applications(self, seeker_id: int, limit: int = 100) -> list[dict]:
@@ -1291,7 +1383,7 @@ class Store:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT a.seeker_id, a.posting_id, a.status, a.resume_version_id, "
-                "       a.applied_at, a.response_at, a.notes, jp.title, "
+                "       a.applied_at, a.response_at, a.notes, a.rejection_reason, a.rejection_category, jp.title, "
                 "       jp.company_name, jp.canonical_url AS url "
                 "FROM applications a JOIN job_postings jp ON jp.id = a.posting_id "
                 "WHERE a.seeker_id = ? ORDER BY COALESCE(a.applied_at, '') DESC, "
@@ -1317,8 +1409,10 @@ class Store:
             opened = self.conn.execute(
                 base.format(closed=0) + "AND (jp.valid_through IS NULL OR jp.valid_through >= ?) "
                 "AND sj.status NOT IN ('skipped', 'applied', 'expired') AND jp.last_seen_at >= date(?, '-45 days') "
+                "AND COALESCE(jp.posted_on, substr(jp.first_seen_at, 1, 10)) >= date(?, ?) AND " + _TWIN_APPLIED + " "
                 "ORDER BY s.fit_score DESC, sj.first_seen_at DESC, jp.id DESC LIMIT ?",
-                (seeker_id, float(min_score), today, today, max(0, int(open_limit)))).fetchall()
+                (seeker_id, float(min_score), today, today, today, f"-{int(self.fresh_days)} days",
+                 max(0, int(open_limit)))).fetchall()
             closed = self.conn.execute(
                 base.format(closed=1) + "AND jp.valid_through IS NOT NULL AND jp.valid_through < ? "
                 "AND jp.valid_through >= date(?, ?) AND sj.status NOT IN ('skipped', 'applied') "
@@ -1421,3 +1515,365 @@ class Store:
                 continue                       # already nudged; wait for the 7-day expiry
             result.append(item)
         return result
+
+    # --- learned score adjustments (ranking.reweight) -------------------
+    def reweight_rows(self, seeker_id: int) -> list[dict]:
+        """Every scored job of this seeker with what reweighting needs: its model score, facts, sources and company."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT s.posting_id, s.model_score, s.fit_score, s.adjust, jp.company_name, jp.title, jp.location, "
+                "       jp.description, jp.salary_min, jp.salary_max, jp.salary_currency, jp.work_mode, jp.posted_on, "
+                "       (SELECT GROUP_CONCAT(ps.source) FROM posting_sources ps WHERE ps.posting_id = jp.id) AS sources "
+                "FROM scores s JOIN job_postings jp ON jp.id = s.posting_id WHERE s.seeker_id = ?",
+                (seeker_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def company_outcomes(self, seeker_id: int) -> list[tuple[int, str, str]]:
+        """(posting_id, company_name, outcome) for every application outcome and every job the user skipped."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT a.posting_id, jp.company_name, a.status FROM applications a "
+                "JOIN job_postings jp ON jp.id = a.posting_id WHERE a.seeker_id = ? "
+                "UNION ALL SELECT sj.posting_id, jp.company_name, 'skipped' FROM seeker_jobs sj "
+                "JOIN job_postings jp ON jp.id = sj.posting_id WHERE sj.seeker_id = ? AND sj.status = 'skipped'",
+                (seeker_id, seeker_id)).fetchall()
+        return [(int(r[0]), r[1], r[2]) for r in rows]
+
+    def set_adjustments(self, seeker_id: int, changes: list[tuple[int, float, str]]) -> None:
+        """(posting_id, adjust, notes): fit_score becomes the model score plus adjust, kept in 0..100."""
+        with self._lock, self.conn:
+            self.conn.executemany(
+                "UPDATE scores SET adjust = ?, adjust_notes = ?, "
+                "fit_score = MIN(100, MAX(0, COALESCE(model_score, fit_score) + ?)) WHERE seeker_id = ? AND posting_id = ?",
+                [(a, notes[:300], a, seeker_id, pid) for pid, a, notes in changes])
+
+    def rejection_summary(self, seeker_id: int) -> dict[str, int]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT rejection_category, COUNT(*) FROM applications WHERE seeker_id = ? "
+                "AND rejection_category IS NOT NULL GROUP BY rejection_category", (seeker_id,)).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+
+    # --- submit audit (append-only) -------------------------------------
+    def audit(self, seeker_id: int, posting_id: int, action: str, outcome: str, detail: str = "") -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO submit_audit (seeker_id, posting_id, action, outcome, detail, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (int(seeker_id), int(posting_id), action[:40], outcome[:40], " ".join(str(detail).split())[:500], _now()))
+
+    def audit_log(self, seeker_id: int, posting_id: int | None = None, limit: int = 100) -> list[dict]:
+        sql = "SELECT id, posting_id, action, outcome, detail, created_at FROM submit_audit WHERE seeker_id = ?"
+        params: list[object] = [int(seeker_id)]
+        if posting_id is not None:
+            sql += " AND posting_id = ?"
+            params.append(int(posting_id))
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 1000)))
+        with self._lock:
+            return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def in_flight(self, seeker_id: int, hours: float = IN_FLIGHT_HOURS) -> int | None:
+        """The application being worked on right now: its newest audit row is a built or approved request from the last
+        `hours`. Any later outcome (applied, blocked, failed, cancelled, ...) ends it."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        states = ",".join("?" * len(_STATE_ACTIONS))
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT a.posting_id FROM submit_audit a WHERE a.seeker_id = ? AND a.created_at >= ? "
+                "AND a.action IN (%s) AND a.id = (SELECT MAX(b.id) FROM submit_audit b "
+                "WHERE b.seeker_id = a.seeker_id AND b.posting_id = a.posting_id AND b.action IN (%s)) "
+                "ORDER BY a.id DESC LIMIT 1" % (",".join("?" * len(_IN_FLIGHT_ACTIONS)), states),
+                (int(seeker_id), since, *_IN_FLIGHT_ACTIONS, *_STATE_ACTIONS)).fetchone()
+        return int(row[0]) if row else None
+
+    def begin_application(self, seeker_id: int, posting_id: int, outcome: str, detail: str = "") -> None:
+        """Claim the one in-flight slot and record request_built, as ONE write transaction (every process sharing the
+        database - Claude, the bridge, the dashboard, the text inbox - goes through it). Raises ValueError when another
+        application is in flight."""
+        with self._lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                busy = self.in_flight(seeker_id)
+                if busy is not None:
+                    raise ValueError(f"job {busy} is still in flight (one application at a time): record its outcome, "
+                                     "report_blocked or cancel_application first")
+                self.conn.execute(
+                    "INSERT INTO submit_audit (seeker_id, posting_id, action, outcome, detail, created_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (int(seeker_id), int(posting_id), "request_built", outcome[:40], detail[:500], _now()))
+                self.conn.execute("COMMIT")
+            except BaseException:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                raise
+
+    def begin_retry(self, seeker_id: int, posting_id: int) -> None:
+        """The one retry of a parked failure: take the in-flight slot, mark the item retried and record retry_built, as ONE
+        write transaction. Raises ValueError when another job is in flight or the item is not parked."""
+        with self._lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                busy = self.in_flight(seeker_id)
+                if busy is not None and busy != int(posting_id):
+                    raise ValueError(f"job {busy} is still in flight; finish or cancel it first")
+                moved = self.conn.execute(
+                    "UPDATE retry_queue SET state = 'retried', retried_at = ? WHERE seeker_id = ? AND posting_id = ? "
+                    "AND state = 'parked'", (_now(), int(seeker_id), int(posting_id))).rowcount
+                if moved != 1:
+                    raise ValueError("there is no parked failure to retry for this job (it was never parked, or it was "
+                                     "already retried)")
+                self.conn.execute(
+                    "INSERT INTO submit_audit (seeker_id, posting_id, action, outcome, detail, created_at) "
+                    "VALUES (?,?,?,?,?,?)", (int(seeker_id), int(posting_id), "retry_built", "user_confirmed", "", _now()))
+                self.conn.execute("COMMIT")
+            except BaseException:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                raise
+
+    def last_state(self, seeker_id: int, posting_id: int) -> str | None:
+        """The newest state-changing audit action for one application (request_built, blocked, cancelled, ...)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT action FROM submit_audit WHERE seeker_id = ? AND posting_id = ? AND action IN (%s) "
+                "ORDER BY id DESC LIMIT 1" % ",".join("?" * len(_STATE_ACTIONS)),
+                (int(seeker_id), int(posting_id), *_STATE_ACTIONS)).fetchone()
+        return row[0] if row else None
+
+    def spend_code_step(self, seeker_id: int, posting_id: int, step: int) -> bool:
+        """Record an authenticator time step as used, unless it already was (True when spent now). One write
+        transaction across processes, so the dashboard and the bridge can never both accept the same code."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        with self._lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                for (detail,) in self.conn.execute(
+                        "SELECT detail FROM events WHERE seeker_id = ? AND kind = 'bridge_code_used' AND created_at >= ?",
+                        (int(seeker_id), since)).fetchall():
+                    try:
+                        if json.loads(detail).get("step") == step:
+                            self.conn.execute("ROLLBACK")
+                            return False
+                    except ValueError:
+                        continue
+                self.conn.execute(
+                    "INSERT INTO events (seeker_id, posting_id, kind, detail, created_at) VALUES (?,?,?,?,?)",
+                    (int(seeker_id), int(posting_id), "bridge_code_used",
+                     json.dumps({"step": step, "posting_id": int(posting_id)}), _now()))
+                self.conn.execute("COMMIT")
+                return True
+            except BaseException:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                raise
+
+    # --- the built request and the retry queue -------------------------
+    def save_payload(self, seeker_id: int, posting_id: int, payload: str) -> None:
+        """Keep the exact request built for this application (a parked one is never overwritten)."""
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO retry_queue (seeker_id, posting_id, payload, failure, state, parked_at) "
+                "VALUES (?,?,?,'','built',?) ON CONFLICT(seeker_id, posting_id) DO UPDATE SET "
+                "payload = excluded.payload, failure = '', state = 'built', parked_at = excluded.parked_at, "
+                "retried_at = NULL WHERE retry_queue.state IN ('built', 'done')",
+                (int(seeker_id), int(posting_id), payload, _now()))
+
+    def retry_item(self, seeker_id: int, posting_id: int) -> dict | None:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM retry_queue WHERE seeker_id = ? AND posting_id = ?",
+                                    (int(seeker_id), int(posting_id))).fetchone()
+        return dict(row) if row else None
+
+    def retry_items(self, seeker_id: int, states: tuple[str, ...] = ("parked", "failed")) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT r.posting_id, r.failure, r.state, r.parked_at, r.retried_at, jp.title, jp.company_name "
+                "FROM retry_queue r JOIN job_postings jp ON jp.id = r.posting_id WHERE r.seeker_id = ? AND r.state IN (%s) "
+                "ORDER BY r.parked_at DESC" % ",".join("?" * len(states)), (int(seeker_id), *states)).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_retry_state(self, seeker_id: int, posting_id: int, state: str, failure: str | None = None,
+                        expect: tuple[str, ...] = ()) -> bool:
+        """Move one item to `state`; with `expect`, only from one of those states (True when it moved)."""
+        sql = "UPDATE retry_queue SET state = ?, failure = COALESCE(?, failure)"
+        params: list[object] = [state, None if failure is None else " ".join(failure.split())[:300]]
+        if state == "parked":
+            sql += ", parked_at = ?"
+            params.append(_now())
+        if state == "retried":
+            sql += ", retried_at = ?"
+            params.append(_now())
+        sql += " WHERE seeker_id = ? AND posting_id = ?"
+        params += [int(seeker_id), int(posting_id)]
+        if expect:
+            sql += " AND state IN (%s)" % ",".join("?" * len(expect))
+            params += list(expect)
+        with self._lock, self.conn:
+            return self.conn.execute(sql, params).rowcount == 1
+
+    # --- proposals the user confirms -------------------------------------
+    def add_proposal(self, seeker_id: int, posting_id: int, kind: str, payload: dict, evidence: str,
+                     message_ref: str) -> int | None:
+        """A new pending suggestion; None when this message was already turned into one."""
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO proposals (seeker_id, posting_id, kind, payload, evidence, message_ref, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (int(seeker_id), int(posting_id), kind, json.dumps(payload, sort_keys=True), evidence[:300],
+                 message_ref[:200], _now()))
+            return int(cur.lastrowid) if cur.rowcount == 1 else None
+
+    def proposals(self, seeker_id: int, state: str = "pending", kind: str | None = None) -> list[dict]:
+        sql = ("SELECT p.id, p.seeker_id, p.posting_id, p.kind, p.payload, p.evidence, p.state, p.created_at, p.decided_at, "
+               "jp.title, jp.company_name FROM proposals p JOIN job_postings jp ON jp.id = p.posting_id "
+               "WHERE p.seeker_id = ? AND p.state = ?")
+        params: list[object] = [int(seeker_id), state]
+        if kind:
+            sql += " AND p.kind = ?"
+            params.append(kind)
+        with self._lock:
+            rows = self.conn.execute(sql + " ORDER BY p.id DESC LIMIT 200", params).fetchall()
+        out = []
+        for r in rows:
+            item = dict(r)
+            item["payload"] = json.loads(item["payload"])
+            out.append(item)
+        return out
+
+    def decide_proposal(self, seeker_id: int, proposal_id: int, accept: bool) -> dict | None:
+        """Mark a pending proposal accepted or dismissed; returns it, or None when it is not this seeker's pending one."""
+        with self._lock, self.conn:
+            row = self.conn.execute("SELECT * FROM proposals WHERE id = ? AND seeker_id = ? AND state = 'pending'",
+                                    (int(proposal_id), int(seeker_id))).fetchone()
+            if row is None:
+                return None
+            self.conn.execute("UPDATE proposals SET state = ?, decided_at = ? WHERE id = ?",
+                              ("accepted" if accept else "dismissed", _now(), int(proposal_id)))
+        item = dict(row)
+        item["payload"] = json.loads(item["payload"])
+        return item
+
+    # --- cover letter drafts ---------------------------------------------
+    def save_letter_draft(self, seeker_id: int, posting_id: int, draft: str, warnings: list[str]) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO cover_letters (seeker_id, posting_id, draft, warnings, drafted_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(seeker_id, posting_id) DO UPDATE SET draft = excluded.draft, warnings = excluded.warnings, "
+                "drafted_at = excluded.drafted_at, approved_text = NULL, approved_at = NULL",
+                (int(seeker_id), int(posting_id), draft, json.dumps(warnings), _now()))
+
+    def approve_letter(self, seeker_id: int, posting_id: int, text: str) -> bool:
+        with self._lock, self.conn:
+            return self.conn.execute(
+                "UPDATE cover_letters SET approved_text = ?, approved_at = ? WHERE seeker_id = ? AND posting_id = ?",
+                (text, _now(), int(seeker_id), int(posting_id))).rowcount == 1
+
+    def letter(self, seeker_id: int, posting_id: int) -> dict | None:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM cover_letters WHERE seeker_id = ? AND posting_id = ?",
+                                    (int(seeker_id), int(posting_id))).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["warnings"] = json.loads(item["warnings"] or "[]")
+        return item
+
+    # --- where an application stopped, and board logins -----------------
+    def save_progress(self, seeker_id: int, posting_id: int, step: str, page_url: str | None,
+                      filled: list[str]) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO apply_progress (seeker_id, posting_id, step, page_url, filled, updated_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(seeker_id, posting_id) DO UPDATE SET step = excluded.step, "
+                "page_url = excluded.page_url, filled = excluded.filled, updated_at = excluded.updated_at",
+                (int(seeker_id), int(posting_id), step[:60], page_url, json.dumps(filled[:50]), _now()))
+
+    def progress(self, seeker_id: int, posting_id: int) -> dict | None:
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM apply_progress WHERE seeker_id = ? AND posting_id = ?",
+                                    (int(seeker_id), int(posting_id))).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["filled"] = json.loads(item["filled"] or "[]")
+        return item
+
+    def set_board_session(self, seeker_id: int, host: str, state: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO board_sessions (seeker_id, host, state, updated_at) VALUES (?,?,?,?) "
+                "ON CONFLICT(seeker_id, host) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at",
+                (int(seeker_id), host.lower()[:120], state, _now()))
+
+    def board_sessions(self, seeker_id: int) -> dict[str, str]:
+        with self._lock:
+            return {r["host"]: r["state"] for r in self.conn.execute(
+                "SELECT host, state FROM board_sessions WHERE seeker_id = ?", (int(seeker_id),))}
+
+    # --- history for analytics ----------------------------------------
+    def application_events(self, seeker_id: int) -> list[dict]:
+        """Every recorded application step (posting, status, when), oldest first."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT posting_id, detail AS status, created_at FROM events WHERE seeker_id = ? AND kind = 'application' "
+                "ORDER BY id", (int(seeker_id),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def match_counts_by_week(self, seeker_id: int, min_score: float, weeks: int) -> dict[str, int]:
+        """Scored jobs at or above the threshold, by the ISO week JobPilot first saw them."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT strftime('%Y-W%W', sj.first_seen_at) AS week, COUNT(*) FROM seeker_jobs sj JOIN scores s "
+                "ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id WHERE sj.seeker_id = ? "
+                "AND s.fit_score >= ? AND sj.first_seen_at >= date('now', ?) GROUP BY week",
+                (int(seeker_id), float(min_score), f"-{int(weeks) * 7} days")).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+
+    def last_errors(self, hours: int = 24, limit: int = 10) -> list[dict]:
+        """Source, scoring and delivery errors from the last `hours` (any seeker), newest first."""
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT kind, detail, created_at FROM events WHERE created_at >= ? AND kind IN "
+                "('source_error', 'scoring_error', 'delivery_error', 'tool_error') ORDER BY id DESC LIMIT ?",
+                (since, int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+
+    def source_stats(self, seeker_id: int, min_score: float) -> list[dict]:
+        """Per board, for this seeker: jobs found, scored, average fit, good matches, applications and interviews."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT ps.source, COUNT(DISTINCT sj.posting_id) AS jobs, COUNT(DISTINCT s.posting_id) AS scored, "
+                "       ROUND(AVG(s.fit_score), 1) AS avg_fit, "
+                "       COUNT(DISTINCT CASE WHEN s.fit_score >= ? THEN s.posting_id END) AS good_matches, "
+                "       COUNT(DISTINCT a.posting_id) AS applications, "
+                "       COUNT(DISTINCT CASE WHEN a.status IN ('interview', 'offer') THEN a.posting_id END) AS interviews "
+                "FROM seeker_jobs sj JOIN posting_sources ps ON ps.posting_id = sj.posting_id "
+                "LEFT JOIN scores s ON s.seeker_id = sj.seeker_id AND s.posting_id = sj.posting_id "
+                "LEFT JOIN applications a ON a.seeker_id = sj.seeker_id AND a.posting_id = sj.posting_id "
+                "WHERE sj.seeker_id = ? GROUP BY ps.source ORDER BY good_matches DESC, jobs DESC",
+                (float(min_score), int(seeker_id))).fetchall()
+        return [dict(r) for r in rows]
+
+    def posting_facts(self, posting_id: int) -> dict:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT salary_min, salary_max, salary_currency, work_mode, posted_on, valid_through "
+                "FROM job_postings WHERE id = ?", (int(posting_id),)).fetchone()
+        return dict(row) if row else {}
+
+    def score_detail(self, seeker_id: int, posting_id: int) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT fit_score, model_score, adjust, adjust_notes, reasoning, scored_at FROM scores "
+                "WHERE seeker_id = ? AND posting_id = ?", (int(seeker_id), int(posting_id))).fetchone()
+        return dict(row) if row else None
+
+    def latest_any_machine_run(self) -> dict | None:
+        with self._lock:
+            row = self.conn.execute("SELECT id, machine, started_at, finished_at, status FROM machine_runs "
+                                    "ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+

@@ -318,7 +318,7 @@ def test_send_failure_is_reported_and_not_retried(demo):
     assert fo.messages == [] and "already used" in sent[-1]
 
 
-def test_preview_refuses_at_the_daily_cap_and_caps_open_codes(demo):
+def test_preview_has_no_daily_cap_but_caps_open_codes(demo):
     store, sid, ids, out, state = demo
     for pid in ids[:4]:
         _link(store, pid)
@@ -326,10 +326,10 @@ def test_preview_refuses_at_the_daily_cap_and_caps_open_codes(demo):
     for i, pid in enumerate(ids[:4]):
         run(demo, Reader([msg(f"jp apply {pid}", at=f"2026-10-18T05:0{i}:00Z")]), sent, apply_client=fo)
     assert sum("ready to apply" in t for t in sent) == inbox.MAX_OPEN_CODES and "waiting for a yes" in sent[-1]
-    for _ in range(10):
+    for _ in range(50):
         store.record_event("fo_apply_batch", "x", sid)
     run(demo, Reader([msg(f"jp apply {ids[0]}", at="2026-10-18T07:00:00Z")]), sent, apply_client=fo)
-    assert "limit" in sent[-1]
+    assert "today's limit" not in sent[-1]
 
 
 def test_phone_code_is_not_an_mcp_parameter(demo):

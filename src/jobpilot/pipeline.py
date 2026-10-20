@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from .profiles import Profile
+from .ranking import facts_for, filter_reason
 from .sources.base import SourceResult, SourceStatus
 from .sources.health import classify
 from .store.db import Store
@@ -29,9 +30,15 @@ class SeekerTarget:
     profile: Profile
 
 
-def _excluded(posting: Posting, profile: Profile) -> bool:
+def _excluded(posting: Posting, profile: Profile, facts=None) -> bool:
+    """Excluded keywords, then the seeker's match-time filters (blacklist, staffing agencies, salary, work mode,
+    location). A fact the posting does not state never excludes it."""
     haystack = f"{posting.title} {posting.company_name}".lower()
-    return any(kw.lower() in haystack for kw in profile.exclude_keywords)
+    if any(kw.lower() in haystack for kw in profile.exclude_keywords):
+        return True
+    facts = facts or facts_for(posting.title, posting.location, posting.description, posting.posted_at)
+    return filter_reason(profile, posting.company_name, posting.title, posting.location, posting.description,
+                         facts) is not None
 
 
 def _describe(exc: BaseException) -> str:
@@ -125,11 +132,14 @@ def _persist(
     store: Store, found_by_search: list[tuple[list[Posting], list[SeekerTarget]]]
 ) -> None:
     posting_ids: dict[tuple[str, str], int] = {}
+    facts: dict[tuple[str, str], object] = {}
     for found, subscribers in found_by_search:
         for p in found:
             key = (p.source, p.external_id)
             if key not in posting_ids:
                 posting_id = store.upsert_posting(p)
+                facts[key] = facts_for(p.title, p.location, p.description, p.posted_at)
+                store.set_posting_facts(posting_id, facts[key])
                 if p.valid_through:
                     store.set_valid_through(posting_id, p.valid_through)
                 company_id = store.match_company(p.company_name)
@@ -137,7 +147,7 @@ def _persist(
                     store.attach_company(posting_id, company_id)
                 posting_ids[key] = posting_id
             for t in subscribers:
-                if not _excluded(p, t.profile):
+                if not _excluded(p, t.profile, facts[key]):
                     store.link_posting(t.seeker_id, posting_ids[key])
 
 

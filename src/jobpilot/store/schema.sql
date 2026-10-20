@@ -167,3 +167,81 @@ CREATE TABLE IF NOT EXISTS company_feeds (
     endpoint     TEXT NOT NULL,
     added_at     TEXT NOT NULL
 );
+
+-- ---- Fo build list (2026-10-19) -------------------------------------------------------------------------------------
+-- Every submit attempt and its outcome. Append-only: the triggers refuse any UPDATE or DELETE. No foreign keys, so a
+-- merged posting or seeker never needs to rewrite history (the row keeps the id it had).
+CREATE TABLE IF NOT EXISTS submit_audit (
+    id         INTEGER PRIMARY KEY,
+    seeker_id  INTEGER NOT NULL,
+    posting_id INTEGER NOT NULL,
+    action     TEXT NOT NULL,
+    outcome    TEXT NOT NULL,
+    detail     TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_submit_audit_lookup ON submit_audit(seeker_id, posting_id, id);
+CREATE TRIGGER IF NOT EXISTS submit_audit_no_update BEFORE UPDATE ON submit_audit
+BEGIN SELECT RAISE(ABORT, 'submit_audit is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS submit_audit_no_delete BEFORE DELETE ON submit_audit
+BEGIN SELECT RAISE(ABORT, 'submit_audit is append-only'); END;
+
+-- The exact request built for each application (state built). A failed one is parked with that payload and may be
+-- retried once, only with the user's OK; a second failure is final.
+CREATE TABLE IF NOT EXISTS retry_queue (
+    seeker_id  INTEGER NOT NULL,
+    posting_id INTEGER NOT NULL,
+    payload    TEXT NOT NULL,
+    failure    TEXT NOT NULL,
+    state      TEXT NOT NULL DEFAULT 'parked' CHECK (state IN ('built', 'parked', 'retried', 'failed', 'done')),
+    parked_at  TEXT NOT NULL,
+    retried_at TEXT,
+    PRIMARY KEY (seeker_id, posting_id)
+);
+
+-- Suggestions the user must confirm: a status change read from an email, or a calendar hold for an interview.
+CREATE TABLE IF NOT EXISTS proposals (
+    id          INTEGER PRIMARY KEY,
+    seeker_id   INTEGER NOT NULL,
+    posting_id  INTEGER NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('status', 'calendar')),
+    payload     TEXT NOT NULL,
+    evidence    TEXT NOT NULL DEFAULT '',
+    message_ref TEXT NOT NULL,
+    state       TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'accepted', 'dismissed')),
+    created_at  TEXT NOT NULL,
+    decided_at  TEXT,
+    UNIQUE (seeker_id, kind, message_ref)
+);
+
+-- AI-written cover letter drafts. Only approved_text (the text the user approved, edited or not) is ever used.
+CREATE TABLE IF NOT EXISTS cover_letters (
+    seeker_id     INTEGER NOT NULL,
+    posting_id    INTEGER NOT NULL,
+    draft         TEXT NOT NULL,
+    warnings      TEXT NOT NULL DEFAULT '[]',
+    approved_text TEXT,
+    drafted_at    TEXT NOT NULL,
+    approved_at   TEXT,
+    PRIMARY KEY (seeker_id, posting_id)
+);
+
+-- Where an application stopped (the page link and what was already filled), so the next attempt continues from there.
+CREATE TABLE IF NOT EXISTS apply_progress (
+    seeker_id  INTEGER NOT NULL,
+    posting_id INTEGER NOT NULL,
+    step       TEXT NOT NULL,
+    page_url   TEXT,
+    filled     TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (seeker_id, posting_id)
+);
+
+-- Per board: does the user already have a login there (reported by Fo or the user)?
+CREATE TABLE IF NOT EXISTS board_sessions (
+    seeker_id  INTEGER NOT NULL,
+    host       TEXT NOT NULL,
+    state      TEXT NOT NULL CHECK (state IN ('logged_in', 'needs_login', 'blocked')),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (seeker_id, host)
+);

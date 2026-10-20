@@ -57,7 +57,7 @@ builds `build_fo_apply_message(..., batch_approved=True)` and passes it to `ask_
 permission prompt for each Fo call). With the batch approved, Fo submits without a second confirmation, but it STOPS and tells
 you if a form asks for anything not in your resume (salary, notice period, a question, a file) or needs an account or a code.
 Claude records each result: `applied` when Fo says it submitted, `started` with a note when it stopped, so a blocked job is not
-retried blindly. No calendar events are created. Limits: 10 approved requests per day, only jobs on the approved list.
+retried blindly. No calendar events are created. There is no daily limit; only jobs on the approved list.
 Jobs on login boards are listed separately for you to apply to by hand.
 
 ## 3. Apply with Fo (one job at a time, only with your yes)
@@ -78,7 +78,7 @@ Jobs on login boards are listed separately for you to apply to by hand.
 With the inbox running (`python -m jobpilot.inbox --once`), text Fo `jp matches`, then `jp apply <id>`. JobPilot replies with
 the job, a note that your resume is tailored to it, and a one-time code. Reply `jp yes <code>` and Fo applies with the
 tailored resume. The code is random, tied to that one job, works once and expires in two hours; at most 3 are open at a time.
-Login-gated boards are refused (apply by hand). Counts toward the 10-a-day Fo limit. The job is marked `started` the
+Login-gated boards are refused (apply by hand). The job is marked `started` the
 moment the request is built (so it can never go out twice); tell Claude the result to mark it `applied`.
 
 **Who submits.** While review mode is on (the default), Fo fills the form and asks you in its own chat before it submits.

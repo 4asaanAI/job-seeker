@@ -22,11 +22,25 @@ enabled = false
 # transport: api (FO_API_KEY, not released by Wajo yet) | claude (headless `claude -p` on your own Fo
 # login from /mcp, Fo send/poll tools only) | auto (api if the key is set, else claude).
 # transport = "auto"
+# Each morning Fo reads your application emails and JobPilot suggests status changes and interview calendar holds,
+# which you confirm (dashboard To do tab, or my_proposals). Nothing changes on its own.
+# email_scan = true
 
 [google]
 # Keep a "JobPilot Tracker" Google Sheet and tailored resume Google Docs through Fo (needs [fo] enabled). Fo does the
 # work in your own Google account; JobPilot holds no Google credentials for this.
 enabled = false
+
+[notify]
+# The daily digest of new matches: "text" or "email" (sent by Fo to your own number or address only).
+channel = "text"
+# Score threshold for the digest; leave it out to use each seeker's own min_score.
+# min_score = 75
+
+[freshness]
+# Matches older than this (by the posting's date, else when JobPilot first saw it) drop out of matches and digests.
+# Tracker rows are never deleted: an aged-out match becomes "stale" on the sheet.
+max_age_days = 14
 
 [apply]
 # Use a facts-only cover letter (built from your own resume) where an application form REQUIRES one. Off by default.

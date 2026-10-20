@@ -98,8 +98,9 @@ def test_export_creates_formats_and_directly_shares_one_way_view():
     assert result.sheet_title == "Sheet1"
     assert result.row_count == 1
     update = next(kwargs for kind, kwargs in sheets._spreadsheets.calls if kind == "update")
-    assert update["body"]["values"][0] == list(HEADERS)
-    assert update["body"]["values"][1][4] == ""
+    assert update["body"]["values"][0][0].startswith("Summary: ")             # the summary row sits above the header
+    assert update["body"]["values"][1] == list(HEADERS)
+    assert update["body"]["values"][2][4] == ""
     permission = drive.calls[0]
     assert permission["body"] == {
         "type": "user", "role": "reader", "emailAddress": "a@example.test"

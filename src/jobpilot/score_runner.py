@@ -112,6 +112,8 @@ def score_backlog(store: Store, seeker_id: int, profile, profile_path: Path,
             if failed_batches >= 2:  # the same jobs would come back forever
                 break
     left = len(store.unscored_jobs(seeker_id, 100_000))
+    from .ranking import reweight
+    reweight(store, seeker_id, profile)                # filters and learned adjustments apply to the new scores too
     return {"seeker_id": seeker_id, "scored": scored, "left": left}
 
 
