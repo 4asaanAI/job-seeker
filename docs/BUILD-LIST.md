@@ -94,8 +94,9 @@ bridge log records only ids and flags, never answers, CSV text or URLs.
 
 Kept from Fo on purpose, because each one removes your per-application OK, rewrites your records or widens who JobPilot serves:
 `set_review_mode`, batch planning and approval, adding seekers, the unattended search and score writes, the service-account
-sheet exporter, `import_applications` (it can rewrite real records; use the dashboard or Claude) and approving a formal
-answer (you approve the exact text you are shown, in the dashboard).
+sheet exporter, `import_applications` and `save_base_resume` (they rewrite your records or work history; use the dashboard or
+Claude) and approving a formal answer (you approve the exact text you are shown, in the dashboard). Fo can write a formal
+draft but not replace one you already approved.
 
 What Fo can and cannot do on its own, checked by tests:
 - It can save an answer you told it, but never replace one; the answer goes into forms as you typed it until you approve its

@@ -48,6 +48,8 @@ function renderStatus(s) {
   if (!s || !s.ok) return;
   el.append(h("span", {}, `Last 7 days: ${s.found} found, ${s.scored} scored, ${s.applied} applied`));
   if (s.next_scheduled_refresh) el.append(h("span", {}, `Next refresh: ${s.next_scheduled_refresh.replace("T", " ")}`));
+  if (s.answers_awaiting_formal_approval) el.append(h("span", { class: "warn" }, `${s.answers_awaiting_formal_approval} answer(s) go into forms as typed until you approve a formal version`));
+  if (s.answers_saved_by_fo_7d) el.append(h("span", { class: "warn" }, `Fo saved ${s.answers_saved_by_fo_7d} answer(s) this week: check Search profile`));
   if (s.in_flight) el.append(h("span", { class: "warn" }, `In flight: job ${s.in_flight}`));
   for (const w of s.warnings || []) el.append(h("span", { class: "warn" }, w));
   if ((s.errors_last_24h || []).length) el.append(h("span", { class: "bad" }, `${s.errors_last_24h.length} error(s) in the last day`));

@@ -1338,8 +1338,11 @@ def build_tools(
                     return {"ok": False, "error": "these values are not in the uploaded "
                             "resume; copy them exactly or leave them out",
                             "unverified": missing}
-                if target.is_file():                    # one step back if a save drops or reorders something
-                    (target.parent / "base_resume.previous.yaml").write_bytes(target.read_bytes())
+                if target.is_file():                    # dated copies (newest 10 kept): one bad save never erases the last good one
+                    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+                    (target.parent / f"base_resume.{stamp}.bak.yaml").write_bytes(target.read_bytes())
+                    for old in sorted(target.parent.glob("base_resume.*.bak.yaml"))[:-10]:
+                        old.unlink()
                 draft.replace(target)
             finally:
                 draft.unlink(missing_ok=True)

@@ -357,7 +357,8 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         """How many jobs were found, scored, shown and applied to in the last 7 days."""
         out = inner["my_status"](pin)
         keep = ("ok", "window", "found", "scored", "shown", "applied", "total_jobs", "error", "code",
-                "next_scheduled_refresh", "warnings", "in_flight", "parked_failures", "proposals_to_confirm")
+                "next_scheduled_refresh", "warnings", "in_flight", "parked_failures", "proposals_to_confirm",
+                "answers_awaiting_formal_approval", "answers_saved_by_fo_7d")
         kept = {k: v for k, v in out.items() if k in keep}
         if out.get("ok"):                          # counts only: error details can hold paths and job text
             kept["errors_last_24h"] = len(out.get("errors_last_24h") or [])
@@ -500,7 +501,8 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         out = inner["pre_submit_check"](pin, int(posting_id), fields)
         if out.get("checklist"):
             out["checklist"] = [{**c, "field": clean(c["field"], 60)} for c in out["checklist"]]
-        return {k: v for k, v in out.items() if k in ("ok", "ready", "problems", "checklist", "note", "error", "code")}
+        return {k: v for k, v in out.items() if k in ("ok", "ready", "problems", "checklist", "note", "error", "code",
+                                                       "answers_waiting_for_formal_approval")}
 
     @guarded("report_blocked")
     def report_blocked(posting_id: int, kind: str, page_url: str | None = None, note: str = "") -> dict:

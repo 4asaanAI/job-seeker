@@ -42,7 +42,7 @@ def test_fo_has_every_feature_but_not_the_switches_that_remove_the_users_ok(env)
                  "save_answer", "retry_failed", "refresh_tracker_sheet", "update_tracker_row", "audit_log"):
         assert must in tools, must
     for never in ("set_review_mode", "plan_apply_batch", "approve_batch_items", "review_batch", "add_seeker", "discover",
-                  "import_applications", "approve_formal_answer",
+                  "import_applications", "approve_formal_answer", "save_base_resume",
                   "record_score", "sync_google_sheet", "_apply_core", "register_me"):
         assert never not in tools, never
     for name, fn in tools.items():
@@ -232,4 +232,17 @@ def test_text_inside_results_loses_unsafe_links():
 
 def test_the_payload_digest_and_save_resume_are_reachable_and_backed_up(env):
     store, sid, ids, tools = env
-    assert "record_notification" in tools and "save_base_resume" in tools
+    assert "record_notification" in tools and "save_base_resume" not in tools
+
+
+def test_the_waiting_answers_reach_fo_and_fo_cannot_cancel_an_approval(env):
+    store, sid, ids, tools = env
+    from jobpilot import vault
+    folder = Path(store.get_seeker(sid).profile_path).parent
+    tools["save_answer"]("notice_period", "30 days")
+    assert tools["my_status"]()["answers_awaiting_formal_approval"] >= 1
+    vault.set_formal_draft(folder, "notice_period", "My notice period is 30 days.")
+    vault.approve_formal(folder, "notice_period")
+    refused = tools["draft_formal_answer"]("notice_period")
+    assert refused["ok"] is False and "dashboard" in refused["error"]
+    assert vault.approved_formal(folder)                                   # the approval survived Fo's attempt

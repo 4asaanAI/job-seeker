@@ -32,20 +32,20 @@ PASSTHROUGH = (
     "posting_detail", "source_report", "my_sources", "my_history", "my_dashboard", "get_followups", "my_applications",
     "add_target_company", "investigate_posting", "verify_still_open", "check_company_careers", "company_openings",
     "web_search", "web_fetch", "web_crawl", "web_extract", "web_research",
-    "resume_facts", "tailor_resume", "render_resume", "render_resume_pdf", "my_resumes", "save_base_resume",
+    "resume_facts", "tailor_resume", "render_resume", "render_resume_pdf", "my_resumes",
     "manual_apply_packet", "audit_log", "my_retry_queue", "draft_cover_letter",
     "propose_status_from_emails", "my_proposals", "snapshot_tracker", "funnel_report", "record_notification",
-    "application_followups", "draft_followup", "interview_prep", "reweight_matches", "draft_formal_answer",
+    "application_followups", "draft_followup", "interview_prep", "reweight_matches",
     "build_fo_message", "build_fo_resume_doc_message", "build_fo_cover_letter_message", "build_fo_deck_message",
     "build_fo_sweep_replies_message", "build_fo_reply_check_message",
 )
 
 
 EXTRA = ("available_sources", "set_job_status", "save_answer", "approve_cover_letter", "decide_proposal",
-         "refresh_tracker_sheet")
+         "refresh_tracker_sheet", "draft_formal_answer")
 # Withheld from Fo on purpose (the user does these in the dashboard or with Claude): import_applications (it can rewrite
-# real records), approve_formal_answer (the user approves the exact text they are shown), save_base_resume's overwrite
-# of an existing resume is kept but backed up.
+# real records), approve_formal_answer (the user approves the exact text they are shown), save_base_resume (it
+# replaces the work history every application sends; the user saves a resume through Claude).
 FORWARD = {"started": {"applied"}, "applied": {"interview", "rejected"}, "interview": {"rejected", "offer"}}
 NAMES = PASSTHROUGH + EXTRA
 
@@ -165,6 +165,12 @@ def build_more(inner: dict, pin: int, store, guarded) -> dict:
                                          "application. The user decides it in the dashboard."}
         return shape(inner["decide_proposal"](pin, int(proposal_id), bool(accept)))
 
+    @guarded("draft_formal_answer")
+    def draft_formal_answer(question: str) -> dict:
+        """Write the formal, polite version of one saved answer for the user to read and approve in the dashboard. Not
+        allowed once the user approved a version (they rewrite it in the dashboard)."""
+        return shape(inner["draft_formal_answer"](pin, question, False))
+
     @guarded("refresh_tracker_sheet")
     def refresh_tracker_sheet(export_xlsx: bool = False) -> dict:
         """The request to refresh the WHOLE JobPilot Tracker sheet (up to 100 rows; slow). Do it yourself. For one job use
@@ -172,7 +178,7 @@ def build_more(inner: dict, pin: int, store, guarded) -> dict:
         built = inner["build_fo_tracker_message"](pin, export_xlsx=bool(export_xlsx))
         return {k: v for k, v in built.items() if k in ("ok", "message", "rows", "error", "code", "note")}
 
-    tools.update({f.__name__: f for f in (available_sources, set_job_status, save_answer, approve_cover_letter,
+    tools.update({f.__name__: f for f in (draft_formal_answer, available_sources, set_job_status, save_answer, approve_cover_letter,
                                           decide_proposal, refresh_tracker_sheet)})
     return tools
 

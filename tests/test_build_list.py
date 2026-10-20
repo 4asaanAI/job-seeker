@@ -772,19 +772,21 @@ def test_pre_submit_check_and_status_list_answers_still_waiting_for_a_formal_ver
     assert tools["my_status"](sid)["answers_awaiting_formal_approval"] >= 1
 
 
-def test_saving_a_base_resume_keeps_one_step_back(env):
+def test_saving_a_base_resume_keeps_dated_backups_so_two_saves_never_erase_the_original(env):
     store, sid, ids, tools, tmp_path = env
     folder = tmp_path / "d" / "seekers" / "avery"
-    (folder / "resume_source.txt").write_text(tools["resume_facts"](sid)["name"] + "\n" + "\n".join(
-        [tools["resume_facts"](sid)["headline"]] + [e["employer"] + " " + e["title"] + " " + e["dates"] for e in
-                                                  tools["resume_facts"](sid)["experience"]]), encoding="utf-8")
     facts = tools["resume_facts"](sid)
+    (folder / "resume_source.txt").write_text("\n".join(
+        [facts["name"], facts["headline"]] + [f"{e['employer']} {e['title']} {e['dates']}" for e in facts["experience"]]),
+        encoding="utf-8")
+    original = (folder / "base_resume.yaml").read_bytes()
     resume = {"name": facts["name"], "headline": facts["headline"], "contact": [], "experience": [
         {"id": e["id"], "employer": e["employer"], "title": e["title"], "dates": e["dates"], "bullets": []}
         for e in facts["experience"]], "education": [], "skills": []}
-    out = tools["save_base_resume"](sid, resume)
-    assert out["ok"], out
-    assert (folder / "base_resume.previous.yaml").is_file()
+    assert tools["save_base_resume"](sid, resume)["ok"]
+    assert tools["save_base_resume"](sid, {**resume, "skills": []})["ok"]
+    backups = sorted(folder.glob("base_resume.*.bak.yaml"))
+    assert len(backups) == 2 and backups[0].read_bytes() == original            # the user's own version is still there
 
 
 def test_the_writer_has_a_generous_daily_cap(env):

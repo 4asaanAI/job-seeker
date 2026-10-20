@@ -153,9 +153,9 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
             return {"formal_draft": None, "note": f"no formal version yet ({str(exc)[:80]}); the answer is used as typed"}
         return {"formal_draft": text, "formal_warnings": warnings,
                 "note": "Show the user the formal version. Forms use it only after the user approves exactly this text "
-                        "(approve_formal_answer, or the dashboard); until then the answer goes in as typed."}
+                        "in the dashboard (Search profile); until then the answer goes in as typed."}
 
-    def draft_formal_answer(seeker_id: int, question: str) -> dict:
+    def draft_formal_answer(seeker_id: int, question: str, replace_approved: bool = True) -> dict:
         """(Re)write the formal, polite version of one saved answer. The answer is used as typed until the user approves
         the formal text. Show the text and its warnings (changed numbers, dropped limits, flipped refusals) to the user."""
         try:
@@ -165,6 +165,8 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
             raw = vault.load_answers(folder).get(q)
             if raw is None:
                 raise ValueError("no saved answer for that question")
+            if not replace_approved and q in vault.approved_formal(folder):
+                raise ValueError("this answer's formal version is already approved; the user rewrites it in the dashboard")
             out = _formal_draft(folder, q, raw, sid)
             return {"ok": out.get("formal_draft") is not None, "seeker_id": sid, "question": q, **out}
         except (OSError, PermissionError, ValueError) as exc:
