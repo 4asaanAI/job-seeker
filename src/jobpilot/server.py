@@ -838,6 +838,7 @@ def build_tools(
         resume_file: bool | None = None,
         preview: bool = False,
         user_approved: bool = False,
+        trusted_answers: bool = True,
     ) -> dict:
         """Build the request that asks Fo to apply to ONE job. SENDS NOTHING.
 
@@ -926,7 +927,7 @@ def build_tools(
             if names is None:
                 raise ValueError("this posting's title or company looks unsafe; apply to it by hand")
             given = dict(vet_answers(answers))          # this job's own answers keep the per-request limits
-            vetted_answers = list((vault.merged_answers(vault.load_answers(_base_resume_path(sid).parent), given)
+            vetted_answers = list((vault.merged_answers(vault.effective_answers(_base_resume_path(sid).parent), given)
                                    or {}).items())
             base = load_base_resume(_base_resume_path(sid))
             tailored = experience_order is None and skills is None and bullet_order is None
@@ -948,37 +949,45 @@ def build_tools(
                                     posting_id=int(posting_id),
                                     answers=vetted_answers or None)
             message = _resume_notes(sid, int(posting_id), host) + message
-            if phone_code:
-                with store._lock:                       # only now, with the message built: check, consume and mark started as one step
-                    if not _phone_approval_ok(sid, int(posting_id), phone_code):
-                        raise ValueError("that approval code is not valid for this job, was already used, or has expired")
-                    if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
-                           for a in store.applications(sid, 500)):
-                        raise ValueError("an application for this job is already recorded")
-                    store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
-                    store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
-            if batch_approved or phone_code:
-                store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
-                # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
-                if batch_approved:
-                    store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
-            if preview:
-                return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "route": classify_route(link)[0],
-                        "job_terms_missing_from_resume": gaps, "cover_letter_if_required": letter is not None,
-                        "message": message, "answers": dict(vetted_answers), "resume_text": text,
-                        "letter_text": letter, "preview": True, "note": "A check only: nothing was built for sending."}
-            if user_approved:                              # approved in the dashboard with an authenticator code
-                store.record_application(sid, int(posting_id), "started", "approved in the dashboard; outcome unknown")
-            # one application in flight from here until its outcome; the exact request is kept for one retry
-            store.audit(sid, int(posting_id), "request_built", "batch" if batch_approved else
-                        "phone" if phone_code else "dashboard" if user_approved else "single", host)
-            store.save_payload(sid, int(posting_id), message)
-            store.record_event("apply_host", json.dumps({"host": host, "posting_id": int(posting_id)}), sid, int(posting_id))
-            if vetted_answers:
-                given = json.dumps({"posting_id": int(posting_id), "answers": dict(vetted_answers)})
-                if len(given) <= 2000:
-                    store.record_event("apply_answers", given, sid, int(posting_id))
-            _save_text_version(sid, int(posting_id), text, experience_order, skills, bullet_order)
+            claimed = False
+            if not preview:                                # one in flight: claim the slot atomically, across processes
+                store.begin_application(sid, int(posting_id), "batch" if batch_approved else "phone" if phone_code
+                                        else "dashboard" if user_approved else "single", host)
+                claimed = True
+            try:
+                if phone_code:
+                    with store._lock:                       # only now, with the message built: check, consume and mark started as one step
+                        if not _phone_approval_ok(sid, int(posting_id), phone_code):
+                            raise ValueError("that approval code is not valid for this job, was already used, or has expired")
+                        if any(a["posting_id"] == int(posting_id) and a["status"] != "withdrawn"
+                               for a in store.applications(sid, 500)):
+                            raise ValueError("an application for this job is already recorded")
+                        store.record_event("phone_apply_used", json.dumps({"code": phone_code}), sid, int(posting_id))
+                        store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                if batch_approved or phone_code:
+                    store.record_event("fo_apply_batch", f"posting {int(posting_id)}", sid, int(posting_id))
+                    # outcome unknown until Fo reports: mark it so a dead session can never re-send the same application
+                    if batch_approved:
+                        store.record_application(sid, int(posting_id), "started", "request built; outcome unknown")
+                if preview:
+                    return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "route": classify_route(link)[0],
+                            "job_terms_missing_from_resume": gaps, "cover_letter_if_required": letter is not None,
+                            "message": message, "answers": dict(vetted_answers), "resume_text": text,
+                            "letter_text": letter, "preview": True, "note": "A check only: nothing was built for sending."}
+                if user_approved:                              # approved in the dashboard with an authenticator code
+                    store.record_application(sid, int(posting_id), "started", "approved in the dashboard; outcome unknown")
+                # the exact request is kept for one retry
+                store.save_payload(sid, int(posting_id), message)
+                store.record_event("apply_host", json.dumps({"host": host, "posting_id": int(posting_id)}), sid, int(posting_id))
+                if given and trusted_answers:       # answers the bridge (Fo) supplied are never certified as the user's own
+                    shown = json.dumps({"posting_id": int(posting_id), "answers": given})
+                    if len(shown) <= 2000:
+                        store.record_event("apply_answers", shown, sid, int(posting_id))
+                _save_text_version(sid, int(posting_id), text, experience_order, skills, bullet_order)
+            except BaseException:
+                if claimed:
+                    store.audit(sid, int(posting_id), "cancelled", "build failed")     # free the slot: nothing was sent
+                raise
         except (OSError, PermissionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         route, route_note = classify_route(link)

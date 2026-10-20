@@ -189,8 +189,10 @@ def parse_scan_reply(text: str) -> list[dict]:
             continue
         if not isinstance(item, dict) or not item.get("id"):
             continue
-        out.append({"id": "fo:" + str(item["id"])[:150], "from": str(item.get("from") or "")[:200],
-                    "subject": str(item.get("subject") or "")[:200], "snippet": str(item.get("snippet") or "")[:300]})
+        sender, subject, snippet = (str(item.get(k) or "")[:300] for k in ("from", "subject", "snippet"))
+        # Fo may number its messages 1, 2, 3 every day: the reference is the content, so a later email is never dropped
+        ref = "fo:" + hashlib.sha256(f"{item['id']}|{sender}|{subject}|{snippet}".encode()).hexdigest()[:24]
+        out.append({"id": ref, "from": sender[:200], "subject": subject[:200], "snippet": snippet})
         if len(out) >= MAX_SCAN:
             break
     return out

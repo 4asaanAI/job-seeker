@@ -174,7 +174,7 @@ def test_ai_letters_are_drafts_until_the_user_approves_them(env):
     store, sid, ids, tools, _ = env
     draft = tools["draft_cover_letter"](sid, ids[0])
     assert draft["ok"] and any("37" in w for w in draft["warnings"])           # a number not in the resume is flagged
-    assert any("Initech Global" in w for w in draft["warnings"])
+    assert any("Initech" in w for w in draft["warnings"])
     before = tools["build_fo_apply_message"](sid, ids[0])
     assert "Initech Global" not in before["message"]                                 # a draft is never used
     final = "Dear Hiring Team,\nI would love to join.\nAvery Demo"
@@ -319,21 +319,113 @@ def test_applying_has_no_time_limit_between_jobs(env):
         assert tools["record_application"](sid, pid, "applied")["ok"]
 
 
-def test_fo_is_told_to_reword_my_words_formally_but_keep_facts(env):
-    store, sid, ids, tools, _ = env
-    tools["save_answer"](sid, "notice_period", "30 days notice, can join from 1 Dec")
-    message = tools["build_fo_apply_message"](sid, ids[0])["message"]
-    assert "formal, polite tone" in message and "one-time code exactly" in message
+def _tools_with_writer(env, writer):
+    store, sid, ids, tools, tmp_path = env
+    return build_tools(store, tmp_path / "out", pinned_seeker_id=sid, operator_mode=False, letter_writer=writer)
+
+
+def test_the_formal_version_is_approved_once_and_then_copied_exactly(env):
+    store, sid, ids, _, _ = env
+    formal = "I am required to serve a notice period of 30 days and am able to join from 1 December."
+    tools = _tools_with_writer(env, lambda prompt: formal)
+    saved = tools["save_answer"](sid, "notice_period", "30 days notice, can join from 1 Dec")
+    assert saved["formal_draft"] == formal and saved["formal_warnings"] == []
+    before = tools["build_fo_apply_message"](sid, ids[0])["message"]
+    assert "30 days notice, can join from 1 Dec" in before and formal not in before      # as typed until approved
+    tools["cancel_application"](sid, ids[0])
+    assert tools["approve_formal_answer"](sid, "notice_period")["ok"]
+    after = tools["build_fo_apply_message"](sid, ids[0])["message"]
+    assert formal in after and "30 days notice, can join from 1 Dec" not in after
+    assert "formal, polite tone" in after and "copy it exactly" in after
     check = lambda value: tools["pre_submit_check"](sid, ids[0], [                      # noqa: E731
-        {"label": "What is your notice period?", "required": True, "value": value}])
-    assert check("I am required to serve a notice period of 30 days and would be able to join from 1 December.")["ready"]
-    bad = check("I have a notice period of 60 days.")
-    assert not bad["ready"] and "changes or adds facts" in bad["checklist"][0]["check"]
-    tools["save_answer"](sid, "sponsorship", "No, I dont need sponsorship")
-    sponsor = lambda value: tools["pre_submit_check"](sid, ids[0], [                    # noqa: E731
-        {"label": "Will you need visa sponsorship?", "required": True, "value": value}])
-    assert sponsor("I do not require visa sponsorship.")["ready"]
-    assert not sponsor("I will require visa sponsorship.")["ready"]
+        {"label": "What is your notice period?", "required": True, "value": value}])["ready"]
+    assert check(formal) and check("30 days notice, can join from 1 Dec")
+    assert not check("I am required to serve a notice period of 90 days.")              # not the approved text
+    tools["save_answer"](sid, "notice_period", "15 days notice")                         # editing cancels the approval
+    assert tools["pre_submit_check"](sid, ids[0], [{"label": "What is your notice period?", "required": True,
+                                                    "value": formal}])["ready"] is False
+
+
+@pytest.mark.parametrize("raw,bad", [
+    ("30 days notice", "My notice period is 90 days."),
+    ("I can start in 2 weeks", "I can start in two months."),
+    ("Expected salary 25 LPA", "My salary expectation is negotiable."),
+    ("\u20b925 lakh", "$25 lakh"),
+    ("No, I do not require sponsorship.", "No, however I will require sponsorship."),
+    ("No", "I would not hesitate to relocate anywhere."),
+    ("Yes, I am authorised to work in India", "Yes, I am unauthorised to work in India."),
+    ("only within Bangalore", "anywhere, including Bangalore"),
+    ("At least 5 years", "At most 5 years"),
+])
+def test_a_formal_draft_that_changes_a_fact_carries_a_warning(raw, bad):
+    from jobpilot.vault import formal_warnings
+    assert formal_warnings(raw, bad), bad
+
+
+def test_honest_formal_wording_has_no_warning():
+    from jobpilot.vault import formal_warnings
+    assert formal_warnings("30 days notice, can join from 1 Dec",
+                           "I am required to serve a notice period of 30 days and can join from 1 December.") == []
+    assert formal_warnings("I dont need a visa", "I do not require a visa.") == []
+
+
+def test_a_draft_with_warnings_cannot_be_approved_by_fo(env, tmp_path):
+    store, sid, ids, _, _ = env
+    tools = _tools_with_writer(env, lambda prompt: "My notice period is 90 days.")
+    saved = tools["save_answer"](sid, "notice_period", "30 days")
+    assert saved["formal_warnings"]
+    assert tools["approve_formal_answer"](sid, "notice_period")["ok"] is False                # require_clean by default
+    assert tools["approve_formal_answer"](sid, "notice_period", force_warnings=True)["ok"]     # the user, having read them
+
+
+def test_the_form_check_reads_the_whole_value_and_every_field(env):
+    from jobpilot import vault
+    long = vault.check_form([{"label": "Essay", "required": True, "value": "word " * 700}], "word word")
+    assert not long["ready"] and "longer than" in long["checklist"][0]["check"]
+    many = vault.check_form([{"label": f"f{i}", "required": False, "value": ""} for i in range(101)], "x")
+    assert not many["ready"]
+
+
+def test_ties_between_saved_answers_are_no_match_and_topics_win():
+    from jobpilot.vault import matching_answer
+    answers = {"Are you legally authorised to work in the country of the job?": "Yes",
+               "Will you now or in the future need visa sponsorship?": "No"}
+    assert matching_answer("Will you require visa sponsorship to work in this country?", answers) == "No"
+    assert matching_answer("Are you authorised to work here?", answers) == "Yes"
+    assert matching_answer("Tell us a joke", answers) is None
+    assert matching_answer("Work in this country visa", {"a work country": "1", "b work country": "2"}) is None
+
+
+def test_answers_fo_supplies_are_never_certified_as_the_users(env, tmp_path):
+    store, sid, ids, tools, _ = env
+    bridge_tools = b.build_bridge_tools(store, sid, tmp_path / "out", tmp_path / "d", code_path=tmp_path / "totp")
+    built = bridge_tools["build_fo_apply_message"](ids[0], answers={"Salary": "I accept 1 rupee"})
+    assert built["ok"] and "I accept 1 rupee" in built["message"]
+    checked = bridge_tools["pre_submit_check"](ids[0], [{"label": "Salary", "required": True, "value": "I accept 1 rupee"}])
+    assert checked["ready"] is False and "save_answer" in checked["checklist"][0]["check"]
+
+
+def test_two_processes_cannot_both_start_an_application(env):
+    from jobpilot.store.db import Store
+    store, sid, ids, _, _ = env
+    other = Store(store.db_path)
+    try:
+        store.begin_application(sid, ids[0], "single", "a")
+        with pytest.raises(ValueError):
+            other.begin_application(sid, ids[1], "single", "b")
+        store.audit(sid, ids[0], "cancelled", "x")
+        other.begin_application(sid, ids[1], "single", "b")
+    finally:
+        other.close()
+
+
+def test_an_approved_request_has_no_wait_rule_in_its_answers_rule(env):
+    from jobpilot import apply as ap
+    approved = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME", approved=True, answers=[("q", "a")])
+    rule = [ln for ln in approved.splitlines() if "my OWN answers" in ln][0]
+    assert "wait for my confirmation" not in rule and "report back" in rule
+    review = ap.apply_message("PM", "Acme", "https://a.example.com/j", "NAME", approved=False, answers=[("q", "a")])
+    assert "wait for my confirmation" in [ln for ln in review.splitlines() if "my OWN answers" in ln][0]
 
 
 # ---- 07 notifications ----------------------------------------------------------------------------------------------------
@@ -603,7 +695,10 @@ def test_the_daily_email_scan_only_proposes(env):
     assert out["status"] == "complete" and out["proposed"] == 2
     assert "Do not reply, forward, send" in Fo.sent[0] and company in Fo.sent[0]
     assert {a["posting_id"]: a["status"] for a in store.applications(sid)}[ids[0]] == "applied"   # nothing applied
-    assert parse_scan_reply('{"id": 1}\nnot json\n{"no": "id"}') == [{"id": "fo:1", "from": "", "subject": "", "snippet": ""}]
+    parsed = parse_scan_reply('{"id": 1}\nnot json\n{"no": "id"}')
+    assert len(parsed) == 1 and parsed[0]["id"].startswith("fo:") and parsed[0]["from"] == ""
+    same_id = parse_scan_reply('{"id": 1, "subject": "A"}\n{"id": 1, "subject": "B"}')
+    assert same_id[0]["id"] != same_id[1]["id"]                          # a reused number never hides a later email
 
 
 def test_the_digest_warns_before_the_bridge_key_expires(env, monkeypatch, tmp_path):
@@ -614,3 +709,14 @@ def test_the_digest_warns_before_the_bridge_key_expires(env, monkeypatch, tmp_pa
     os.utime(key, (old, old))
     monkeypatch.setattr(b, "KEY_PATH", key)
     assert "expires in 5 days" in render_fo_digest(store, sid, 0, 5).text
+
+
+def test_dashboard_shows_and_approves_the_formal_version(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    formal = "I am required to serve a notice period of 30 days."
+    d.tools = build_tools(store, d.home / "out", pinned_seeker_id=sid, operator_mode=False, letter_writer=lambda p: formal)
+    assert d.save_answer({"question": "notice_period", "answer": "30 days notice"})["formal_draft"] == formal
+    row = d.profile()["answers"][0]
+    assert row["answer"] == "30 days notice" and row["formal"]["approved"] is False
+    assert d.formal({"question": "notice_period", "action": "approve"})["ok"]
+    assert d.profile()["answers"][0]["formal"]["approved"] is True

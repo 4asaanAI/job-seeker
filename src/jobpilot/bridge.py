@@ -459,7 +459,7 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
             if waiting is not None and waiting != int(posting_id):
                 return {"ok": False, "error": f"job {waiting} is still waiting for its approval code; finish it first "
                                               "(or wait two hours)"}
-            out = inner["_apply_core"](pin, int(posting_id), answers=answers)
+            out = inner["_apply_core"](pin, int(posting_id), answers=answers, trusted_answers=False)
             if not out.get("ok"):
                 return out
             message = out["message"]

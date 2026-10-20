@@ -203,9 +203,16 @@ class Dashboard:
         keys = ("headline", "location", "also_search", "search_terms", "seniority", "work_modes", "locations",
                 "salary_floor", "salary_currency", "blacklist_companies", "whitelist_companies",
                 "exclude_staffing_agencies", "source_weights", "min_score", "followup_days", "sources")
+        from .. import vault
         form = self.tools["form_profile"](self.sid)
+        folder = self.tools["_vault_folder"](self.sid)
+        formal = vault.load_formal(folder)
+        answers = [{"question": q, "answer": a,
+                    "formal": ({"text": f["text"], "approved": bool(f.get("approved")), "warnings": f.get("warnings", [])}
+                               if (f := formal.get(q)) and f.get("for") == a else None)}
+                   for q, a in vault.load_answers(folder).items()]
         return {"ok": True, "profile": {k: data.get(k) for k in keys},
-                "answers": form.get("answers", {}), "not_answered_yet": form.get("not_answered_yet", []),
+                "answers": answers, "not_answered_yet": form.get("not_answered_yet", []),
                 "sources_available": [s["source"] for s in self.tools["available_sources"]()]}
 
     def save_profile(self, body: dict) -> dict:
@@ -217,6 +224,13 @@ class Dashboard:
 
     def save_answer(self, body: dict) -> dict:
         return self.tools["save_answer"](self.sid, str(body.get("question") or ""), str(body.get("answer") or ""))
+
+    def formal(self, body: dict) -> dict:
+        """Write a formal version of a saved answer, or approve the one on screen (the user has read its warnings)."""
+        question = str(body.get("question") or "")
+        if body.get("action") == "approve":
+            return self.tools["approve_formal_answer"](self.sid, question, True)
+        return self.tools["draft_formal_answer"](self.sid, question)
 
 
 def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, ...] = ("127.0.0.1", "localhost")):
@@ -340,6 +354,10 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
         data = await body(request)
         return lambda: dash.save_answer(data)
 
+    async def api_formal(request: Request):
+        data = await body(request)
+        return lambda: dash.formal(data)
+
     routes = [
         Route("/login", guard(login_page, api=False, public=True), methods=["GET"]),
         Route("/login", guard(login, api=False, public=True), methods=["POST"]),
@@ -360,6 +378,7 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
         Route("/api/proposal/{proposal:int}", guard(api_proposal), methods=["POST"]),
         Route("/api/profile", guard(api_profile), methods=["GET", "POST"]),
         Route("/api/answer", guard(api_answer), methods=["POST"]),
+        Route("/api/answer/formal", guard(api_formal), methods=["POST"]),
     ]
     return Starlette(routes=routes)
 

@@ -22,7 +22,7 @@ FO_URL = "https://mcp.api.wajo.ai/fo"
 FO_HOST = "mcp.api.wajo.ai"
 MAX_BODY = 1_000_000
 MAX_MESSAGE = 1500
-MAX_REPLY = 6000          # Fo's own reply text kept for pattern matching (a sheet link, an email scan); never followed
+MAX_REPLY = 12000         # Fo's own reply text kept for pattern matching (a sheet link, an email scan); never followed
 POLL_WAIT_SECONDS = 40
 
 

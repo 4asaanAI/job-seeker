@@ -34,14 +34,14 @@ PASSTHROUGH = (
     "resume_facts", "tailor_resume", "render_resume", "render_resume_pdf", "my_resumes", "save_base_resume",
     "manual_apply_packet", "audit_log", "my_retry_queue", "retry_failed", "draft_cover_letter",
     "propose_status_from_emails", "my_proposals", "snapshot_tracker", "import_applications", "funnel_report",
-    "application_followups", "draft_followup", "interview_prep", "reweight_matches",
+    "application_followups", "draft_followup", "interview_prep", "reweight_matches", "draft_formal_answer",
     "build_fo_message", "build_fo_resume_doc_message", "build_fo_cover_letter_message", "build_fo_deck_message",
     "build_fo_sweep_replies_message", "build_fo_reply_check_message",
 )
 
 
 EXTRA = ("available_sources", "set_job_status", "save_answer", "approve_cover_letter", "decide_proposal",
-         "refresh_tracker_sheet")
+         "refresh_tracker_sheet", "approve_formal_answer")
 NAMES = PASSTHROUGH + EXTRA
 
 
@@ -153,7 +153,13 @@ def build_more(inner: dict, pin: int, store, guarded) -> dict:
         built = inner["build_fo_tracker_message"](pin, export_xlsx=bool(export_xlsx))
         return {k: v for k, v in built.items() if k in ("ok", "message", "rows", "error", "code", "note")}
 
-    tools.update({f.__name__: f for f in (available_sources, set_job_status, save_answer, approve_cover_letter,
+    @guarded("approve_formal_answer")
+    def approve_formal_answer(question: str) -> dict:
+        """Approve the stored formal version of a saved answer exactly as drafted, after the user said it is fine. A draft
+        with warnings can only be approved by the user in the dashboard."""
+        return shape(inner["approve_formal_answer"](pin, question, False))
+
+    tools.update({f.__name__: f for f in (approve_formal_answer, available_sources, set_job_status, save_answer, approve_cover_letter,
                                           decide_proposal, refresh_tracker_sheet)})
     return tools
 

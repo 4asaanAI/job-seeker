@@ -122,11 +122,21 @@ def deliver(store: Store, cfg, home: Path, *, bot_factory, fo_factory, tracker_t
                     from .profiles import seeker_min_score
                     threshold = seeker_min_score(store.get_seeker(cfg.fo_seeker_id).profile_path, home)
                 try:
-                    print(f"fo digests sent: {push_digests(store, send, min_score=threshold, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)}")
+                    sent_digests = push_digests(store, send, min_score=threshold, channel='fo', seeker_ids=ids, recipient=lambda s: s.id, render=render_fo_digest)
+                    print(f"fo digests sent: {sent_digests}")
+                    from .fo import key_warnings
+                    warn = key_warnings()
+                    if warn and not sent_digests and not store.recent_event_details(cfg.fo_seeker_id, "key_warning_sent", 20, 1):
+                        send(cfg.fo_seeker_id, "\n".join(warn))        # a day with no new matches still hears about a key
+                        store.record_event("key_warning_sent", warn[0][:200], cfg.fo_seeker_id)
+                        print("key warning sent")
                     print(f"fo follow-ups sent: {push_followups(store, send, render_fo_followups, channel='fo', seeker_ids=ids)}")
                     fo_id = cfg.fo_seeker_id
                 finally:
-                    if getattr(cfg, "email_scan", False):     # its own guard; only ever makes proposals
+                    if getattr(cfg, "email_scan", False) and not isinstance(fo_client, FoClient):
+                        # the headless relay would read Fo's reply (email text) with a model that can message Fo
+                        print("email scan: skipped, it needs the direct Fo API (set FO_API_KEY, transport api or auto)")
+                    elif getattr(cfg, "email_scan", False):   # its own guard; only ever makes proposals
                         try:
                             from .tracking import scan_emails
                             print(f"email scan: {scan_emails(store, cfg.fo_seeker_id, fo_client)}")

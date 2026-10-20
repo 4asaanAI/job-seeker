@@ -106,7 +106,7 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
             fields = vault.form_fields(load_base_resume(resume_path(sid)))
             answers = vault.load_answers(resume_path(sid).parent)
             missing = [q for k, q in vault.STANDARD_QUESTIONS.items() if q not in answers]
-            return {"ok": True, "seeker_id": sid, "fields": fields, "answers": answers,
+            return {"ok": True, "seeker_id": sid, "fields": fields, "answers": vault.effective_answers(resume_path(sid).parent),
                     "not_answered_yet": missing,
                     "note": "Every value is the user's own text. Ask the user for anything missing; never fill it in yourself."}
         except FileNotFoundError:
@@ -122,9 +122,54 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
         text. An empty answer removes the question."""
         try:
             sid = check(seeker_id)
-            q, answers = vault.save_answer(resume_path(sid).parent, question, answer)
+            folder = resume_path(sid).parent
+            q, answers = vault.save_answer(folder, question, answer)
             store.record_event("answer_saved", q[:120], sid)
-            return {"ok": True, "seeker_id": sid, "question": q, "saved_answers": len(answers)}
+            out = {"ok": True, "seeker_id": sid, "question": q, "saved_answers": len(answers)}
+            if answers.get(q):
+                out.update(_formal_draft(folder, q, answers[q]))
+            return out
+        except (OSError, PermissionError, ValueError) as exc:
+            return _fail(exc)
+
+    def _formal_draft(folder, question: str, raw: str) -> dict:
+        """Write a formal, polite version of the user's answer with the headless writer and keep it as an unapproved
+        draft. Until the user approves it, forms get the answer exactly as the user typed it."""
+        if letter_writer is None:
+            return {"formal_draft": None, "note": "no writer is configured; the answer is used as typed"}
+        try:
+            text = documents.clean_draft(letter_writer(vault.FORMAL_PROMPT.format(question=question, answer=raw)))
+            warnings = vault.set_formal_draft(folder, question, text)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return {"formal_draft": None, "note": f"no formal version yet ({str(exc)[:80]}); the answer is used as typed"}
+        return {"formal_draft": text, "formal_warnings": warnings,
+                "note": "Show the user the formal version. Forms use it only after the user approves exactly this text "
+                        "(approve_formal_answer, or the dashboard); until then the answer goes in as typed."}
+
+    def draft_formal_answer(seeker_id: int, question: str) -> dict:
+        """(Re)write the formal, polite version of one saved answer. The answer is used as typed until the user approves
+        the formal text. Show the text and its warnings (changed numbers, dropped limits, flipped refusals) to the user."""
+        try:
+            sid = check(seeker_id)
+            folder = resume_path(sid).parent
+            q = vault._clean_question(question)
+            raw = vault.load_answers(folder).get(q)
+            if raw is None:
+                raise ValueError("no saved answer for that question")
+            out = _formal_draft(folder, q, raw)
+            return {"ok": out.get("formal_draft") is not None, "seeker_id": sid, "question": q, **out}
+        except (OSError, PermissionError, ValueError) as exc:
+            return _fail(exc)
+
+    def approve_formal_answer(seeker_id: int, question: str, force_warnings: bool = False) -> dict:
+        """Approve the stored formal version of an answer EXACTLY as drafted, after the user said it is fine. Forms then
+        carry that text word for word. A draft with warnings is refused here unless the user read them and said to go on
+        (force_warnings), and the bridge never forces. Editing the original answer cancels the approval."""
+        try:
+            sid = check(seeker_id)
+            text = vault.approve_formal(resume_path(sid).parent, question, require_clean=not force_warnings)
+            store.record_event("formal_approved", vault._clean_question(question)[:120], sid)
+            return {"ok": True, "seeker_id": sid, "question": vault._clean_question(question), "approved_text": text}
         except (OSError, PermissionError, ValueError) as exc:
             return _fail(exc)
 
@@ -140,7 +185,8 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
             _posting(sid, posting_id)
             if not isinstance(fields, list) or not fields:
                 raise ValueError("fields must be a non-empty list of the form's fields")
-            answers = vault.load_answers(resume_path(sid).parent)
+            folder = resume_path(sid).parent
+            answers = vault.load_answers(folder)
             for detail, _ in store.recent_event_details(sid, "apply_answers", 24 * 7, 20):
                 given = json.loads(detail)
                 if given.get("posting_id") == int(posting_id):
@@ -148,7 +194,8 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
                     break
             letter = store.letter(sid, int(posting_id))
             result = vault.check_form([f for f in fields if isinstance(f, dict)], _resume_text(sid), answers,
-                                      letter_text=letter["approved_text"] if letter else None)
+                                      letter_text=letter["approved_text"] if letter else None,
+                                      formal=vault.approved_formal(folder))
             store.audit(sid, int(posting_id), "pre_submit_check", "ready" if result["ready"] else "problems",
                         f"{result['problems']} problem(s) in {len(result['checklist'])} field(s)")
             return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), **result,
@@ -604,7 +651,8 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
         report_blocked, cancel_application, report_submit_failed, retry_failed, my_retry_queue, review_batch,
         approve_batch_items, audit_log, render_resume_pdf, draft_cover_letter, approve_cover_letter,
         propose_status_from_emails, my_proposals, decide_proposal, snapshot_tracker, import_applications, funnel_report,
-        application_followups, draft_followup, interview_prep)} | {"_retry_with_code": _retry_with_code}
+        application_followups, draft_followup, interview_prep, draft_formal_answer, approve_formal_answer)
+    } | {"_retry_with_code": _retry_with_code}
 
 
 AUTO_SUBMIT = "I have ALREADY approved applying to this exact job"     # apply.apply_message's approved wording

@@ -1587,6 +1587,27 @@ class Store:
                 (int(seeker_id), since, *_IN_FLIGHT_ACTIONS, *_STATE_ACTIONS)).fetchone()
         return int(row[0]) if row else None
 
+    def begin_application(self, seeker_id: int, posting_id: int, outcome: str, detail: str = "") -> None:
+        """Claim the one in-flight slot and record request_built, as ONE write transaction (every process sharing the
+        database - Claude, the bridge, the dashboard, the text inbox - goes through it). Raises ValueError when another
+        application is in flight."""
+        with self._lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                busy = self.in_flight(seeker_id)
+                if busy is not None and busy != int(posting_id):
+                    raise ValueError(f"job {busy} is still in flight (one application at a time): record its outcome, "
+                                     "report_blocked or cancel_application first")
+                self.conn.execute(
+                    "INSERT INTO submit_audit (seeker_id, posting_id, action, outcome, detail, created_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (int(seeker_id), int(posting_id), "request_built", outcome[:40], detail[:500], _now()))
+                self.conn.execute("COMMIT")
+            except BaseException:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                raise
+
     def last_state(self, seeker_id: int, posting_id: int) -> str | None:
         """The newest state-changing audit action for one application (request_built, blocked, cancelled, ...)."""
         with self._lock:
@@ -1680,7 +1701,8 @@ class Store:
             return int(cur.lastrowid) if cur.rowcount == 1 else None
 
     def proposals(self, seeker_id: int, state: str = "pending", kind: str | None = None) -> list[dict]:
-        sql = ("SELECT p.*, jp.title, jp.company_name FROM proposals p JOIN job_postings jp ON jp.id = p.posting_id "
+        sql = ("SELECT p.id, p.seeker_id, p.posting_id, p.kind, p.payload, p.evidence, p.state, p.created_at, p.decided_at, "
+               "jp.title, jp.company_name FROM proposals p JOIN job_postings jp ON jp.id = p.posting_id "
                "WHERE p.seeker_id = ? AND p.state = ?")
         params: list[object] = [int(seeker_id), state]
         if kind:

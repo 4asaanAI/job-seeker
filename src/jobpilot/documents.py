@@ -127,20 +127,37 @@ def letter_prompt(resume_text: str, title: str, company: str, description: str) 
                                 description=(description or "")[:3000])
 
 
+_NUMBER_WORDS = {"two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "fifteen",
+                 "twenty", "thirty", "forty", "fifty", "hundred", "thousand", "million", "billion", "dozen", "decade"}
+_SENTENCE_WORDS = {"i", "my", "our", "the", "this", "that", "in", "as", "at", "with", "dear", "thank", "thanks", "best",
+                   "sincerely", "regards", "please", "while", "during", "after", "before", "from", "for", "and", "but",
+                   "with", "your", "you", "we", "it", "to", "on", "of", "an", "a", "hiring", "team", "january", "february",
+                   "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"}
+
+
 def letter_warnings(draft: str, resume_text: str, company: str, title: str = "") -> list[str]:
-    """What the user must check before approving: numbers, links and capitalised names that the resume does not have."""
+    """What the user must check before approving: numbers (also written as words), links, and names (employers, schools,
+    products, tools) that the resume, the company or the job title do not have."""
     known = f"{resume_text} {company} {title}".lower()
+    known_words = set(re.findall(r"[a-z0-9+#.]+", known))
     warnings = []
     for number in sorted(set(re.findall(r"\d[\d,.%]*", draft))):
         number = number.strip(".,")
         if not re.search(rf"(?<![\d.,]){re.escape(number)}(?![\d])", known):    # "12" is not found inside "2012"
             warnings.append(f"the number {number} is not in your resume")
+    for word in sorted({w for w in re.findall(r"[a-z]+", draft.lower()) if w in _NUMBER_WORDS}):
+        if word not in known_words:
+            warnings.append(f'the number word "{word}" is not in your resume')
     if has_contact_or_link(draft):
         warnings.append("it contains a link or an email address; remove it")
-    mid = re.sub(r"(^|[.!?]\s+|\n)(?:My|Our|The|This|In|As|At|I|Dear|With|Thank)\s+", r"\1", draft)   # sentence openers
-    for name in sorted(set(re.findall(r"\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+\b", mid))):
-        if name.lower() not in known and name not in ("Dear Hiring", "Hiring Team", "Dear Hiring Team"):
-            warnings.append(f'"{name}" is not in your resume or the company name')
+    seen = set()
+    for m in re.finditer(r"(?<![.!?]\s)(?<!^)(?<!\n)\b([A-Z][a-zA-Z0-9+#]*(?:[A-Z][a-z]+)*)\b", draft):
+        name = m.group(1)
+        low = name.lower()
+        if low in _SENTENCE_WORDS or low in known_words or low in seen or len(name) < 2:
+            continue
+        seen.add(low)
+        warnings.append(f'"{name}" is not in your resume, the company name or the job title')
     return warnings[:20]
 
 

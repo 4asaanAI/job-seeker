@@ -1,7 +1,7 @@
 """The user's own form data: fields read once from their saved resume, and an answers vault they fill in themselves.
 
 Invariant: only the user's own facts go into form answers. Fo rewrites the user's words in a formal, polite tone (the
-user asked for that, 2026-10-19), so a rewording is accepted when it keeps every fact (faithful_rewording). The resume fields are the user's resume text, split (never
+user asked for that, 2026-10-19), the user approves a formal version of each answer once (see "the formal version" below). The resume fields are the user's resume text, split (never
 reworded); the vault holds only what the user typed (the tool and the dashboard say so, and nothing else writes it).
 `unsourced` checks a filled-in form against both, so a value from anywhere else is caught before submit.
 """
@@ -17,6 +17,7 @@ import yaml
 from .resume.engine import BaseResume
 
 VAULT_FILE = "answers.yaml"
+MAX_FIELDS = 100
 MAX_ANSWERS, MAX_QUESTION, MAX_ANSWER = 20, 120, 3000   # the same caps as apply.vet_answers
 # Suggested keys for the answers most forms ask; any other question text is allowed too.
 STANDARD_QUESTIONS = {
@@ -155,89 +156,196 @@ def _words(text: object) -> set[str]:
     return {w for w in re.findall(r"[a-z]+", str(text or "").lower()) if w not in _STOP and len(w) > 2}
 
 
+_KEY_STEMS = ("sponsor", "authori", "notice", "salary", "compens", "ctc", "relocat", "clearance", "disab", "veteran")
+
+
 def matching_answer(label: str, answers: dict[str, str]) -> str | None:
-    """The user's saved answer whose question shares the most words with this form label (at least two), else None."""
-    best, best_n = None, 1
-    for question, answer in answers.items():
-        n = len(_words(label) & _words(question))
-        if n > best_n:
-            best, best_n = answer, n
-    return best
+    """The user's saved answer for a form label. A key topic in the label (sponsorship, work authorisation, notice,
+    salary, relocation...) selects only the questions about that topic; otherwise the most words in common (at least
+    two) wins. A tie is no match: never guess between two answers."""
+    low = (label or "").lower()
+    pool = list(answers.items())
+    for stem in _KEY_STEMS:
+        if stem in low:
+            topical = [(q, a) for q, a in pool if stem in q.lower()]
+            if topical:
+                pool = topical
+                break
+    scored = sorted(((len(_words(label) & _words(q)), q, a) for q, a in pool), key=lambda t: -t[0])
+    if not scored or scored[0][0] < (1 if len(pool) < len(answers) else 2):
+        return None
+    if len(scored) > 1 and scored[1][0] == scored[0][0]:
+        return None
+    return scored[0][2]
 
 
-# ---- a formal rewording of the user's own answer -------------------------------------------------------------------------
-# Fo rewrites the user's answers in a formal, polite tone before filling them in. A rewording is accepted only when it
-# keeps the facts: no number, name or yes/no that the user's own text does not have, the same negation, and still
-# about the same thing.
-_NEGATION = re.compile(r"\b(no|not|never|none|cannot|can't|don't|doesn't|won't|without|n't)\b|n't\b", re.I)
+# ---- the formal version of an answer, approved by the user ----------------------------------------------------------------
+# The user asked for their own words to be put in a formal, polite tone before they go into a form. A model cannot be
+# trusted to keep every fact (and a code check cannot prove it did), so JobPilot writes the formal version ONCE, the user
+# approves that exact text, and from then on Fo copies the approved text word for word. Editing the original answer
+# cancels the approval. Warnings (changed numbers, dropped qualifiers, flipped negation...) are shown with the draft.
+
+FORMAL_FILE = "answers_formal.yaml"
+FORMAL_PROMPT = """Rewrite the job seeker's answer below in a formal, polite tone for a job application form. Rules:
+- Keep every fact, number, date, amount, currency, unit, name and every yes or no EXACTLY as given. Add nothing.
+- Never soften, flip or drop a refusal, a limit (only, at least, at most, within, immediately) or a condition.
+- At most one and a half times the original length. Plain text. No greeting or sign-off unless the answer has one.
+Reply with only the rewritten answer.
+
+Question: {question}
+Answer: {answer}
+"""
+_NUMBER_WORDS = {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+                 "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+                 "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "lakh", "lakhs", "crore",
+                 "million", "billion", "half", "dozen", "couple"}
+_QUALIFIERS = {"only", "least", "most", "within", "immediately", "negotiable", "minimum", "maximum", "approximately",
+               "around", "about", "exactly", "anywhere", "except", "unless", "provided", "subject", "depending", "upto",
+               "earliest", "latest", "flexible", "currently", "previously"}
+_NEG = re.compile(r"\b(no|not|never|none|nobody|nothing|neither|nor|cannot|cant|dont|doesnt|wont|isnt|arent|wasnt|"
+                  r"without|unable|refuse\w*|decline\w*)\b|n't|\bun[a-z]{4,}\b|\bnon[a-z]{3,}\b", re.I)
+_UNITS = re.compile(r"[$€£₹%]|\b(?:usd|eur|gbp|inr|rs|lpa|lakhs?|crores?|k|days?|weeks?|months?|years?|hours?|minutes?)\b",
+                    re.I)
 _POLITE = {"i", "dear", "thank", "thanks", "regards", "sincerely", "kindly", "please", "yes", "no", "hiring", "team",
-           "mr", "ms", "mrs", "dr"}
+           "mr", "ms", "mrs", "dr", "however", "furthermore", "additionally", "currently", "indeed", "my", "our", "the"}
 
 
-def _numbers(text: str) -> set[str]:
-    return {n.replace(",", "") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text or "")}
+def _count_negations(text: str) -> int:
+    return len(_NEG.findall((text or "").replace("’", "'")))
 
 
-_MONTHS = {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
+def formal_warnings(raw: str, formal: str) -> list[str]:
+    """Differences a person must look at before approving a formal version. An empty list is no proof: the user reads it."""
+    raw, formal = str(raw or ""), str(formal or "")
+    if not formal.strip():
+        return ["the formal version is empty"]
+    out = []
 
+    def nums(t):
+        return sorted(n.replace(",", "") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", t))
 
-def _word(w: str) -> str:
-    """'December' and 'Dec' are the same fact."""
-    return w[:3] if w[:3] in _MONTHS and w.isalpha() else w
+    def words(t):
+        return set(re.findall(r"[a-z]+", t.lower()))
 
-
-def _names(text: str) -> set[str]:
-    """Capitalised words that do not start a sentence: the names and places a rewording must not invent."""
-    out = set()
-    for m in re.finditer(r"(?<![.!?]\s)(?<!^)\b([A-Z][a-zA-Z]+)", text or ""):
-        word = _word(m.group(1).lower())
-        if word not in _POLITE:
-            out.add(word)
+    def units(t):
+        return sorted(u.lower().rstrip("s") for u in _UNITS.findall(t))
+    if nums(raw) != nums(formal):
+        out.append("the numbers differ from your answer")
+    if (words(raw) & _NUMBER_WORDS) != (words(formal) & _NUMBER_WORDS):
+        out.append("a number written as a word differs from your answer")
+    if units(raw) != units(formal):
+        out.append("a currency or unit differs from your answer")
+    if (words(raw) & _QUALIFIERS) != (words(formal) & _QUALIFIERS):
+        out.append("a limiting word (only, at least, immediately, ...) was added or dropped")
+    if _count_negations(raw) != _count_negations(formal):
+        out.append("a refusal or negation was added, dropped or changed")
+    first_raw, first_formal = (re.findall(r"[a-z]+", raw.lower()) or [""])[0], (re.findall(r"[a-z]+", formal.lower()) or [""])[0]
+    if first_raw in YES_NO and first_formal in YES_NO and first_raw != first_formal:
+        out.append("the yes or no changed")
+    def month(w):                                            # "December" and "Dec" are the same word
+        return w[:3] if w[:3] in {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"} else w
+    new_names = ({month(w.lower()) for w in re.findall(r"(?<![.!?]\s)(?<!^)\b([A-Z][a-zA-Z]+)", formal)}
+                 - {month(w) for w in words(raw)} - _POLITE)
+    if new_names:
+        out.append("names that are not in your answer: " + ", ".join(sorted(new_names)[:5]))
+    if len(formal) > 1.5 * len(raw) + 60:
+        out.append("much longer than your answer")
     return out
 
 
-def faithful_rewording(value: str, saved: str, other_sources: str = "") -> bool:
-    """True when `value` reads as the user's `saved` answer reworded, with every fact kept and none added."""
-    if not value or not saved or len(value) > 3 * len(saved) + 300:
-        return False
-    known = f"{saved} {other_sources}"
-    if not _numbers(value) <= _numbers(known):
-        return False
-    if not _names(value) <= {_word(w) for w in _TOKEN.findall(known.lower())} | _POLITE:
-        return False
-    if bool(_NEGATION.search(saved)) != bool(_NEGATION.search(value)):
-        return False
-    first = _norm(saved).split(" ", 1)[0]
-    words = set(_norm(value).split())
-    if first in YES_NO and ({"yes", "no"} - {first}) & words and first not in words:
-        return False
-    content = [w for w in _norm(saved).split() if len(w) > 3 and w not in _STOP]
-    if content:
-        stems = {w[:5] for w in _norm(value).split()}
-        if sum(w[:5] in stems for w in content) < max(1, round(0.4 * len(content))):
-            return False
-    return True
+def load_formal(folder: Path) -> dict[str, dict]:
+    path = Path(folder) / FORMAL_FILE
+    if not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {str(q): v for q, v in data.items() if isinstance(v, dict) and v.get("text")} if isinstance(data, dict) else {}
+
+
+def _write_formal(folder: Path, data: dict) -> None:
+    path = Path(folder) / FORMAL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=FORMAL_FILE + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(data, fh, sort_keys=False, allow_unicode=True)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def set_formal_draft(folder: Path, question: str, formal: str) -> list[str]:
+    """Store a formal version for a saved answer, unapproved. Returns its warnings."""
+    q = _clean_question(question)
+    raw = load_answers(folder).get(q)
+    if raw is None:
+        raise ValueError("no saved answer for that question")
+    text = " ".join(str(formal or "").split())[:MAX_ANSWER]
+    warnings = formal_warnings(raw, text)
+    data = load_formal(folder)
+    data[q] = {"for": raw, "text": text, "approved": False, "warnings": warnings}
+    _write_formal(folder, data)
+    return warnings
+
+
+def approve_formal(folder: Path, question: str, require_clean: bool = False) -> str:
+    """Approve the stored formal version exactly as it is. require_clean refuses a draft that has warnings."""
+    q = _clean_question(question)
+    entry = load_formal(folder).get(q)
+    if entry is None or entry.get("for") != load_answers(folder).get(q):
+        raise ValueError("no current formal draft for that answer: draft one first")
+    if require_clean and entry.get("warnings"):
+        raise ValueError("the draft has warnings (" + "; ".join(entry["warnings"][:3]) + "); the user approves it in the "
+                         "dashboard after reading them")
+    data = load_formal(folder)
+    data[q]["approved"] = True
+    _write_formal(folder, data)
+    return entry["text"]
+
+
+def effective_answers(folder: Path) -> dict[str, str]:
+    """What goes into forms: the approved formal text where one is current, else the answer exactly as the user typed it."""
+    raw = load_answers(folder)
+    out = dict(raw)
+    for q, entry in load_formal(folder).items():
+        if entry.get("approved") and q in raw and entry.get("for") == raw[q]:
+            out[q] = entry["text"]
+    return out
+
+
+def approved_formal(folder: Path) -> dict[str, str]:
+    """question -> the approved, current formal text (for the pre-submit check)."""
+    raw = load_answers(folder)
+    return {q: e["text"] for q, e in load_formal(folder).items()
+            if e.get("approved") and q in raw and e.get("for") == raw[q]}
 
 
 _LETTER_FIELD = re.compile(r"cover letter|motivation letter|letter of (?:motivation|interest)", re.I)
 
 
 def check_form(fields: list[dict], resume_text: str, answers: dict[str, str] | None = None,
-               letter_text: str | None = None) -> dict:
+               letter_text: str | None = None, formal: dict[str, str] | None = None) -> dict:
     """fields: [{label, required, value, kind}] as filled in on the form (kind "file" for an upload, "choice" for a
     dropdown, radio button or checkbox). Returns the checklist: every required field filled, every file present, and
     every value traceable to the user's own text (resume or saved answers)."""
     answers = answers or {}
-    sources = [resume_text, *answers.values()]
+    formal = formal or {}                       # question -> the formal text the user approved
+    sources = [resume_text, *answers.values(), *formal.values()]
     checklist, problems = [], 0
-    for f in fields[:100]:
+    if len(fields) > MAX_FIELDS:
+        checklist.append({"field": "(form)", "ok": False, "check": f"more than {MAX_FIELDS} fields: split the check"})
+        problems += 1
+    for f in fields[:MAX_FIELDS]:
         label = " ".join(str(f.get("label") or "field").split())[:80]
-        value = " ".join(str(f.get("value") or "").split())[:500]
+        value = " ".join(str(f.get("value") or "").split())
         required = bool(f.get("required"))
         kind = str(f.get("kind") or "text").lower()
         if kind == "file":
             item = {"field": label, "ok": bool(value) or not required,
                     "check": "file attached" if value else ("required file missing" if required else "optional, left empty")}
+        elif len(value) > MAX_ANSWER:
+            item = {"field": label, "ok": False, "check": f"longer than {MAX_ANSWER} characters: not checked, so not accepted"}
         elif not value:
             item = {"field": label, "ok": not required,
                     "check": "required field is empty" if required else "optional, left empty"}
@@ -256,15 +364,11 @@ def check_form(fields: list[dict], resume_text: str, answers: dict[str, str] | N
             item = {"field": label, "ok": ok, "check": "matches the user's saved answer" if ok
                     else "differs from the user's saved answer"}
         elif not unsourced(value, sources):
-            item = {"field": label, "ok": True, "check": "from the user's own text"}
-        elif (saved := matching_answer(label, answers)) is not None and faithful_rewording(value, saved, resume_text):
-            item = {"field": label, "ok": True, "check": "a formal rewording of the user's saved answer, facts unchanged"}
-        elif saved is not None:
-            item = {"field": label, "ok": False, "check": "a rewording that changes or adds facts compared with the "
-                                                          "user's saved answer"}
+            item = {"field": label, "ok": True, "check": "from the user's own text (or the formal version they approved)"}
         else:
-            item = {"field": label, "ok": False, "check": "value is not in the resume or the user's saved answers (if the "
-                                                          "user just gave it, save it with save_answer first)"}
+            item = {"field": label, "ok": False, "check": "value is not in the resume, the user's saved answers or their "
+                                                          "approved formal versions (if the user just gave it, save it "
+                                                          "with save_answer and approve its formal version first)"}
         problems += not item["ok"]
         checklist.append(item)
     return {"ready": problems == 0 and bool(checklist), "problems": problems, "checklist": checklist}

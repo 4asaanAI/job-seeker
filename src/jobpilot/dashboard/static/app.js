@@ -292,14 +292,23 @@ async function renderProfile() {
   const q = h("input", { type: "text", list: "std-q", "aria-label": "Question" });
   const a = h("textarea", { "aria-label": "Your answer", style: "min-height:70px" });
   const answers = h("div", { class: "panel" }, h("h2", {}, "Your saved answers"),
-    h("p", { class: "note" }, "Type each answer yourself. Fo puts it into a formal, polite tone before filling it in, keeping every fact. Empty an answer to remove it."),
-    Object.entries(p.answers || {}).map(([k, v]) => h("div", { class: "list-row" },
-      h("div", { class: "grow" }, h("div", {}, k), h("div", { class: "note" }, v)),
-      h("button", { class: "btn danger", onclick: async () => { report(await api("/api/answer", { question: k, answer: "" }), "Removed"); renderProfile(); } }, "Remove"))),
+    h("p", { class: "note" }, "Type each answer yourself. A formal, polite version is written for you to read; forms use it only after you approve it, word for word. Until then the answer goes in as you typed it."),
+    (p.answers || []).map((x) => h("div", { class: "list-row" },
+      h("div", { class: "grow" }, h("div", {}, x.question), h("div", { class: "note" }, `As you typed: ${x.answer}`),
+        x.formal ? h("div", {}, h("div", { class: "note" }, `Formal version${x.formal.approved ? " (approved, used in forms)" : " (not approved yet)"}:`),
+          h("div", {}, x.formal.text),
+          (x.formal.warnings || []).length ? h("ul", { class: "check-bad" }, x.formal.warnings.map((w) => h("li", {}, w))) : null)
+          : h("div", { class: "note" }, "No formal version yet.")),
+      h("button", { class: "btn", onclick: async () => { toast("Writing the formal version…");
+        report(await api("/api/answer/formal", { question: x.question, action: "draft" }), "Formal version written"); renderProfile(); } }, x.formal ? "Rewrite" : "Write formal version"),
+      x.formal && !x.formal.approved ? h("button", { class: "btn primary", onclick: async () => {
+        report(await api("/api/answer/formal", { question: x.question, action: "approve" }), "Approved"); renderProfile(); } }, "Approve") : null,
+      h("button", { class: "btn danger", onclick: async () => { report(await api("/api/answer", { question: x.question, answer: "" }), "Removed"); renderProfile(); } }, "Remove"))),
     (p.not_answered_yet || []).length ? h("p", { class: "note" }, `Not answered yet: ${p.not_answered_yet.join(" · ")}`) : null,
     h("datalist", { id: "std-q" }, (p.not_answered_yet || []).map((x) => h("option", { value: x }))),
     h("div", { class: "field" }, h("label", {}, "Question"), q), h("div", { class: "field" }, h("label", {}, "Answer"), a),
     h("button", { class: "btn primary", onclick: async () => {
+      toast("Saving and writing the formal version…");
       report(await api("/api/answer", { question: q.value, answer: a.value }), "Answer saved"); renderProfile(); } }, "Save answer"));
   el.replaceChildren(form, answers);
 }
