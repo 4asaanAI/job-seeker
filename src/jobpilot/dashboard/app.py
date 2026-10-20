@@ -327,13 +327,14 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
 
     async def index(request: Request):
         return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"),
-                            headers={"Content-Security-Policy": "default-src 'self'; img-src 'self' data:; "
+                            headers={"Cache-Control": "no-cache", "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; "
                                                                 "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
                                      "X-Frame-Options": "DENY"})
 
     def static(name: str, media: str):
         async def serve(request: Request):
-            return FileResponse(STATIC / name, media_type=media)
+            # no-cache = the browser must re-check with the server each time (a changed file is fetched at once)
+            return FileResponse(STATIC / name, media_type=media, headers={"Cache-Control": "no-cache"})
         return serve
 
     async def api_board(request: Request):
