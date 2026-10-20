@@ -124,7 +124,7 @@ def _scrub(text: str) -> str:
 
 def apply_message(title: str, company: str, url: str, resume_text: str, *, approved: bool = False,
                   attach_pdf: bool = False, letter_text: str | None = None, posting_id: int | None = None,
-                  answers: list[tuple[str, str]] | None = None) -> str:
+                  answers: list[tuple[str, str]] | None = None, ask_questions: list[str] | None = None) -> str:
     marker = secrets.token_hex(8)
     body = _scrub(resume_text)
     where = f"the two lines containing {marker}" if letter_text else "the markers"       # two fences need naming
@@ -169,6 +169,11 @@ def apply_message(title: str, company: str, url: str, resume_text: str, *, appro
             + ("Tell me everything you filled in when you report back.\n" if approved else
                "Show me everything you filled in and wait for my confirmation before you submit.\n"))
         answers_block = f"\n{answers_marker}\n" + "\n".join(f"{_scrub(q)}: {_scrub(a)}" for q, a in answers) + f"\n{answers_marker}"
+    if ask_questions:
+        n_ask = nxt + (1 if answers else 0)
+        answers_rule += (f"{n_ask}. These questions depend on the job's country, which is not clear from the posting, so I have not "
+                         "answered them: when the form asks one of them, stop and ask me, and do not guess: "
+                         + " | ".join(_scrub(q) for q in ask_questions[:5]) + "\n")
     other_file = ("a file other than my resume or cover letter" if letter_text else "a file other than my resume") if attach_pdf else "a file"
     return (
         f"Please help me apply to this job: {title}, {company}. Posting: {url}\n"

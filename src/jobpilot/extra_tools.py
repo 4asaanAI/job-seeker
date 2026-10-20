@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from . import documents, followups, tracking, vault
+from . import documents, eligibility, followups, tracking, vault
 from .apply import best_apply_url, classify_route, safe_title_company, vetted_job_url
 from .fo import clean
 from .profiles import seeker_min_score
@@ -206,6 +206,11 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
                 if given.get("posting_id") == int(posting_id):
                     answers = vault.merged_answers(answers, given.get("answers")) or answers
                     break
+            posting = _posting(sid, posting_id)
+            elig = eligibility.for_posting(profile_for(sid)[2], posting)      # per-job answers from the user's countries
+            for question in elig["unsure"]:
+                answers.pop(question, None)
+            answers.update(elig["answers"])
             letter = store.letter(sid, int(posting_id))
             result = vault.check_form([f for f in fields if isinstance(f, dict)], _resume_text(sid), answers,
                                       letter_text=letter["approved_text"] if letter else None,

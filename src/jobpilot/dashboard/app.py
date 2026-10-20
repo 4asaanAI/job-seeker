@@ -237,15 +237,17 @@ class Dashboard:
         saved = {a["question"]: a for a in answers}
         catalog = [{**q, "saved": saved.get(q["question"])} for q in vault.QUESTION_CATALOG]
         custom = [a for a in answers if a["question"] not in vault.STANDARD_QUESTIONS.values()]
+        eligibility_ = {k: data.get(k) or [] for k in ("work_authorized_countries", "relocation_countries")}
         return {"ok": True, "profile": {k: data.get(k) for k in keys},
-                "answers": answers, "catalog": catalog, "custom_answers": custom,
+                "eligibility": eligibility_, "answers": answers, "catalog": catalog, "custom_answers": custom,
                 "not_answered_yet": form.get("not_answered_yet", []),
                 "sources_available": [s["source"] for s in self.tools["available_sources"]()]}
 
     def save_profile(self, body: dict) -> dict:
         allowed = ("headline", "location", "also_search", "search_terms", "seniority", "work_modes", "locations",
                    "salary_floor", "salary_currency", "blacklist_companies", "whitelist_companies",
-                   "exclude_staffing_agencies", "source_weights", "min_score", "followup_days")
+                   "exclude_staffing_agencies", "source_weights", "min_score", "followup_days",
+                   "work_authorized_countries", "relocation_countries")
         changes = {k: v for k, v in body.items() if k in allowed}
         return self.tools["update_my_profile"](self.sid, **changes)
 
@@ -297,6 +299,14 @@ class Dashboard:
     def assist_state(self, token: str) -> dict:
         state = self.assists.get(token)
         return {"ok": True, **state} if state else {"ok": False, "code": "not_found", "error": "unknown request"}
+
+    def eligibility_try(self, location: str) -> dict:
+        """What JobPilot would answer for a job at this location, from the countries the user recorded."""
+        from .. import eligibility
+        _, _, profile = self.tools["_profile"](self.sid)
+        out = eligibility.derive(profile.work_authorized_countries, profile.relocation_countries, location)
+        return {"ok": True, "location": location[:120], "countries": sorted(eligibility.countries_of(location)),
+                "answers": out["answers"], "ask_me": out["unsure"], "basis": out["basis"]}
 
     def formal(self, body: dict) -> dict:
         """Write a formal version of a saved answer, or approve the one on screen (the user has read its warnings)."""
@@ -432,6 +442,10 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
         data = await body(request)
         return lambda: dash.formal(data)
 
+    async def api_eligibility(request: Request):
+        location = str(request.query_params.get("location") or "")
+        return lambda: dash.eligibility_try(location)
+
     async def api_assist(request: Request):
         data = await body(request)
         return lambda: dash.assist_start(data)
@@ -461,6 +475,7 @@ def make_app(dash: Dashboard, token_path: Path = TOKEN_PATH, hosts: tuple[str, .
         Route("/api/profile", guard(api_profile), methods=["GET", "POST"]),
         Route("/api/answer", guard(api_answer), methods=["POST"]),
         Route("/api/answer/formal", guard(api_formal), methods=["POST"]),
+        Route("/api/eligibility", guard(api_eligibility)),
         Route("/api/assist", guard(api_assist), methods=["POST"]),
         Route("/api/assist/{token}", guard(api_assist_state)),
     ]

@@ -32,12 +32,16 @@ public internet (no Funnel): it is meant for your own devices.
   column heading to sort. Your choices are remembered in this browser. A job that does not state a fact (no salary, no work mode)
   is not removed by the filter for it.
 - **To do:** email suggestions to confirm, failed submissions, follow-ups due.
-- **My answers:** about 27 ready-made questions in groups (work eligibility, availability, compensation, location and work style,
-  about you, short written answers, voluntary). Answer once; applications are prefilled. Saving an answer writes a formal, polite
-  version for you to read; forms use it only after you approve it, word for word.
+- **My answers:** the ten questions nearly every form asks, in four groups. **Where can you work?** comes first: list the countries
+  where you can work without sponsorship and the ones you would relocate to, and JobPilot answers "authorised to work in the
+  country of the job?", "need visa sponsorship?" and "willing to relocate?" **for each job** from the job's location (by looking
+  the country up, not by guessing). When a job's country is not clear (a plain "Remote"), Fo stops and asks you. "What would
+  JobPilot answer?" lets you try any location. The other answers (notice period, salary expectation, current compensation, years of
+  experience, LinkedIn, why this role, why leaving) are answered once; saving writes a formal, polite version for you to read, and
+  forms use it only after you approve it, word for word.
   **Ask Fo to help me write it** opens a small chat: tell Fo the facts, or press "Draft it for me". Fo uses only your resume and what
   you tell it, asks for a fact it lacks, and takes no other action. Its reply goes into the answer box only when you press "Use this
-  as my answer"; nothing is saved until you press Save.
+  as my answer"; nothing is saved until you press Save. A question no form of yours asks for is not here; add your own at the bottom.
 - **Search profile:** what JobPilot searches for and which jobs are hidden.
 
 ## What protects it
