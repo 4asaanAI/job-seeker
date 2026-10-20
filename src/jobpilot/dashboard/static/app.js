@@ -72,6 +72,7 @@ function card(item, column) {
     h("div", { class: "row" },
       item.score !== undefined && item.score !== null ? h("span", { class: "score" }, Math.round(item.score)) : null,
       item.status && column !== "match" ? h("span", { class: "badge" }, item.status) : null,
+      item.needs_you ? h("span", { class: "badge warn" }, "needs you") : null,
       item.deadline_soon ? h("span", { class: "badge warn" }, "closes in 48h") : null,
       item.work_mode ? h("span", { class: "badge" }, item.work_mode) : null,
       fmtPay(item) ? h("span", { class: "badge" }, fmtPay(item)) : null,
@@ -320,6 +321,23 @@ async function openJob(pid) {
                  ["Applying", `${j.route}: ${j.route_note}`],
                  ["Application", d.application ? `${d.application.status}${d.application.applied_at ? " since " + d.application.applied_at.slice(0, 10) : ""}` : "none"]]));
   if (j.url && /^https?:\/\//i.test(j.url)) parts.push(h("p", {}, h("a", { href: j.url, target: "_blank", rel: "noopener noreferrer" }, "Open the posting")));
+
+  // hand-off: Fo could not submit this one, so the final link and the values are here for the user
+  if (d.handoff) {
+    const hf = d.handoff;
+    parts.push(h("div", { class: "panel" }, h("h2", {}, "Fo could not submit this one: finish it yourself"),
+      h("p", { class: "note" }, "Fo filled in what it could and stopped. Open the final page, enter the values below, and press Submit yourself. Then tell JobPilot."),
+      hf.final_link && /^https:\/\//i.test(hf.final_link)
+        ? h("p", {}, h("a", { class: "btn primary", href: hf.final_link, target: "_blank", rel: "noopener noreferrer" }, "Open the final application page"))
+        : h("p", { class: "check-bad" }, "No safe link was recorded; open the posting instead."),
+      hf.kind ? h("p", { class: "note" }, `Stopped at: ${hf.kind}${hf.step ? " (" + hf.step + ")" : ""}`) : null,
+      kv(hf.values.map((v) => [v.field, v.value])),
+      (hf.filled || []).length ? h("p", { class: "note" }, `Fo had already filled: ${hf.filled.join(", ")}`) : null,
+      h("p", { class: "note" }, "Resume: use “Make resume PDF” below, or paste the resume text shown in the review."),
+      h("div", { class: "approve" },
+        h("button", { class: "btn primary", onclick: () => act(pid, "applied", {}) }, "I submitted it"),
+        h("button", { class: "btn danger", onclick: () => act(pid, "cancel", {}) }, "Cancel"))));
+  }
 
   // review: prefilled fields, answers, the request, approve with code
   if (d.review) {

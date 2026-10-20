@@ -44,6 +44,12 @@ Then install LayaaStat's Mac checker (`scripts/control-room/install-mac-checker.
   match, newest, closing soonest, highest salary (currencies compared at rough rates) or company / title A-Z. In the list, click a
   column heading to sort. Your choices are remembered in this browser. A job that does not state a fact (no salary, no work mode)
   is not removed by the filter for it.
+- **Applications Fo could not submit:** when a site stops Fo (a captcha, an anti-bot check, a login, a file or question it cannot
+  handle), the card says "needs you" and the job's drawer shows **Fo could not submit this one: finish it yourself**: the final
+  application link as a button, the values to enter (your name, contact details and saved answers, the answers worked out for that
+  job's country), and what Fo had already filled. Open the link, enter the values, press Submit yourself, then press **I submitted
+  it**. Fo sends the same link in its reply (a block marked HANDOFF) and calls `report_blocked`, which is what makes the card appear.
+  Where Fo can submit, it submits itself once you approve the application with your authenticator code.
 - **To do:** email suggestions to confirm, failed submissions, follow-ups due.
 - **My answers:** the ten questions nearly every form asks, in four groups. **Where can you work?** comes first: list the countries
   where you can work without sponsorship and the ones you would relocate to, and JobPilot answers "authorised to work in the

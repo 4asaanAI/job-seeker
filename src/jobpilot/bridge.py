@@ -515,7 +515,7 @@ def build_bridge_tools(store, pin: int, out_dir: Path, home: Path, *, scorer=Non
         """Report that the application stopped at a step only the user can do (captcha, login, otp, upload, question,
         manual, anti_bot, other). Never retry it yourself. Tell the user the tell_user text."""
         out = inner["report_blocked"](pin, int(posting_id), kind, page_url, note)
-        return {k: v for k, v in out.items() if k in ("ok", "state", "tell_user", "error", "code")}
+        return {k: v for k, v in out.items() if k in ("ok", "state", "tell_user", "handoff", "error", "code")}
 
     @guarded("record_progress")
     def record_progress(posting_id: int, step: str, page_url: str | None = None, filled_fields: list[str] | None = None,
