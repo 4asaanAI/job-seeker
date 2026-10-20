@@ -26,10 +26,11 @@ nav { display: flex; gap: 4px; overflow-x: auto; flex: 1; }
 .status .warn { color: var(--warn); font-weight: 600; }
 .status .bad { color: var(--bad); font-weight: 600; }
 main { padding: 0 16px 32px; }
-.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: var(--gap); overflow-x: auto;
-         padding-bottom: 8px; align-items: start; }
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: var(--gap); overflow: auto;
+         padding-bottom: 8px; align-items: start; max-height: calc(100dvh - 64px); }
 .column { background: var(--chip); border-radius: var(--radius); padding: 10px; min-height: 120px; }
-.column h2 { margin: 2px 4px 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+.column h2 { position: sticky; top: -10px; z-index: 1; background: var(--chip); margin: -10px -10px 10px; padding: 12px 14px 8px;
+             border-radius: var(--radius) var(--radius) 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
              display: flex; justify-content: space-between; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
         cursor: pointer; }
@@ -90,14 +91,14 @@ textarea { min-height: 180px; }
 .check { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; color: var(--ink); }
 .check input { width: auto; }
 .field.row, .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-         overflow: hidden; font-size: 14px; }
+.table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); font-size: 14px; }
 .table th, .table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
-.table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.table th { position: sticky; top: 0; z-index: 1; background: var(--card); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .table th.sortable { cursor: pointer; } .table th.on { color: var(--ink); }
 .table tbody tr { cursor: pointer; } .table tbody tr:hover { background: var(--chip); }
 .table td.warn { color: var(--warn); font-weight: 600; }
-.list { overflow-x: auto; }
+.list { overflow: auto; max-height: calc(100dvh - 64px); border: 1px solid var(--line); border-radius: var(--radius); }
+.list .table { border: 0; }
 /* ---- my answers and the Fo writing helper */
 .qcard { border-top: 1px solid var(--line); padding: 12px 0; }
 .qcard:first-of-type { border-top: 0; }
