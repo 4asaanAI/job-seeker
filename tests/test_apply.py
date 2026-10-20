@@ -108,7 +108,7 @@ def test_route_classification(url, route):
 
 def test_apply_message_hands_a_stuck_page_to_me_and_asks_for_codes():
     m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r")
-    assert "STOP there and give me" in m and "exact link of that page" in m and "do not create accounts" in m.lower()
+    assert "HANDOFF" in m and "Final link:" in m and "the page that has the Submit button" in m and "do not create accounts" in m.lower()
     assert "ask me for it" in m and "continue from that page" in m
 
 
@@ -159,7 +159,7 @@ def test_approved_batch_message_submits_without_second_confirmation_but_stops_on
     https_link(store, ids[1], "https://boards.greenhouse.io/acme/jobs/2")
     m = tools["build_fo_apply_message"](sid, ids[1], batch_approved=True, plan_id=_approve(tools, sid))
     assert m["ok"] and "ALREADY approved applying to this exact job" in m["message"]
-    for must in ("do NOT guess", "Do NOT create any calendar event", "STOP there and give me"):
+    for must in ("do NOT guess", "Do NOT create any calendar event", "HANDOFF"):
         assert must in m["message"]
 
 
@@ -448,7 +448,7 @@ def test_apply_message_never_enters_a_past_job_as_current_employer():
 
 def test_apply_message_does_not_retry_a_bot_check():
     m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r", approved=True)
-    assert "anti-bot" in m and "do not submit again" in m
+    assert "anti-bot" in m and "never submit twice" in m and "do NOT retry" in m
 
 
 def test_lever_forms_are_direct_but_flag_the_bot_check():

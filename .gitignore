@@ -41,3 +41,4 @@ data/scoring.lock
 
 # nightly snapshots: a full copy of the database and the tracker (private), written by the daily run
 data/backups/
+data/dashboard.log

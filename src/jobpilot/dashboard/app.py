@@ -63,7 +63,8 @@ class Dashboard:
         for a in self.store.applications(sid, 500):
             column = {"offer": "interview", "withdrawn": "rejected"}.get(a["status"], a["status"])
             if column in columns:
-                columns[column].append({"posting_id": a["posting_id"], "title": display_title(a["title"]),
+                waiting = a["status"] == "started" and self.store.last_state(sid, a["posting_id"]) == "blocked"
+                columns[column].append({"needs_you": waiting, "posting_id": a["posting_id"], "title": display_title(a["title"]),
                                         "company": display_title(a["company_name"]),
                                         "status": a["status"], "applied_at": a["applied_at"],
                                         "response_at": a["response_at"]})
@@ -88,7 +89,12 @@ class Dashboard:
                                                  "job_terms_missing_from_resume")} if built.get("ok")
                       else {"error": built.get("error"), "code": built.get("code")})
         form = t["form_profile"](sid)
-        return {"ok": True, "job": detail, "application": app, "review": review,
+        handoff = None
+        if app and app["status"] == "started" and self.store.last_state(sid, posting_id) == "blocked":
+            progress = self.store.progress(sid, posting_id) or {}
+            blocked = next((a for a in self.store.audit_log(sid, posting_id, 20) if a["action"] == "blocked"), {})
+            handoff = self._handoff(posting_id, progress, blocked)
+        return {"ok": True, "job": detail, "application": app, "review": review, "handoff": handoff,
                 "form": form.get("fields") if form.get("ok") else None,
                 "answers": form.get("answers") if form.get("ok") else {},
                 "letter": self.store.letter(sid, posting_id),
@@ -105,6 +111,29 @@ class Dashboard:
         return {"state": state, "error": row["detail"]} if state == "unknown" else {"state": state, "reply": row["detail"]}
 
     # ---- writes --------------------------------------------------------------------------------------------------------
+    def _handoff(self, posting_id: int, progress: dict, blocked: dict) -> dict:
+        """What the user needs to finish a blocked application themselves (read-only: nothing is recorded here)."""
+        from .. import eligibility, vault
+        from ..apply import best_apply_url
+        from ..resume import load_base_resume
+        posting = self.store.posting_view(self.sid, posting_id) or {}
+        link = progress.get("page_url") or best_apply_url(posting.get("url"), *self.store.source_urls(posting_id))
+        folder = self.tools["_vault_folder"](self.sid)
+        try:
+            fields = vault.form_fields(load_base_resume(folder / "base_resume.yaml"))
+        except (OSError, ValueError):
+            fields = {}
+        answers = vault.effective_answers(folder)
+        elig = eligibility.for_posting(self.tools["_profile"](self.sid)[2], posting)
+        for question in elig["unsure"]:
+            answers.pop(question, None)
+        answers.update(elig["answers"])
+        values = [{"field": "Full name", "value": fields.get("full_name")}, {"field": "Email", "value": fields.get("email")},
+                  {"field": "Phone", "value": fields.get("phone")}, {"field": "Address", "value": fields.get("address")},
+                  *[{"field": q, "value": a} for q, a in answers.items()]]
+        return {"final_link": link, "kind": blocked.get("outcome") or "manual", "filled": progress.get("filled", []),
+                "step": progress.get("step"), "values": [v for v in values if v["value"]]}
+
     def action(self, posting_id: int, action: str, body: dict) -> dict:
         t, sid = self.tools, self.sid
         if action not in JOB_ACTIONS:

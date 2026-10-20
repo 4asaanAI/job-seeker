@@ -1176,3 +1176,57 @@ def test_the_watcher_re_executes_with_the_same_arguments(dash, tmp_path, monkeyp
     with pytest.raises(Done):
         dash_app.watch_code(d, ["--host", "100.1.2.3"], interval=0, execv=fake_exec, sleep=lambda s: None)
     assert seen == [(sys.executable, [sys.executable, "-m", "jobpilot.dashboard", "--host", "100.1.2.3"])]
+
+
+# ---- hand-off: where Fo cannot submit, the user gets the final link and the values --------------------------------------------
+
+def test_the_request_tells_fo_to_submit_where_it_can_and_to_hand_off_the_final_link_where_it_cannot():
+    from jobpilot import apply as ap
+    for approved in (True, False):
+        m = ap.apply_message("PM", "Acme", "https://a.example.com/j", "r", approved=approved)
+        assert "Where you CAN submit" in m and "submit it yourself, once" in m
+        assert "HANDOFF\nFinal link: <the exact https address of the page that has the Submit button" in m
+        assert "Blocked by:" in m and "Left for me:" in m and "Values entered:" in m and "never submit twice" in m
+        assert "report_blocked" in m
+        assert "say only that they were filled in" in m                      # the hand-off never repeats contact details
+
+
+def test_report_blocked_returns_the_final_link_and_the_values_to_enter(env):
+    store, sid, ids, tools, _ = env
+    tools["save_answer"](sid, "notice_period", "15 days")
+    page = f"https://boards.greenhouse.io/acme/jobs/{ids[0]}/apply"
+    tools["build_fo_apply_message"](sid, ids[0])
+    out = tools["report_blocked"](sid, ids[0], "anti_bot", page, "verification failed")
+    hand = out["handoff"]
+    assert hand["final_link"] == page and hand["kind"] == "anti_bot" and "press Submit yourself" in hand["left_for_you"]
+    fields = {v["field"]: v["value"] for v in hand["values"]}
+    assert fields["Full name"] and "notice period / when can you start?" in " ".join(fields) and "15 days" in fields.values()
+    assert page in out["tell_user"] and "Final link:" in out["tell_user"]
+
+
+def test_a_link_on_another_site_is_replaced_by_the_jobs_own_apply_link(env):
+    store, sid, ids, tools, _ = env
+    tools["build_fo_apply_message"](sid, ids[0])
+    out = tools["report_blocked"](sid, ids[0], "captcha", "https://evil.example/apply")
+    assert out["handoff"]["final_link"] == f"https://boards.greenhouse.io/acme/jobs/{ids[0]}"
+
+
+def test_the_bridge_passes_the_handoff_to_fo_and_the_dashboard_shows_it(dash, tmp_path):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    bridge_tools = b.build_bridge_tools(store, sid, tmp_path / "o", tmp_path / "d", code_path=tmp_path / "t")
+    assert bridge_tools["build_fo_apply_message"](ids[0])["ok"]
+    page = f"https://boards.greenhouse.io/acme/jobs/{ids[0]}/apply"
+    out = bridge_tools["report_blocked"](ids[0], "anti_bot", page, "")
+    assert out["handoff"]["final_link"] == page
+    drawer = d.job(ids[0])
+    assert drawer["handoff"]["final_link"] == page and drawer["handoff"]["values"]
+    card = next(a for a in d.board()["columns"]["started"] if a["posting_id"] == ids[0])
+    assert card["needs_you"] is True
+    assert d.action(ids[0], "applied", {})["ok"]                              # "I submitted it"
+    assert d.job(ids[0])["handoff"] is None
+
+
+def test_no_handoff_panel_for_an_application_that_is_not_blocked(dash):
+    d, fo, secret, (store, sid, ids, tools, _) = dash
+    assert tools["build_fo_apply_message"](sid, ids[0])["ok"]
+    assert d.job(ids[0])["handoff"] is None

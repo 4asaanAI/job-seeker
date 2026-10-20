@@ -271,12 +271,35 @@ def build_extra_tools(store, out_dir: Path, home: Path, *, check: Callable[[int]
                    "otp": "enter the one-time code you were sent", "upload": "upload the file it asks for",
                    "question": "answer the question it asks (and save the answer with save_answer for next time)",
                    "anti_bot": "press Submit yourself", "manual": "finish the step it shows"}.get(kind, "finish the step")
-            where = f" at {url}" if url else ""
+            hand = handoff_for(sid, posting, url, kind, ask)
+            where = f" at {hand['final_link']}" if hand["final_link"] else ""
             return {"ok": True, "seeker_id": sid, "posting_id": int(posting_id), "state": "waiting_for_user",
+                    "handoff": hand,
                     "tell_user": f"The application for {what} paused{where}: please {ask}, then say "
-                                 "'continue' and it picks up from that page. Nothing was submitted."}
+                                 "'continue' and it picks up from that page. Nothing was submitted."
+                                 + (f" Final link: {hand['final_link']}" if hand["final_link"] else "")}
         except (PermissionError, ValueError) as exc:
             return _fail(exc)
+
+    def handoff_for(sid: int, posting: dict, page_url: str | None, kind: str, ask: str) -> dict:
+        """What the user needs to finish an application Fo could not submit: the final link (the page Fo reached, if it is
+        on the job's own site, else the job's vetted apply link), why it stopped, and the values to enter."""
+        link = page_url or best_apply_url(posting["url"], *store.source_urls(posting["id"]))
+        folder = resume_path(sid).parent
+        try:
+            fields = vault.form_fields(load_base_resume(resume_path(sid)))
+        except (OSError, ValueError):
+            fields = {}
+        answers = vault.effective_answers(folder)
+        elig = eligibility.for_posting(profile_for(sid)[2], posting)
+        for question in elig["unsure"]:
+            answers.pop(question, None)
+        answers.update(elig["answers"])
+        values = [{"field": "Full name", "value": fields.get("full_name")}, {"field": "Email", "value": fields.get("email")},
+                  {"field": "Phone", "value": fields.get("phone")}, {"field": "Address", "value": fields.get("address")},
+                  *[{"field": q, "value": a} for q, a in answers.items()]]
+        return {"final_link": link, "kind": kind, "left_for_you": ask, "values": [v for v in values if v["value"]],
+                "resume": "Attach the PDF made with render_resume_pdf, or paste the resume text from the review draft."}
 
     def cancel_application(seeker_id: int, posting_id: int) -> dict:
         """The user decided not to go on with a request that was built but not submitted. Frees the one-at-a-time slot.
