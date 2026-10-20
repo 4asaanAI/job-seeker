@@ -248,6 +248,18 @@ company_name = "Mindtickle"
 endpoint = "https://api.lever.co/v0/postings/mindtickle?mode=json"
 enabled = true
 
+[ats_sources.groww]
+vendor = "greenhouse"
+company_name = "Groww"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/groww/jobs?content=true"
+enabled = true
+
+[ats_sources.razorpay]
+vendor = "greenhouse"
+company_name = "Razorpay"
+endpoint = "https://boards-api.greenhouse.io/v1/boards/razorpaysoftwareprivatelimited/jobs?content=true"
+enabled = true
+
 [ats_sources.databricks]
 vendor = "greenhouse"
 company_name = "Databricks"
