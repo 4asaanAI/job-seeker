@@ -710,7 +710,7 @@ def build_tools(
                 raise ValueError("no resume saved yet; ask the user to send theirs as a PDF or Word file")
             base = load_base_resume(path)
             hint = suggest_tailoring(base, posting["title"] or "", posting["description"] or "",
-                                     max(1, min(int(max_bullets), 8)))
+                                     max(1, min(int(max_bullets), 8)), posting["company_name"] or "")
             previous = [{"resume_version_id": v["id"], "path": v["path"], "generated_at": v["generated_at"],
                          "selection": v["validation_report"].get("selection")}
                         for v in store.resume_versions(sid, int(posting_id))[:3]]
@@ -729,7 +729,8 @@ def build_tools(
     def _selection(base, posting, experience_order, skills, bullet_order):
         """The user's explicit selection, or else this job's facts-only tailoring (so no application goes out untailored)."""
         if experience_order is None and skills is None and bullet_order is None:
-            hint = suggest_tailoring(base, posting["title"] or "", posting["description"] or "", max_bullets=1000)   # reorder only: never drop a fact on its own
+            hint = suggest_tailoring(base, posting["title"] or "", posting["description"] or "", max_bullets=1000,
+                                     company=posting["company_name"] or "")   # reorder only: never drop a fact on its own
             return (hint["experience_order"], hint["skills"], hint["bullet_order"],
                     hint["keywords_missing_from_resume"])
         return experience_order, skills, bullet_order, []

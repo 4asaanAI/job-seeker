@@ -100,3 +100,10 @@ def test_experience_without_bullets_does_not_break_tailoring(tmp_path):
     assert "beta" not in s["bullet_order"]
     out = tmp_path / "r.docx"
     assert render_docx(base, out, bullet_order=s["bullet_order"]).ok
+
+
+def test_gaps_skip_the_company_name_and_filler_words(base):
+    desc = "Kintsugi AI is redefining tax. Committed innovators leading the space. Product roadmap and Kubernetes."
+    gaps = suggest(base, "Product Manager", desc, company="Kintsugi AI")["keywords_missing_from_resume"]
+    assert "kubernetes" in gaps and "roadmap" in gaps
+    assert not {"kintsugi", "redefining", "committed", "leading", "space"} & set(gaps)

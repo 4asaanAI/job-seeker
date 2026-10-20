@@ -13,7 +13,9 @@ from had has have having he her his how i if in into is it its may more most mus
 should so such than that the their them then there these they this those to up us was we were what when which who
 will with within would you your able across including per plus etc experience experienced years year work working
 role roles team teams job position candidate company strong ability responsibilities requirements preferred
-required skills knowledge looking join opportunity benefits employer equal opportunity posting apply applicant demo fictional hire hiring location remote office based full time part""".split())
+required skills knowledge looking join opportunity benefits employer equal opportunity posting apply applicant demo fictional hire hiring location remote office based full time part
+leading leader innovator innovative space committed commitment redefining redefine interact passionate passion mission
+world help helping ensure make making building build new great best seeking ideal exciting fast-paced dynamic""".split())
 _WORD = re.compile(r"[a-z][a-z0-9+#.\-]{1,}")
 
 
@@ -37,10 +39,11 @@ def _score(text: str, keywords: list[str]) -> int:
     return sum(1 for k in keywords if k in present)
 
 
-def suggest(base: BaseResume, title: str, description: str, max_bullets: int = 4) -> dict:
+def suggest(base: BaseResume, title: str, description: str, max_bullets: int = 4, company: str = "") -> dict:
     """Suggest bullet ids per experience (most relevant first, at least one kept), a skill order,
     and the job terms the resume does not mention (gaps to tell the user, never to fabricate)."""
     keywords = job_keywords(title, description)
+    own_name = set(terms(company))                   # the employer's own name is never a gap in the resume
     resume_terms = set(terms(" ".join([base.headline, base.summary or "",
                                        *[t for e in base.experience for _, t in e.bullets],
                                        *base.skills])))
@@ -57,7 +60,7 @@ def suggest(base: BaseResume, title: str, description: str, max_bullets: int = 4
         "experience_order": [e.id for e in base.experience],
         "bullet_order": bullet_order,
         "skills": skills,
-        "keywords_missing_from_resume": [k for k in keywords if k not in resume_terms][:15],
+        "keywords_missing_from_resume": [k for k in keywords if k not in resume_terms and k not in own_name][:15],
         "keywords_matched": [k for k in keywords if k in resume_terms][:15],
     }
 
