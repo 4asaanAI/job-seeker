@@ -1230,3 +1230,11 @@ def test_no_handoff_panel_for_an_application_that_is_not_blocked(dash):
     d, fo, secret, (store, sid, ids, tools, _) = dash
     assert tools["build_fo_apply_message"](sid, ids[0])["ok"]
     assert d.job(ids[0])["handoff"] is None
+
+
+def test_matching_answer_prefers_the_exact_question():
+    from jobpilot import vault as v
+    answers = {"What is your gender?": "Male", "Gender": "Male", "Country": "India (+91)", "Current Company": "Computer Software"}
+    assert v.matching_answer("Gender*", answers) == "Male"
+    assert v.matching_answer("Country", answers) == "India (+91)"
+    assert v.matching_answer("Gender", {"What is your gender?": "Male", "Gender": "Female"}) == "Female"
