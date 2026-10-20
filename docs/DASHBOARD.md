@@ -23,6 +23,19 @@ Run it with your Tailscale address so only your own devices can reach it:
 Open `http://100.x.y.z:8770` on the phone, log in with the token, and use "Add to Home Screen". Do not expose it to the
 public internet (no Funnel): it is meant for your own devices.
 
+## Start it from LayaaStat's Control Room
+
+The Control Room (stat.layaa.ai, platform admins) has a **Job Pilot dashboard** tile under "The Mac" with Turn on / Turn off
+and an Open link. Set it up once on this Mac:
+
+```bash
+sed -e "s#/path/to/jobpilot#$PWD#g" -e "s#100.x.y.z#$(tailscale ip -4)#" \
+    scripts/com.jobpilot.dashboard.plist.example > ~/Library/LaunchAgents/com.jobpilot.dashboard.plist
+```
+
+Then install LayaaStat's Mac checker (`scripts/control-room/install-mac-checker.sh` in the LayaaStat repo, steps in its
+`docs/runbooks/control-room.md`). The checker turns this LaunchAgent on and off; Off stays off after a restart.
+
 ## The screens
 
 - **Pipeline:** your jobs as a board (matches, started, applied, interview, closed) or as a sortable table (the Board / List

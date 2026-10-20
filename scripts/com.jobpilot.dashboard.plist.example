@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The JobPilot dashboard on macOS, switched on and off from LayaaStat's Control Room (the Mac checker runs
+     launchctl bootstrap / bootout on this label). Copy to ~/Library/LaunchAgents/com.jobpilot.dashboard.plist and fix
+     the paths and the Tailscale address (tailscale ip -4). Logs: <JOBPILOT_HOME>/data/dashboard.log -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jobpilot.dashboard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/jobpilot/.venv/bin/python</string><string>-m</string><string>jobpilot.dashboard</string>
+    <string>--host</string><string>100.x.y.z</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>JOBPILOT_HOME</key><string>/path/to/jobpilot</string></dict>
+  <key>WorkingDirectory</key><string>/path/to/jobpilot</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key><string>/path/to/jobpilot/data/dashboard.log</string>
+  <key>StandardErrorPath</key><string>/path/to/jobpilot/data/dashboard.log</string>
+</dict>
+</plist>
